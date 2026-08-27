@@ -93,7 +93,7 @@ public:
   bool remove ();
   bool remove_and_update_globals ();
   bool fully_replaceable (tree name, basic_block bb);
-  vec<std::pair<int, int> > m_list;
+  vec<edge> m_list;
   range_query &m_ranger;
   bool final_p;
   bitmap m_tmp;
@@ -131,7 +131,7 @@ remove_unreachable::maybe_register (gimple *s)
   if (!final_p)
     handle_early (s, e);
   else
-    m_list.safe_push (std::make_pair (e->src->index, e->dest->index));
+    m_list.safe_push (e);
 }
 
 // Return true if all uses of NAME are dominated by block BB.  1 use
@@ -248,7 +248,7 @@ remove_unreachable::handle_early (gimple *s, edge e)
     {
       auto_bitmap dce;
       bitmap_set_bit (dce, SSA_NAME_VERSION (ssa));
-      simple_dce_from_worklist (dce);
+      simple_dce_from_worklist (dce, nullptr, true);
     }
 }
 
@@ -266,12 +266,7 @@ remove_unreachable::remove ()
   unsigned i;
   for (i = 0; i < m_list.length (); i++)
     {
-      auto eb = m_list[i];
-      basic_block src = BASIC_BLOCK_FOR_FN (cfun, eb.first);
-      basic_block dest = BASIC_BLOCK_FOR_FN (cfun, eb.second);
-      if (!src || !dest)
-	continue;
-      edge e = find_edge (src, dest);
+      edge e = m_list[i];
       gimple *s = gimple_outgoing_range_stmt_p (e->src);
       gcc_checking_assert (gimple_code (s) == GIMPLE_COND);
 
@@ -279,7 +274,7 @@ remove_unreachable::remove ()
       if (!name)
 	name = gimple_range_ssa_p (gimple_cond_rhs (s));
       // Check if global value can be set for NAME.
-      if (name && fully_replaceable (name, src))
+      if (name && fully_replaceable (name, e->src))
 	{
 	  value_range r (TREE_TYPE (name));
 	  if (gori_name_on_edge (r, name, e, &m_ranger))
@@ -322,12 +317,7 @@ remove_unreachable::remove_and_update_globals ()
   auto_bitmap all_exports;
   for (i = 0; i < m_list.length (); i++)
     {
-      auto eb = m_list[i];
-      basic_block src = BASIC_BLOCK_FOR_FN (cfun, eb.first);
-      basic_block dest = BASIC_BLOCK_FOR_FN (cfun, eb.second);
-      if (!src || !dest)
-	continue;
-      edge e = find_edge (src, dest);
+      edge e = m_list[i];
       gimple *s = gimple_outgoing_range_stmt_p (e->src);
       gcc_checking_assert (gimple_code (s) == GIMPLE_COND);
 
@@ -1139,7 +1129,7 @@ execute_ranger_vrp (struct function *fun, bool final_p)
 	{
 	  ipa_record_return_value_range (return_range);
 	  if (POINTER_TYPE_P (TREE_TYPE (TREE_TYPE (current_function_decl)))
-	      && return_range.nonzero_p ()
+	      && !return_range.contains_zero_p ()
 	      && cgraph_node::get (current_function_decl)
 			->add_detected_attribute ("returns_nonnull"))
 	    warn_function_returns_nonnull (current_function_decl);

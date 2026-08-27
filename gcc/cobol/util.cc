@@ -183,9 +183,6 @@ class cdf_directives_t
     static std::string str(cdf_values_t) {
       return "<dictionary>";
     }
-    static std::string str(source_format_t arg) {
-      return arg.description();
-    }
     static std::string str(cbl_enabled_exceptions_t) {
       return "<enabled_exceptions>";
     }
@@ -195,7 +192,6 @@ class cdf_directives_t
   cdf_stack_t<cbl_call_convention_t> call_convention;
   cdf_stack_t<current_tokens_t> cobol_words;
   cdf_stack_t<cdf_values_t> dictionary;   // DEFINE
-  cdf_stack_t<source_format_t> source_format;
   cdf_stack_t<cbl_enabled_exceptions_t> enabled_exceptions;
 
   cdf_directives_t() {
@@ -206,14 +202,12 @@ class cdf_directives_t
     call_convention.push();
     cobol_words.push();
     dictionary.push();
-    source_format.push();
     enabled_exceptions.push();
   }
   void pop() {
     call_convention.pop();
     cobol_words.pop();
     dictionary.pop();
-    source_format.pop();
     enabled_exceptions.pop();
   }
 };
@@ -282,16 +276,6 @@ cbl_prototype_ok( const cbl_loc_t& loc, size_t iprog, dspc_t clause ) {
   return true;
 }
 
-void
-cobol_set_indicator_column( int column ) {
-  cdf_directives.source_format.value().indicator_column_set(column);
-  dbgmsg("%s: format now %s", __func__,
-         cdf_directives.source_format.value().description());
-}
-source_format_t& cdf_source_format() {
-  return cdf_directives.source_format.value();
-}
-
 cbl_enabled_exceptions_t&
 cdf_enabled_exceptions() {
   return cdf_directives.enabled_exceptions.value();
@@ -302,22 +286,12 @@ void cdf_push_call_convention() { cdf_directives.call_convention.push(); }
 void cdf_push_current_tokens() { cdf_directives.cobol_words.push(); }
 void cdf_push_dictionary() { cdf_directives.dictionary.push(); }
 void cdf_push_enabled_exceptions() { cdf_directives.enabled_exceptions.push(); }
-void cdf_push_source_format() {
-  cdf_directives.source_format.push();
-  dbgmsg("%s: format still %s", __func__,
-         cdf_directives.source_format.value().description());
-}
 
 void cdf_pop() { cdf_directives.pop(); }
 void cdf_pop_call_convention() { cdf_directives.call_convention.pop(); }
 void cdf_pop_current_tokens() { cdf_directives.cobol_words.pop(); }
 void cdf_pop_dictionary() { cdf_directives.dictionary.pop(); }
 void cdf_pop_enabled_exceptions() { cdf_directives.enabled_exceptions.pop(); }
-void cdf_pop_source_format() {
-  cdf_directives.source_format.pop();
-  dbgmsg("%s: format now %s", __func__,
-         cdf_directives.source_format.value().description());
-}
 
 void cdf_unreachable() { gcc_unreachable(); }
 
@@ -371,12 +345,14 @@ cdf_file_name( const cbl_file_t *file ) {
   return file->name;
 }
 
-
 void
 cdf_field_add( const cbl_loc_t& loc, const std::string& name, const cdfval_t& value ) {
+  void scanner_cache_update( const symbol_elem_t *elem );
+
   if( symbols_begin() < symbols_end() ) {
     cbl_field_t field = cdf_literalize(loc, name, value);
-    symbol_field_add(current_program_index(), &field);                    
+    auto e = symbol_field_add(current_program_index(), &field);
+    scanner_cache_update( e );
   }
 }
 
@@ -462,7 +438,7 @@ cbl_field_type_str( enum cbl_field_type_t type )
   case FldPointer:
     return "FldPointer";
  }
-  cbl_internal_error("%s:%d: invalid %<symbol_type_t%> %d", __func__, __LINE__, type);
+  ////cbl_internal_error("%s:%d: invalid %<field_type_t%> %d", __func__, __LINE__, type);
   return "???";
 }
 
@@ -561,7 +537,6 @@ determine_intermediate_type( const cbl_refer_t& aref,
     {
     output.type = FldNumericBin5;
     output.data.capacity(16);
-    output.data.digits   = MAX_FIXED_POINT_DIGITS;
     output.attr = (intermediate_e | signable_e );
     }
 
@@ -2286,10 +2261,9 @@ valid_move( const cbl_refer_t& tgt_ref, const cbl_refer_t& src_ref )
         { 0, 1, 6, 1, 1, 1, 1, 1, 1, 2, 0, 0, },  // FldNumericDisplay (numeric)
         { 0, 1, 4, 1, 1, 1, 1, 1, 1, 1, 0, 0, },  // FldNumericEdited
         { 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, },  // FldAlphaEdited
-        { 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, },  // FldLiteralA
+        { 0, 1, 1, 0, 0, 0, 0, 0, 8, 1, 0, 0, },  // FldLiteralA
         { 0, 1, 6, 1, 1, 1, 1, 1, 1, 2, 0, 0, },  // FldLiteralN       (numeric)
     };
-  /* Needs C++11 */
   static_assert(sizeof(matrix[0]) == COUNT_OF(matrix[0]),
                 "matrix should be square");
 
@@ -2711,8 +2685,9 @@ namespace match_proc {
   public:
     procedures_t( size_t program ) {
       // find sections and paragraphs
-      for( symbol_elem_t *e = symbols_begin(program+1); e->program == program; e++ ) {
-        if( e->type == SymLabel ) {
+      for( symbol_elem_t *e = symbols_begin(program+1);
+          e < symbols_end() && e->program == program; e++ ) {
+          if( e->type == SymLabel ) {
           const auto& L = *cbl_label_of(e);
           auto isym = e - symbols_begin();
           switch(L.type) {
@@ -3436,10 +3411,10 @@ bool cobol_filename( const char *name, ino_t inode ) {
   linemap_add(line_table, LC_ENTER, sysp, name, 1);
   input_filename_vestige = name;
   bool pushed = input_filenames.push( input_file_t(name, inode, 1) );
-  dbgmsg("%s: %s %s line %d-%d inode %ld", __func__,
+  dbgmsg("%s: %s %s line %d-%d inode %lu", __func__,
          pushed? "pushed" : "set to", name,
          cobol_location().first_line,
-         cobol_location().last_line, inode);
+         cobol_location().last_line, (unsigned long) inode);
   return pushed;
 }
 
@@ -3528,27 +3503,27 @@ void current_location_minus_one_clear()
 void
 gcc_location_set( const cbl_loc_t& loc ) {
   // Set the position to the first line & column in the location.
- static location_t loc_m_1 = 0;
- const location_t
-   start_line   = linemap_line_start( line_table, loc.first_line, 80 ),
-   token_start  = linemap_position_for_column( line_table, loc.first_column),
-   finish_line  = linemap_line_start( line_table, loc.last_line, 80 ),
-   token_finish = linemap_position_for_column( line_table, loc.last_column);
- token_location = make_location (token_start, token_start, token_finish);
-
- if( loc.first_line > first_line_minus_1 ) {
-   // In order for GDB-COBOL to be able to step through COBOL code properly,
-   // it is sometimes necessary for the code at the beginning of a COBOL
-   // line to be using the location_t of the previous line.  This is true, for
-   // example, when laying down the infrastructure code between the last
-   // statement of a paragraph and the code created at the beginning of the
-   // following paragragh.  This code assumes that token_location values of
-   // interest are monotonic, and stores that prior value.
-   first_line_minus_1 = loc.first_line;
-   token_location_minus_1 = loc_m_1;
-   loc_m_1 = token_location;
- }
-
+  static location_t loc_m_1 = 0;
+  const location_t
+    start_line   = linemap_line_start( line_table, loc.first_line, 80 ),
+    token_start  = linemap_position_for_column( line_table, loc.first_column),
+    finish_line  = linemap_line_start( line_table, loc.last_line, 80 ),
+    token_finish = linemap_position_for_column( line_table, loc.last_column);
+  token_location = make_location (token_start, token_start, token_finish);
+  
+  if( loc.first_line > first_line_minus_1 ) {
+    // In order for GDB-COBOL to be able to step through COBOL code properly,
+    // it is sometimes necessary for the code at the beginning of a COBOL
+    // line to be using the location_t of the previous line.  This is true, for
+    // example, when laying down the infrastructure code between the last
+    // statement of a paragraph and the code created at the beginning of the
+    // following paragragh.  This code assumes that token_location values of
+    // interest are monotonic, and stores that prior value.
+    first_line_minus_1 = loc.first_line;
+    token_location_minus_1 = loc_m_1;
+    loc_m_1 = token_location;
+  }
+  
   location_dump(__func__, __LINE__, "parser", loc);
 }
 
@@ -3588,6 +3563,25 @@ void gcc_location_dump() {
     fprintf(stderr, "\n");
 }
 
+// tree.h defines yy_flex_debug as a macro because options.h
+#ifdef yy_flex_debug
+#undef yy_flex_debug
+#endif
+void
+location_dump( const char func[], int line, const char tag[],
+               const cbl_loc_t& loc, bool force) {
+  extern int yy_flex_debug; // cppcheck-suppress shadowVariable
+  if( yy_flex_debug ) {
+    const char *detail = gcobol_getenv("update_location");
+    if( force || detail ) { // cppcheck-suppress knownConditionTrueFalse
+      bool gcc_detail = force || (detail && detail[0] == '2');
+      fprintf(stderr, "%s:%d: %s location (%d,%d) to (%d,%d)\n",
+              func, line, tag,
+              loc.first_line, loc.first_column, loc.last_line, loc.last_column);
+      if( gcc_detail ) gcc_location_dump();
+    }
+  }
+}
 
 void ydferror( const char gmsgid[], ... ) ATTRIBUTE_GCOBOL_DIAG(1, 2);
 
@@ -3632,35 +3626,19 @@ class temp_loc_t {
   }
 };
 
-/*
- * Both CDF and parser need to call error_msg, each with their own distinct
- * location type, not because they *need* to be different, but because they
- * are, as an artifact of using different prefixes.  Possibly a better plan
- * would be to convert cdf.y to a pure parser, using no global variables.  But
- * this is where we are.
- *
- * Because we can't reliably instantiate it as a forward-declared template
- * function, and because the parameters are variadic, we can't use a template
- * function or call one.  So, a macro.
- */
-
-#define ERROR_MSG_BODY                                                  \
-  temp_loc_t looker(loc);                                               \
-  verify_format(gmsgid);                                                \
-  parse_error_inc();                                                    \
-  global_dc->begin_group();                                             \
-  va_list ap;                                                           \
-  va_start (ap, gmsgid);                                                \
-  rich_location richloc (line_table, token_location);                   \
-  bool ret = global_dc->diagnostic_impl (&richloc, nullptr, option_zero,        \
-                                         gmsgid, &ap,                   \
-                                         diagnostics::kind::error);     \
-  va_end (ap);                                                          \
-  global_dc->end_group();
-
-
 void error_msg( const cbl_loc_t& loc, const char gmsgid[], ... ) {
-  ERROR_MSG_BODY
+  temp_loc_t looker(loc);
+  verify_format(gmsgid);
+  parse_error_inc();
+  global_dc->begin_group();
+  va_list ap;
+  va_start (ap, gmsgid);
+  rich_location richloc (line_table, token_location);
+  bool ret = global_dc->diagnostic_impl (&richloc, nullptr, option_zero,
+                                         gmsgid, &ap,
+                                         diagnostics::kind::error);
+  va_end (ap);
+  global_dc->end_group();
 }
 
 bool
@@ -4092,6 +4070,14 @@ static const std::set<std::string> reserved_words = {
   "END-START",
 
   // ISO 2023 keywords
+  "B_AND",
+  "B_NOT",
+  "B_OR",
+  "B_SHIFT_L",
+  "B_SHIFT_LC",
+  "B_SHIFT_R",
+  "B_SHIFT_RC",
+  "B_XOR",
   "ACCEPT",
   "ACCESS",
   "ACTIVE-CLASS",
@@ -4228,6 +4214,7 @@ static const std::set<std::string> reserved_words = {
   "END-SUBTRACT",
   "END-UNSTRING",
   "END-WRITE",
+  "END-XML",
   "ENVIRONMENT",
   "EO",
   "EOP",

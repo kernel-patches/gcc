@@ -65,6 +65,10 @@ init_reflection ()
   /* Make it a complete type.  */
   TYPE_SIZE (meta_info_type_node) = bitsize_int (GET_MODE_BITSIZE (ptr_mode));
   TYPE_SIZE_UNIT (meta_info_type_node) = size_int (GET_MODE_SIZE (ptr_mode));
+  TYPE_UNSIGNED (meta_info_type_node) = 1;
+  TYPE_PRECISION (meta_info_type_node) = GET_MODE_BITSIZE (ptr_mode);
+  SET_TYPE_MODE (meta_info_type_node, ptr_mode);
+  SET_TYPE_ALIGN (meta_info_type_node, GET_MODE_ALIGNMENT (ptr_mode));
   /* Name it.  */
   record_builtin_type (RID_MAX, "decltype(^^int)", meta_info_type_node);
 
@@ -141,7 +145,7 @@ get_reflection (location_t loc, tree t, reflect_kind kind/*=REFLECT_UNDEF*/)
 
   /* Constant template parameters and pack-index-expressions cannot
      appear as operands of the reflection operator.  */
-  if (PACK_INDEX_P (t))
+  if (TREE_CODE (t) == PACK_INDEX_EXPR)
     {
       error_at (loc, "%<^^%> cannot be applied to a pack index");
       return error_mark_node;
@@ -179,7 +183,7 @@ get_reflection (location_t loc, tree t, reflect_kind kind/*=REFLECT_UNDEF*/)
 	       || parsing_lambda_declarator ()))
     {
       auto_diagnostic_group d;
-      error_at (loc, "%<^^%> cannot be applied a local entity for which "
+      error_at (loc, "%<^^%> cannot be applied to a local entity for which "
 		"there is an intervening lambda expression");
       inform (DECL_SOURCE_LOCATION (t), "%qD declared here", t);
       return error_mark_node;
@@ -8790,6 +8794,11 @@ splice (tree refl)
      it comes from e.g. members_of it is not.  */
   if (DECL_FUNCTION_TEMPLATE_P (refl))
     refl = ovl_make (refl, NULL_TREE);
+  /* Also add a BASELINK so that we handle &[:R:].  Since R was already
+     resolved (e.g. via members_of), we don't want to consider the enclosing
+     class for the access path.  */
+  if (is_overloaded_fn (refl))
+    refl = baselink_for_fns (refl, /*ignore_current_class_p=*/true);
 
   return refl;
 }
@@ -9396,6 +9405,16 @@ check_splice_expr (location_t loc, location_t start_loc, tree t,
       if (complain_p)
 	error_at (loc, "cannot use a data member specification in a "
 		  "splice expression");
+      return false;
+    }
+
+  /* Like with NSDMs, a bare [:X:] designating a direct base class
+     relationship is ill-formed.  */
+  if (!member_access_p && TREE_CODE (t) == TREE_BINFO)
+    {
+      if (complain_p)
+	error_at (loc, "cannot use a base class in a splice expression "
+		  "without an object");
       return false;
     }
 

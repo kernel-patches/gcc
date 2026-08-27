@@ -1287,16 +1287,27 @@ bitint_large_huge::handle_plus_minus (tree_code code, tree rhs1, tree rhs2,
     }
   else
     {
-      tree in = add_cast (rhs1_type, data_in);
-      lhs = make_ssa_name (rhs1_type);
+      /* Always perform the two additions or subtractions in
+	 unsigned type, avoid introducing a temporary UB.  While
+	 the end result of the 2 additions or 2 subtractions in
+	 a valid program should not overflow, temporarily it can.
+	 See PR126503.  */
+      tree utype = unsigned_type_for (rhs1_type);
+      tree in = add_cast (utype, data_in);
+      lhs = make_ssa_name (utype);
+      if (utype != rhs1_type)
+	{
+	  rhs1 = add_cast (utype, rhs1);
+	  rhs2 = add_cast (utype, rhs2);
+	}
       g = gimple_build_assign (lhs, code, rhs1, rhs2);
       insert_before (g);
-      rhs1 = make_ssa_name (rhs1_type);
+      rhs1 = make_ssa_name (utype);
       g = gimple_build_assign (rhs1, code, lhs, in);
       insert_before (g);
       m_data[m_data_cnt] = NULL_TREE;
       m_data_cnt += 2;
-      return rhs1;
+      return utype != rhs1_type ? add_cast (rhs1_type, rhs1) : rhs1;
     }
   rhs1 = make_ssa_name (m_limb_type);
   g = gimple_build_assign (rhs1, REALPART_EXPR,
@@ -4583,8 +4594,9 @@ bitint_large_huge::finish_arith_overflow (tree var, tree obj, tree type,
 			     build_fold_addr_expr (unshare_expr (obj)), off);
 	  g = gimple_build_call (fn, 3,
 				 build_fold_addr_expr (unshare_expr (obj)),
-				 src, build_int_cst (size_type_node,
-						     obj_nelts * m_limb_size));
+				 build_fold_addr_expr (src),
+				 build_int_cst (size_type_node,
+						obj_nelts * m_limb_size));
 	  insert_before (g);
 	}
       if (orig_obj == NULL_TREE && obj)
@@ -7575,6 +7587,46 @@ gimple_lower_bitint (void)
 		gphi *phi = create_phi_node (lhs, e2->dest);
 		add_phi_arg (phi, rhs1, e2, UNKNOWN_LOCATION);
 		add_phi_arg (phi, rhs2, e3, UNKNOWN_LOCATION);
+		break;
+	      }
+	  else if (SSA_NAME_OCCURS_IN_ABNORMAL_PHI (s)
+		   && is_gimple_call (stmt)
+		   && gimple_call_internal_p (stmt))
+	    switch (gimple_call_internal_fn (stmt))
+	      {
+	      case IFN_UBSAN_CHECK_ADD:
+	      case IFN_UBSAN_CHECK_SUB:
+		if (!bitint_big_endian)
+		  break;
+		/* FALLTHRU */
+	      case IFN_UBSAN_CHECK_MUL:
+	      case IFN_BSWAP:
+	      case IFN_BITREVERSE:
+		for (unsigned i = 0; i < gimple_call_num_args (stmt); ++i)
+		  {
+		    location_t loc = gimple_location (stmt);
+		    gsi = gsi_for_stmt (stmt);
+		    /* Similar case to multiplication/division with (ab)
+		       above for internal functions which set muldiv_p.  */
+		    tree arg = gimple_call_arg (stmt, i);
+		    if (TREE_CODE (arg) == SSA_NAME
+			&& SSA_NAME_OCCURS_IN_ABNORMAL_PHI (arg))
+		      {
+			first_large_huge = 0;
+			tree t = make_ssa_name (TREE_TYPE (arg));
+			g = gimple_build_assign (t, SSA_NAME, arg);
+			gsi_insert_before (&gsi, g, GSI_SAME_STMT);
+			gimple_set_location (g, loc);
+			gimple_call_set_arg (stmt, i, t);
+			if (i == 0
+			    && gimple_call_num_args (stmt) >= 2
+			    && gimple_call_arg (stmt, 1) == arg)
+			  gimple_call_set_arg (stmt, 1, t);
+			update_stmt (stmt);
+		      }
+		  }
+		break;
+	      default:
 		break;
 	      }
 	}

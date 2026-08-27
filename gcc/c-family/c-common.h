@@ -400,7 +400,7 @@ struct GTY(()) c_common_identifier {
 struct c_common_resword
 {
   const char *const word;
-  ENUM_BITFIELD(rid) const rid : 16;
+  enum rid const rid : 16;
   const unsigned int disable   : 32;
 };
 
@@ -1751,5 +1751,56 @@ namespace selftest {
   extern void c_family_tests (void);
 } // namespace selftest
 #endif /* #if CHECKING_P */
+
+/* Wrapping a template parameter in type_identity_t hides it from template
+   argument deduction.  */
+#if __cpp_lib_type_identity
+using std::type_identity_t;
+#else
+template <typename T>
+struct type_identity { typedef T type; };
+template <typename T>
+using type_identity_t = typename type_identity<T>::type;
+#endif
+
+/* RAII sentinel that saves the value of a variable, optionally
+   overrides it right away, and restores its value when the sentinel
+   id destructed.  */
+
+template <typename T>
+class temp_override
+{
+  T& overridden_variable;
+  T saved_value;
+public:
+  temp_override (T& var) : overridden_variable (var), saved_value (var) {}
+  temp_override (T& var, type_identity_t<T> overrider)
+    : overridden_variable (var), saved_value (var)
+  {
+    overridden_variable = overrider;
+  }
+  ~temp_override() { overridden_variable = saved_value; }
+};
+
+/* Object generator function for temp_override, so you don't need to write the
+   type of the object as a template argument.
+
+   Use as auto x = make_temp_override (flag); */
+
+template <typename T>
+inline temp_override<T>
+make_temp_override (T& var)
+{
+  return { var };
+}
+
+/* Likewise, but use as auto x = make_temp_override (flag, value); */
+
+template <typename T>
+inline temp_override<T>
+make_temp_override (T& var, type_identity_t<T> overrider)
+{
+  return { var, overrider };
+}
 
 #endif /* ! GCC_C_COMMON_H */

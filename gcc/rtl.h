@@ -313,10 +313,10 @@ struct GTY((desc("0"), tag("0"),
 	    chain_next ("RTX_NEXT (&%h)"),
 	    chain_prev ("RTX_PREV (&%h)"))) rtx_def {
   /* The kind of value the expression has.  */
-  ENUM_BITFIELD(machine_mode) mode : MACHINE_MODE_BITSIZE;
+  machine_mode mode : MACHINE_MODE_BITSIZE;
 
   /* The kind of expression this is.  */
-  ENUM_BITFIELD(rtx_code) code: RTX_CODE_BITSIZE;
+  enum rtx_code code: RTX_CODE_BITSIZE;
 
   /* 1 in a MEM if we should keep the alias set for this mem unchanged
      when we access a component.
@@ -3092,7 +3092,7 @@ extern bool rtx_equal_p (const_rtx, const_rtx,
 			 rtx_equal_p_callback_function = NULL);
 
 extern bool rtvec_all_equal_p (const_rtvec);
-extern bool rtvec_series_p (rtvec, int);
+extern bool rtvec_series_p (rtvec, poly_int64);
 
 /* Return true if X is a vector constant with a duplicated element value.  */
 

@@ -1,3 +1,57 @@
+2026-08-24  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125822
+	* c-cppbuiltin.cc (c_cpp_builtins): Define __cpp_concepts to
+	202606L rather than 202002L for C++29.
+
+2026-08-12  Jørgen Kvalsvik  <j@lambda.is>
+
+	* c-attribs.cc (handle_suppress_coverage_attribute): New
+	function.
+	* c-pragma.cc (handle_pragma_suppress_coverage): New function.
+	(init_pragma): Register pragma GCC suppress_coverage.
+	* c-pragma.h (suppress_coverage_begin): New forward declaration.
+	(suppress_coverage_end): Ditto.
+
+2026-08-10  Josef Melcr  <josef.melcr@suse.com>
+
+	PR testsuite/126708
+	* c-attribs.cc (handle_callback_only_attribute): Use
+	positional_argument for bounds checking in callback_only
+	attribute handler, downgrade errors to warnings for
+	consistency.
+
+2026-08-06  Jakub Jelinek  <jakub@redhat.com>
+
+	* c-cppbuiltin.cc (c_cpp_builtins): Change
+	__cpp_named_character_escapes value from 202207L to 202606L.
+
+2026-08-06  Josef Melcr  <josef.melcr@suse.com>
+
+	* c-attribs.cc (get_nth_list_elem): Removed.
+	(handle_callback_only_attribute): Use chain_index instead of
+	get_nth_list_elem.
+
+2026-08-06  Josef Melcr  <josef.melcr@suse.com>
+
+	* c-attribs.cc (handle_callback_only_attribute): Moved from
+	attr-callback.cc.
+	(get_nth_list_elem): Likewise.
+
+2026-08-06  Jakub Jelinek  <jakub@redhat.com>
+	    Jason Merrill  <jason@redhat.com>
+
+	PR c++/125989
+	* c-cppbuiltin.cc (c_cpp_builtins): Predefine
+	__cpp_designated_initializers to 202606 instead of 201707 for
+	C++29.
+
+2026-07-25  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
+
+	PR middle-end/125507
+	* c-common.h (struct c_common_resword): Remove ENUM_BITFIELD.
+	* c-indentation.h (struct token_indent_info): Ditto.
+
 2026-07-20  Jakub Jelinek  <jakub@redhat.com>
 
 	PR c++/126309

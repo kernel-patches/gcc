@@ -1314,18 +1314,15 @@ darwin_encode_section_info (tree decl, rtx rtl, int first)
       gcc_checking_assert (strncmp ("*lC", name, 3) == 0);
 
       char *buf;
+      /* Some versions of clang make all string constants linker-visible,
+	 independent of their final section, follow this.  */
       if (is_str)
-	{
-	  bool for_asan = (flag_sanitize & SANITIZE_ADDRESS)
-			   && asan_protect_global (const_cast<tree> (decl));
-	  /* When we are generating code for sanitized strings, the string
-	     internal symbols are made visible in the object.  */
-	  buf = xasprintf ("*%c.str.%s", for_asan ? 'l' : 'L', &name[3]);
-	}
+	buf = xasprintf ("*l.str.%s", &name[3]);
       else
 	/* Lets identify anchored constants with a different prefix, for the
-	   sake of inspection only.  */
-	buf = xasprintf ("*LaC%s", &name[3]);
+	   sake of inspection only.  Assume these need to co-exist with weak
+	   constant defs and so need to be linker-visible.  */
+	buf = xasprintf ("*laC%s", &name[3]);
       if (sym_decl)
 	DECL_NAME (sym_decl) = get_identifier (buf);
       XSTR (sym_ref, 0) = ggc_strdup (buf);
@@ -3579,12 +3576,13 @@ darwin_override_options (void)
       flag_asynchronous_unwind_tables = 0;
     }
 
-  if (flag_var_tracking_uninit == 0
+  if (!OPTION_SET_P (flag_var_tracking_uninit)
+      && flag_var_tracking_uninit == 0
       && generating_for_darwin_version >= 9
       && (flag_gtoggle ? (debug_info_level == DINFO_LEVEL_NONE)
-      : (debug_info_level >= DINFO_LEVEL_NORMAL))
+	  : (debug_info_level >= DINFO_LEVEL_NORMAL))
       && dwarf_debuginfo_p ())
-    flag_var_tracking_uninit = flag_var_tracking;
+    flag_var_tracking_uninit = 1;
 
   if (OPTION_SET_P (flag_pie) && flag_pie)
     {

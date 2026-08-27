@@ -39,6 +39,7 @@
 .Op Fl fyacc-debug
 .\" warnings
 .Op Fl Wno-apply-commit
+.Op Fl Wno-content-expr
 .Op Fl Wno-file-code-set
 .Op Fl Wno-high-order-bit
 .Op Fl Wno-bad-line-directive
@@ -58,6 +59,7 @@
 .Op Fl Wno-comp-6
 .Op Fl Wno-comp-x
 .Op Fl Wno-copybook-found
+.Op Fl Wno-dynamic-call
 .Op Fl Wno-ec-unknown
 .Op Fl Wno-entry-convention
 .Op Fl Wno-ibm-cdf
@@ -80,13 +82,16 @@
 .Op Fl Wno-procedure-not-found
 .Op Fl Wno-procedure-pointer
 .Op Fl Wno-replace-error
+.Op Fl Wno-redefines-first
 .Op Fl Wno-returning-number
 .Op Fl Wno-segment-error
 .Op Fl Wno-segment-negative
+.Op Fl Wno-set-numeric
 .Op Fl Wno-stop-number
 .Op Fl Wno-stray-indicator
 .Op Fl Wno-usage-typename
 .Op Fl Wno-recording-mode
+.Op Fl Wno-redefines-grow
 .Op Fl Wno-set-locale-to
 .Op Fl Wno-set-to-locale
 .Ar filename Op ...
@@ -97,7 +102,7 @@ compiles \*[lang] source code to object code, and optionally produces
 an executable binary or shared object.  As a GCC component, it accepts
 all options that affect code-generation and linking.  Options specific
 to \*[lang] are listed below.
-.Bl -tag -width "\0\0debug"
+.Bl -tag -width 00debug
 .It Fl main Ar filename
 .Nm
 will generate a
@@ -490,6 +495,9 @@ to indicate GnuCOBOL syntax, generally compatible with MicroFocus.
 to indicate MicroFocus syntax:
 .Bl -bullet -compact
 .It
+CDF
+.Sy $IF , $ELSE , $END , Sy $END-IF , Li and Sy $SET
+.It
 .Sy BINARY-LONG-LONG
 .It
 .Sy CALL ... GIVING
@@ -504,17 +512,19 @@ used with
 .It
 .Sy INSPECT ... TRAILING
 .It
+.Sy LEVEL 78
+constants
+.It
 .Sy OCCURS
 at
 .Sy "LEVEL 01"
-.It
-.Sy LEVEL 78
-constants
 .It
 .Sy MOVE POINTER
 .It
 .Sy RETURNING
 <number>
+.It
+.Sy SET NUMERIC
 .It
 .Sy USAGE IS TYPENAME
 .El
@@ -600,6 +610,8 @@ features may be enabled as a warning, or error, or suppressed.
 .Bl -tag -width Wno-cdf-name-not-found\0\0 -compact
 .It Fl Wno-apply-commit
 Warn if APPLY COMMIT is used.
+.It Fl Wno-content-expr
+Warn if an expression is a BY CONTENT parameter.
 .It Fl Wno-bad-line-directive
 Warn if malformed
 .Ql #line
@@ -610,7 +622,7 @@ Warn if EXTERNAL is used with ASSIGN.
 Warn if filename is used with ASSIGN.
 .It Fl Wno-binary-long-long
 Warn if BINARY-LONG-LONG is used.
-.It Fl Wno-call_fd
+.It Fl Wno-call-fd
 Warn if CALL with FD parameter is used.
 This feature is currently unimplemented. 
 .It Fl Wno-call_giving
@@ -623,6 +635,8 @@ Warn if CDF \[Do]IF is used.
 Warn if COMPUTATIONAL-6 is used.
 .It Fl Wno-comp-x
 Warn if COMPUTATIONAL is used with PICTURE X.
+.It Fl Wno-dynamic-call
+Note if CALL with dynamic target is used.
 .It Fl Wno-file-code-set
 Warn if FILE CODE SET is used.
 .It Fl Wno-inspect-trailing
@@ -634,7 +648,12 @@ Warn if CDF defines Level 78 constant.
 .It Fl Wno-move-index
 Warn if MOVE INDEX is used.
 .It Fl Wno-move-pointer
-Warn if MOVE POINTER is used.
+Warn if
+MOVE POINTER is used.
+.It Fl Wno-set-numeric
+Warn if SET is used with NUMERIC target.
+.It Fl Wno-redefines-first
+Warn if REDEFINES does not appear immediately after NAME.
 .It Fl Wno-returning-number
 Warn if RETURNING <number> is used.
 .It Fl Wno-usage-typename
@@ -704,6 +723,8 @@ Warn if a preprocessor fails  (instead of error).
 Warn if PROCEDURE POINTER is used.
 .It Fl Wno-procedure-not-found
 Warn if a referenced procedure is not found (instead of error).
+.It Fl Wno-redefines-grow
+Warn if REDEFINES data item is larger.
 .It Fl Wno-replace-error
 Warn if REPLACE cannot be processed (instead of error).
 .It Fl Wno-segment-error
@@ -714,7 +735,6 @@ Warn if a SEGMENT range is negative (instead of error).
 Warn if IBM-style STOP <number> is used (instead of error).
 .It Fl Wno-stray-indicator
 Warn if indicator column has no recognized meaning (instead of error).
-
 .El
 .
 .Sh COMPILATION SCENARIOS
@@ -852,7 +872,7 @@ is a gcc compiler, and follows gcc conventions where applicable.
 Sometimes those conventions (and user expectations) conflict with
 common Mainframe practice.  Unless required of the compiler by the ISO
 specification, any such conflicts are resolved in favor of gcc.
-.Ss Linking
+.Ss Linking Functions
 Unlike, C, the \*[lang]
 .Sy CALL
 statement implies dynamic linking, because for
@@ -886,11 +906,6 @@ option.  That forces all
 .Sy CALL
 statements to be resolved dynamically, at runtime.
 .ig
-Programs that are expected to execute
-correctly in the presence of an unresolved symbol (perhaps because the
-program logic won't require that particular
-.Sy CALL )
-can use linker options to produce an executable anyway.
 .Pp
 One corner case yet remains.  The
 .Sy CALL
@@ -925,6 +940,53 @@ linking for all
 .Sy CALL
 statement, regardless of compile-time constants.
 ..
+.
+.Ss Linking to C
+.Nm
+can be called from C and can call C functions.  Additionally, 01-level
+data items can be defined by and/or referenced as C global variables.
+.Pp
+A top-level
+.Sy PROGRAM-ID
+has external linkage, just like a non-static C function.  The name is
+exported in lowercase.  Hyphens, being disallowed by the linker, are
+encoded; simplest is not to use such names if they are to be
+referenced outside \*[lang].  Contained programs do not have external
+linkage. 
+.Pp
+A
+.Sy CALL
+statement invokes the target following the C ABI for the platform.  That means for
+.D1 CALL Dq FOO
+the generated code is the same, no matter if
+.Sy FOO
+was compiled with C or \*[lang].  Alphanumeric and group parameters
+are passed as
+.Sy "char *" 
+pointers (not NUL-terminated).  Binary numeric types are passed by
+value, as with C.  See the CDF
+.Sy CALL-CONVENTION
+directive to control how the external reference is rendered. 
+.Pp
+A \*[lang]
+.Sy EXTERNAL
+data item is similar to a Fortran COMMON variable.  Many programs may
+define an item by the same name, preferably with identical
+definitions.  The linker recognizes the multiple definitions as defining a single variable.  (This is unlike C, where there is one definition and potentially N
+.Sy extern
+references.)
+C can participate when COBOL describes a variable as
+.Sy EXTERNAL
+in one of two ways:
+.Bl -enum
+.It
+C can declare an
+.Sy extern 
+variable with the same name.
+.
+.It
+C can define a global nonstatic variable (with or without an initializer) at file scope and the COBOL variables
+will refer to it.
 .
 .Ss Implemented Exception Conditions
 By default, per ISO, no EC is enabled.  Implemented ECs may be enabled
@@ -1395,7 +1457,7 @@ suite has been identified.
 .
 .Ss CDF Text Manipulation
 .Bl -tag -width >>DEFINE
-.It Sy COPY Ar copybook Li Oo OF|IN Ar library Oc Oo Sy REPLACING ... Oc
+.It Sy COPY Ar copybook Oo Li OF|IN Ar library Oc Oo Sy REPLACING ... Oc
 If
 .Ar copybook
 is a literal, it treated a literal filename, which either does or does not exist.  If
@@ -2034,6 +2096,85 @@ with
 .Sy "LINE SEQUENTIAL"
 files.
 .
+.Sh COMPUTATION POLICY
+Inputs to
+.Sy ADD ,
+.Sy SUBTRACT ,
+.Sy MULTIPLY ,
+.Sy DIVIDE ,
+and
+.Sy COMPUTE
+must be
+numeric, and outputs must be numeric or numeric-edited. Type-checking
+is done by the compiler.  However, the program may cause non-numeric
+data to be moved into those operands.  That situation is dealt with at
+runtime in the form of Exception Conditions.
+.Pp
+Per \*[isostd] 14.6.13.2 Incompatible data,
+.Sy EC-DATA-INCOMPATIBLE
+is raised when the receiving data item is numeric and the sending item
+is not. In addition to the above statements, that can occur with
+.Sy MOVE
+if the sending item cannot be interpreted as an integer.
+.Pp
+To the question,
+.Dq "How could that happen?"
+there are three answers: I/O,
+.Sy REDEFINES ,
+and
+.Sy MOVE .
+Unlike some languages, \*[lang] generally uses
+.Dq "late binding" ;
+errors are not raised until the last possible moment.  A
+.Sy READ
+populates a record, and nothing says the input record must match the
+\*[lang] record definition.  Similarly a
+.Em group
+.Sy MOVE
+is defined at copying one block of characters to another. \*[lang]
+does not require the fields to match up.  Even the most specific
+.Sy MOVE
+may still copy arbitrary data:
+.Bd -literal
+77 A PIC X VALUE 'a'.
+77 N PIC 9 VALUE  1.
+ ...
+MOVE A TO N.
+DISPLAY N.
+MOVE N TO A. 
+DISPLAY A.
+.Ed
+.Lp
+displays
+.Bd -literal
+a
+a
+.Ed
+.Pp
+The system will not raise
+.Sy EC-DATA-INCOMPATIBLE
+unless enabled.  When it is not enabled,
+.Nm
+interprets the data as best it can.  For numeric display and packed
+decimal, the values are masked against the ASCII digits 0-9, and
+computation proceeds apace.
+.Pp
+For something in between all-or-nothing checking, 
+.Nm
+supports an implementation-defined EC:
+.Sy EC-DATA-IMP-OC7 ,
+whose name in no way derives from the famous IBM error code.  This EC
+is enabled by default with
+.Sy "-dialect ibm"
+to emulate observed behavior of some IBM compilers.  If enabled,
+the runtime system verifies that numeric 
+.Sy "DISPLAY"
+and
+.Sy "PACKED-DECIMAL"
+data indeed contain valid values at point of computation. If the
+values are not in range, the EC is raised.  It is a fatal EC and, as
+with other fatal ECs causes process termination if not handled.
+.
 .\" .Sh SEE ALSO
 .
 .Sh STANDARDS
@@ -2061,7 +2202,7 @@ to see it compile, please get in touch with the developers.
 .El
 .
 .Ss Status of NIST \*[lang] Compiler Verification Suite
-.Bl -tag -compact -width "\0\0100% NC"
+.Bl -tag -compact -width "00100% NC"
 .It NC 100%
 Nucleus
 .It SQ 100%
@@ -2075,12 +2216,14 @@ Inter-Program Communication
 .It ST 100%
 Sort-Merge
 .It SM 100%
-Source Text Manipulation RW \en Report Writer
-.It CM
+Source Text Manipulation
+.It RW \0\00%
+Report Writer
+.It CM \0\00%
 Communication
-.It DB to do?
+.It DB \0\00%
 Debug
-.It SG
+.It SG \0\00%
 Segmentation
 .It IF 100%
 Intrinsic Function
@@ -2160,22 +2303,22 @@ to the I/O support will be readily available to the paying customer.
 .El
 .
 .Sh COPYRIGHT
-.Bd -unfilled -indent
+.Bd -unfilled
 Copyright (c) 2021-2026 Symas Corporation
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
 met:
 
-* Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-* Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-* Neither the name of the Symas Corporation nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
+\(bu Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+\(bu Redistributions in binary form must reproduce the above
+  copyright notice, this list of conditions and the following disclaimer
+  in the documentation and/or other materials provided with the
+  distribution.
+\(bu Neither the name of the Symas Corporation nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT

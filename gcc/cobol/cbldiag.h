@@ -81,13 +81,11 @@ void cdf_push_call_convention();
 void cdf_push_current_tokens();
 void cdf_push_dictionary();
 void cdf_push_enabled_exceptions();
-void cdf_push_source_format();
 
 void cdf_pop();
 void cdf_pop_call_convention();
 void cdf_pop_current_tokens();
 void cdf_pop_dictionary();
-void cdf_pop_source_format();
 void cdf_pop_enabled_exceptions();
 
 size_t current_program_index();
@@ -107,7 +105,7 @@ struct cbl_loc_base_t {
 };
 struct cbl_loc_t : public cbl_loc_base_t {
 
-  cbl_loc_t() = default; 
+  cbl_loc_t() = default; // cppcheck-suppress uninitDerivedMemberVar
 
   cbl_loc_t(   int first_line, int first_column,
                int last_line,  int last_column ) 
@@ -179,6 +177,7 @@ enum cbl_diag_id_t : uint64_t {
 
   IbmCallFd,
   IbmCdf,
+  IbmContentExpr,
   IbmEjectE,
   IbmEqualAssignE,
   IbmLengthOf, 
@@ -191,6 +190,7 @@ enum cbl_diag_id_t : uint64_t {
   IbmVolatileW,  // dialect warning for ignored syntax
 
   IsoAssignFile,
+  IsoRedefinesGrow,
   IsoResume,
 
   MfAssignExternal,
@@ -205,11 +205,14 @@ enum cbl_diag_id_t : uint64_t {
   MfAnyLength, 
   MfMoveIndex, 
   MfMovePointer, 
+  MfRedefinesFirst,
   MfReturningNum,
-  MfUsageTypename,
+  MfSetNumeric,
   MfTrailing,
+  MfUsageTypename,
   
   Par78CdfDefinedW,
+  ParDynamicCall,
   ParIconvE, 
   ParInfoI,
   ParLangInfoW,
@@ -248,6 +251,8 @@ static inline bool
 dialect_not_ok( const cbl_loc_t& loc, cbl_diag_id_t id, const char term[] ) {
   return dialect_ok(loc, id, term, false);
 }
+
+bool cbl_diagnostic_ignored( cbl_diag_id_t id );
 
 // Diagnostic format specifiers are documented in gcc/pretty-print.cc
 // an error at a location, called from the parser for semantic errors
@@ -288,22 +293,7 @@ void gcc_location_set( const cbl_loc_t& loc );
 
 void gcc_location_dump();
 
-// tree.h defines yy_flex_debug as a macro because options.h
-#if ! defined(yy_flex_debug)
-template <typename LOC>
-static void
-location_dump( const char func[], int line, const char tag[], const LOC& loc) {
-  extern int yy_flex_debug; // cppcheck-suppress shadowVariable
-  if( yy_flex_debug ) {
-    const char *detail = gcobol_getenv("update_location");
-    if( detail ) { // cppcheck-suppress knownConditionTrueFalse
-      fprintf(stderr, "%s:%d: %s location (%d,%d) to (%d,%d) '%c'\n",
-              func, line, tag,
-              loc.first_line, loc.first_column, loc.last_line, loc.last_column, detail[0]);
-      if( *detail == '2' ) gcc_location_dump();
-    }
-  }
-}
-#endif // defined(yy_flex_debug)
-
+void
+location_dump( const char func[], int line, const char tag[],
+               const cbl_loc_t& loc, bool force = false);
 #endif

@@ -61,6 +61,12 @@ along with GCC; see the file COPYING3.  If not see
 #define LBOUND_SUBFIELD 1
 #define UBOUND_SUBFIELD 2
 
+#define GFC_DTYPE_ELEM_LEN 0
+#define GFC_DTYPE_VERSION 1
+#define GFC_DTYPE_RANK 2
+#define GFC_DTYPE_TYPE 3
+#define GFC_DTYPE_ATTRIBUTE 4
+
 
 /* Get FIELD_IDX'th field in struct TYPE.  */
 
@@ -593,7 +599,7 @@ gfc_conv_descriptor_ubound_set (stmtblock_t *block, tree desc,
 
 void
 gfc_get_descriptor_offsets_for_info (const_tree desc_type, tree *data_off,
-				     tree *dtype_off, tree *span_off,
+				     tree *rank_off, tree *span_off,
 				     tree *dim_off, tree *dim_size,
 				     tree *stride_suboff, tree *lower_suboff,
 				     tree *upper_suboff)
@@ -602,13 +608,19 @@ gfc_get_descriptor_offsets_for_info (const_tree desc_type, tree *data_off,
   tree type;
 
   type = TYPE_MAIN_VARIANT (desc_type);
-  field = gfc_advance_chain (TYPE_FIELDS (type), DATA_FIELD);
+  tree fields = TYPE_FIELDS (type);
+  field = gfc_advance_chain (fields, DATA_FIELD);
   *data_off = byte_position (field);
-  field = gfc_advance_chain (TYPE_FIELDS (type), DTYPE_FIELD);
-  *dtype_off = byte_position (field);
-  field = gfc_advance_chain (TYPE_FIELDS (type), SPAN_FIELD);
+  field = gfc_advance_chain (fields, DTYPE_FIELD);
+  tree dtype_off = byte_position (field);
+  type = TREE_TYPE (field);
+  field = gfc_advance_chain (TYPE_FIELDS (type), GFC_DTYPE_RANK);
+  tree rank_suboff = byte_position (field);
+  *rank_off = fold_build2 (PLUS_EXPR, TREE_TYPE (dtype_off), dtype_off,
+			   rank_suboff);
+  field = gfc_advance_chain (fields, SPAN_FIELD);
   *span_off = byte_position (field);
-  field = gfc_advance_chain (TYPE_FIELDS (type), DIMENSION_FIELD);
+  field = gfc_advance_chain (fields, DIMENSION_FIELD);
   *dim_off = byte_position (field);
   type = TREE_TYPE (TREE_TYPE (field));
   *dim_size = TYPE_SIZE_UNIT (type);
@@ -623,6 +635,44 @@ gfc_get_descriptor_offsets_for_info (const_tree desc_type, tree *data_off,
 
 /* Array descriptor higher level routines.
  ******************************************************************************/
+
+/* Return a constructor for a descriptor dtype with the caracteristics given by
+   the arguments.  */
+
+tree
+gfc_build_dtype_constructor (tree size, int type, int rank)
+{
+  tree field;
+  vec<constructor_elt, va_gc> *v = NULL;
+
+  gcc_assert (size);
+
+  STRIP_NOPS (size);
+  size = fold_convert (size_type_node, size);
+  tree dtype_type_node = get_dtype_type_node ();
+  field = gfc_advance_chain (TYPE_FIELDS (dtype_type_node),
+			     GFC_DTYPE_ELEM_LEN);
+  CONSTRUCTOR_APPEND_ELT (v, field,
+			  fold_convert (TREE_TYPE (field), size));
+  field = gfc_advance_chain (TYPE_FIELDS (dtype_type_node),
+			     GFC_DTYPE_VERSION);
+  CONSTRUCTOR_APPEND_ELT (v, field,
+			  build_zero_cst (TREE_TYPE (field)));
+
+  field = gfc_advance_chain (TYPE_FIELDS (dtype_type_node),
+			     GFC_DTYPE_RANK);
+  if (rank >= 0)
+    CONSTRUCTOR_APPEND_ELT (v, field,
+			    build_int_cst (TREE_TYPE (field), rank));
+
+  field = gfc_advance_chain (TYPE_FIELDS (dtype_type_node),
+			     GFC_DTYPE_TYPE);
+  CONSTRUCTOR_APPEND_ELT (v, field,
+			  build_int_cst (TREE_TYPE (field), type));
+
+  return build_constructor (dtype_type_node, v);
+}
+
 
 /* Build a null array descriptor constructor.  */
 
@@ -653,9 +703,16 @@ gfc_build_null_descriptor (tree type)
 #undef SPAN_FIELD
 #undef DIMENSION_FIELD
 #undef CAF_TOKEN_FIELD
+
 #undef STRIDE_SUBFIELD
 #undef LBOUND_SUBFIELD
 #undef UBOUND_SUBFIELD
+
+#undef GFC_DTYPE_ELEM_LEN
+#undef GFC_DTYPE_VERSION
+#undef GFC_DTYPE_RANK
+#undef GFC_DTYPE_TYPE
+#undef GFC_DTYPE_ATTRIBUTE
 
 
 /* For an array descriptor, get the total number of elements.  This is just

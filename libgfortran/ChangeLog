@@ -1,3 +1,74 @@
+2026-08-13  Mikael Morin  <mikael@gcc.gnu.org>
+
+	PR fortran/126799
+	* caf/shmem/collective_subroutine.c (collsub_broadcast_array): Use
+	the element length field instead of the span field as element size.
+
+2026-08-13  Mikael Morin  <mikael@gcc.gnu.org>
+
+	PR fortran/126799
+	* caf/shmem/collective_subroutine.c (collsub_reduce_array): Use
+	the element length field instead of the span field as element size.
+
+2026-08-03  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR libfortran/118793
+	* io/io.h (NML_ERR_MSG_LEN): New macro.
+	(st_parameter_dt): Add nml_err_pending bit.
+	(gfc_unit): Add nml_err_msg.
+	* io/list_read.c (nml_error): New function.
+	(eat_separator): Use new function
+	(convert_integer): Likewise.
+	(convert_unsigned): Likewise.
+	(parse_repeat): Likewise.  Save the position where the repeat
+	count starts and report it.
+	(read_logical): Likewise.
+	(read_integer): Likewise.
+	(parse_real): Likewise.
+	(read_complex): Likewise.
+	(read_real): Likewise.
+	(check_type): Likewise.
+	(list_formatted_read_scalar): Likewise.
+	(read_character): Likewise.  Save the initial position of the value
+	(nml_read_obj): Unwind to nml_err_ret on a deferred error.
+	(namelist_read): Store deferred errors in the unit's nml_err_msg
+	buffer.
+
+2026-07-26  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	* intrinsics/reduce.c (reduce): Fix the mask_present.
+
+2026-07-25  John David Anglin  <danglin@gcc.gnu.org>
+
+	* intrinsics/ceill_16.c: Fix whitespace.
+
+2026-07-24  John David Anglin  <danglin@gcc.gnu.org>
+
+	PR libfortran/126305
+	* c99_protos.h (acosl, acoshl, asinl, asinhl,atan2l, atanl,
+	atanhl, ceill, cosl, coshl, expl, hypotl, logl, sinl, sinhl,
+	sqrtl, tanl, tanhl, truncl, nextafterl, powl, erfl, erfcl):
+	Add declarations.
+	* configure.ac (powl, erfl): Add GCC_CHECK_MATH_FUNCs.
+	* configure: Regenerate.
+	* config.h.in: Regenerate.
+	* intrinsics/c99_functions.c: Include math_imp.h.  Move code
+	to manipulate the floating-point type to math_imp.h.
+	(erfl, erfcl, acosl, acoshl, asinl, asinhl, atan2l, atanl,
+	atanhl, ceill, cosl, coshl, expl, floorl, fmodl, hypotl,
+	logl, sinl, sinhl, sqrtl, tanl, tanhl, truncl, nextafterl,
+	powl, log10l): Implement.
+	(frexpl): Move code to intrinsics/frexpl_16.c.
+	(scalbnl): Move code to intrinsics/scalbnl_16.c.
+	* intrinsics/ceill_16.c: New.
+	* intrinsics/floorl_16.c: New.
+	* intrinsics/frexpl_16.c: New.
+	* intrinsics/math_imp.h: New.
+	* intrinsics/nextafterl_16.c: New.
+	* intrinsics/scalbnl_16.c: New.
+	* intrinsics/truncl_16.c: New.
+	* libgfortran.h (USE_LIBQUADLIB): Define on hppa-hpux.
+
 2026-07-19  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
 
 	PR libfortran/93727

@@ -111,10 +111,10 @@ const unsigned int CP_WRITE_ZT0 = 1U << 10;
    "vector types" for brevity.  */
 enum vector_type_index
 {
-#define DEF_SVE_TYPE(ACLE_NAME, NCHARS, ABI_NAME, SCALAR_TYPE) \
-  VECTOR_TYPE_ ## ACLE_NAME,
+#define DEF_SVE_TYPE(ACLE_NAME, ...) VECTOR_TYPE_##ACLE_NAME,
 #include "aarch64-sve-builtins.def"
-  NUM_VECTOR_TYPES
+  VECTOR_TYPE_none,
+  NUM_VECTOR_TYPES = VECTOR_TYPE_none,
 };
 
 /* Classifies the available measurement units for an address displacement.  */
@@ -199,7 +199,7 @@ enum type_class_index
    and the first type suffix.  */
 enum mode_suffix_index
 {
-#define DEF_SVE_MODE(NAME, BASE, DISPLACEMENT, UNITS) MODE_##NAME,
+#define DEF_SVE_MODE(NAME, ...) MODE_##NAME,
 #include "aarch64-sve-builtins.def"
   MODE_none
 };
@@ -209,10 +209,8 @@ enum mode_suffix_index
    element size.  */
 enum type_suffix_index
 {
-#define DEF_SVE_TYPE_SUFFIX(NAME, ACLE_TYPE, CLASS, BITS, MODE) \
-  TYPE_SUFFIX_ ## NAME,
-#define DEF_SME_ZA_SUFFIX(NAME, BITS, MODE) \
-  TYPE_SUFFIX_ ## NAME,
+#define DEF_SVE_NEON_TYPE_SUFFIX(NAME, ...) TYPE_SUFFIX_##NAME,
+#define DEF_SME_ZA_SUFFIX(NAME, ...) TYPE_SUFFIX_##NAME,
 #include "aarch64-sve-builtins.def"
   NUM_TYPE_SUFFIXES
 };
@@ -222,7 +220,7 @@ enum type_suffix_index
    and the number of vectors in the largest tuple argument.  */
 enum group_suffix_index
 {
-#define DEF_SVE_GROUP_SUFFIX(NAME, VG, VECTORS_PER_TUPLE) GROUP_##NAME,
+#define DEF_SVE_GROUP_SUFFIX(NAME, ...) GROUP_##NAME,
 #include "aarch64-sve-builtins.def"
   GROUP_none,
   NUM_GROUP_SUFFIXES
@@ -254,13 +252,12 @@ struct mode_suffix_info
   units_index displacement_units;
 };
 
-#define ENTRY(E, M, Q, G) E,
+#define DEF_SIMD_TYPE(E, M, Q, G) E,
 enum aarch64_simd_type
 {
 #include "aarch64-simd-builtin-types.def"
   ARM_NEON_H_TYPES_LAST
 };
-#undef ENTRY
 
 /* Static information about a type suffix.  */
 struct type_suffix_info
@@ -593,6 +590,8 @@ public:
 				type_class_index = SAME_TYPE_CLASS,
 				unsigned int = SAME_SIZE,
 				type_suffix_index = NUM_TYPE_SUFFIXES);
+  tree finish_opt_n_resolution (unsigned int, unsigned int, type_suffix_index,
+				type_class_index, unsigned int, sve_type);
   tree finish_opt_single_resolution (unsigned int, unsigned int, sve_type,
 				     type_class_index = SAME_TYPE_CLASS);
 
@@ -733,9 +732,11 @@ public:
   rtx use_contiguous_prefetch_insn (insn_code);
   rtx use_contiguous_store_insn (insn_code);
 
-  rtx map_to_rtx_codes (rtx_code, rtx_code, int, int,
+  rtx map_to_rtx_codes (rtx_code, rtx_code, unspec = UNSPEC_NONE,
+			unspec = UNSPEC_NONE,
 			unsigned int = DEFAULT_MERGE_ARGNO);
-  rtx map_to_unspecs (int, int, int, unsigned int = DEFAULT_MERGE_ARGNO);
+  rtx map_to_unspecs (unspec, unspec = UNSPEC_NONE, unspec = UNSPEC_NONE,
+		      unsigned int = DEFAULT_MERGE_ARGNO);
 
   /* The function call expression.  */
   tree call_expr;
@@ -1524,6 +1525,22 @@ function_expander::result_mode () const
 #define TYPES_cvtnx_mf8(S, D, T) \
   D (mf8, f32)
 
+#define TYPES_cvtzn(S, D, T) \
+  D (s8, f16), \
+  D (u8, f16), \
+  D (s16, f32), \
+  D (u16, f32), \
+  D (s32, f64), \
+  D (u32, f64)
+
+#define TYPES_cvttb(S, D, T) \
+  D (f16, s8), \
+  D (f16, u8), \
+  D (f32, s16), \
+  D (f32, u16), \
+  D (f64, s32), \
+  D (f64, u32)
+
 /* { _s32 _s64 } x { _b8 _b16 _b32 _b64 }
    { _u32 _u64 }.  */
 #define TYPES_inc_dec_n1(D, A) \
@@ -1563,9 +1580,35 @@ function_expander::result_mode () const
   D (s16, s32), \
   D (u16, u32)
 
+/* _s8_s16
+   _u8_u16
+   _s16_s32
+   _u16_u32.  */
+#define TYPES_qshr_x2(S, D, T) \
+  D (s8, s16), \
+  D (u8, u16), \
+  D (s16, s32), \
+  D (u16, u32)
+
+/* _s8_s16
+   _u8_u16.  */
+#define TYPES_qrshr_x2_8(S, D, T) \
+  D (s8, s16), \
+  D (u8, u16)
+
 /* _u16_s32.  */
 #define TYPES_qrshru_x2(S, D, T) \
   D (u16, s32)
+
+/* _u8_s16
+   _u16_s32.  */
+#define TYPES_qshru_x2(S, D, T) \
+  D (u8, s16), \
+  D (u16, s32)
+
+/* _u8_s16.  */
+#define TYPES_qrshrun_x2(S, D, T) \
+  D (u8, s16)
 
 /* _s8_s32
    _s16_s64
@@ -1645,6 +1688,11 @@ function_expander::result_mode () const
    _u32_u16.  */
 #define TYPES_s_narrow_fsu(S, D, T) \
   D (f32, f16), D (s32, s16), D (u32, u16)
+
+/* _s16_s8
+   _u16_u8.  */
+#define TYPES_s_narrow_su(S, D, T) \
+  D (s16, s8), D (u16, u8)
 
 /* _za8 _za16 _za32 _za64 _za128.  */
 #define TYPES_all_za(S, D, T) \
@@ -1766,6 +1814,56 @@ function_expander::result_mode () const
 /* _za64_u16.  */
 #define TYPES_mop_i16i64_unsigned(S, D, T) \
   D (za64, u16)
+
+// svmop4a[_1x1]_za32[_f32]
+// svmop4a[_1x1]_za32[_f16_f16]
+// svmop4a[_1x1]_za32[_bf16_bf16]
+// svmop4a[_1x1]_za32[_s16_s16]
+// svmop4a[_1x1]_za32[_u16_u16]
+// svmop4a[_1x1]_za32[_s8_s8]
+// svmop4a[_1x1]_za32[_u8_u8]
+// svmop4a[_1x1]_za32[_s8_u8]
+// svmop4a[_1x1]_za32[_u8_s8]
+#define TYPES_mop4_base(S, D, T) \
+  T (za32, f32, f32), \
+  T (za32, f16, f16), \
+  T (za32, bf16, bf16), \
+  T (za32, s16, s16), \
+  T (za32, u16, u16), \
+  T (za32, s8, s8), \
+  T (za32, u8, u8), \
+  T (za32, s8, u8), \
+  T (za32, u8, s8)
+
+// svmop4a[_1x1]_za16[_bf16_bf16] (only if __ARM_FEATURE_SME_B16B16 != 0)
+#define TYPES_mop4_b16b16(S, D, T) \
+  T (za16, bf16, bf16)
+
+// svmop4a[_1x1]_za16[_mf8_mf8]_fpm (only if __ARM_FEATURE_SME_F8F16 != 0)
+#define TYPES_mop4_f8f16(S, D, T) \
+  T (za16, mf8, mf8)
+
+// svmop4a[_1x1]_za32[_mf8_mf8]_fpm (only if __ARM_FEATURE_SME_F8F32 != 0)
+#define TYPES_mop4_f8f32(S, D, T) \
+  T (za32, mf8, mf8)
+
+// svmop4a[_1x1]_za16[_f16_f16] (only if __ARM_FEATURE_SME_F16F16 != 0)
+#define TYPES_mop4_f16f16(S, D, T) \
+  T (za16, f16, f16)
+
+// svmop4a[_1x1]_za64[_f64_f64] (only if __ARM_FEATURE_SME_F64F64 != 0)
+#define TYPES_mop4_f64f64(S, D, T) \
+  T (za64, f64, f64)
+
+// svmop4a[_1x1]_za64[_s16_s16] (only if __ARM_FEATURE_SME_I16I64 != 0)
+// svmop4a[_1x1]_za64[_u16_u16] (only if __ARM_FEATURE_SME_I16I64 != 0)
+// svmop4a[_1x1]_za64[_s16_u16] (only if __ARM_FEATURE_SME_I16I64 != 0)
+// svmop4a[_1x1]_za64[_u16_s16] (only if __ARM_FEATURE_SME_I16I64 != 0)
+#define TYPES_mop4_i16i64(S, D, T) \
+  T (za64, s16, s16), \
+  T (za64, u16, u16), \
+  T (za64, s16, u16), \
+  T (za64, u16, s16)
 
 /* _za.  */
 #define TYPES_za(S, D, T) \
@@ -2012,12 +2110,18 @@ DEF_SVE_TYPES_ARRAY (cvt_narrow);
 DEF_SVE_TYPES_ARRAY (cvt_s_s);
 DEF_SVE_TYPES_ARRAY (cvtn_mf8);
 DEF_SVE_TYPES_ARRAY (cvtnx_mf8);
+DEF_SVE_TYPES_ARRAY (cvtzn);
+DEF_SVE_TYPES_ARRAY (cvttb);
 DEF_SVE_TYPES_ARRAY (inc_dec_n);
 DEF_SVE_TYPES_ARRAY (qcvt_x2);
 DEF_SVE_TYPES_ARRAY (qcvt_x4);
+DEF_SVE_TYPES_ARRAY (qshr_x2);
 DEF_SVE_TYPES_ARRAY (qrshr_x2);
+DEF_SVE_TYPES_ARRAY (qrshr_x2_8);
 DEF_SVE_TYPES_ARRAY (qrshr_x4);
 DEF_SVE_TYPES_ARRAY (qrshru_x2);
+DEF_SVE_TYPES_ARRAY (qrshrun_x2);
+DEF_SVE_TYPES_ARRAY (qshru_x2);
 DEF_SVE_TYPES_ARRAY (qrshru_x4);
 DEF_SVE_TYPES_ARRAY (reinterpret);
 DEF_SVE_TYPES_ARRAY (reinterpret_b);
@@ -2025,6 +2129,7 @@ DEF_SVE_TYPES_ARRAY (while);
 DEF_SVE_TYPES_ARRAY (while_x);
 DEF_SVE_TYPES_ARRAY (while_x_c);
 DEF_SVE_TYPES_ARRAY (s_narrow_fsu);
+DEF_SVE_TYPES_ARRAY (s_narrow_su);
 DEF_SVE_TYPES_ARRAY (all_za);
 DEF_SVE_TYPES_ARRAY (d_za);
 DEF_SVE_TYPES_ARRAY (za_bhsd_data);
@@ -2052,6 +2157,13 @@ DEF_SVE_TYPES_ARRAY (mop_base_unsigned);
 DEF_SVE_TYPES_ARRAY (mop_i16i64);
 DEF_SVE_TYPES_ARRAY (mop_i16i64_signed);
 DEF_SVE_TYPES_ARRAY (mop_i16i64_unsigned);
+DEF_SVE_TYPES_ARRAY (mop4_f16f16);
+DEF_SVE_TYPES_ARRAY (mop4_b16b16);
+DEF_SVE_TYPES_ARRAY (mop4_base);
+DEF_SVE_TYPES_ARRAY (mop4_f64f64);
+DEF_SVE_TYPES_ARRAY (mop4_i16i64);
+DEF_SVE_TYPES_ARRAY (mop4_f8f16);
+DEF_SVE_TYPES_ARRAY (mop4_f8f32);
 DEF_SVE_TYPES_ARRAY (za);
 
 DEF_SVE_TYPES_ARRAY (b_float);

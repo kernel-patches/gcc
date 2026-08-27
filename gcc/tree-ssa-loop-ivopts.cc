@@ -455,7 +455,7 @@ struct iv_cand
   bool important;	/* Whether this is an "important" candidate, i.e. such
 			   that it should be considered by all uses.  */
   bool involves_undefs; /* Whether the IV involves undefined values.  */
-  ENUM_BITFIELD(iv_position) pos : 8;	/* Where it is computed.  */
+  enum iv_position pos : 8;/* Where it is computed.  */
   gimple *incremented_at;/* For original biv, the statement where it is
 			   incremented.  */
   tree var_before;	/* The variable used for it before increment.  */
@@ -7257,10 +7257,15 @@ create_new_iv (struct ivopts_data *data, struct iv_cand *cand)
       name_info (data, cand->var_before)->preserve_biv = true;
       name_info (data, cand->var_after)->preserve_biv = true;
 
-      /* Rewrite the increment so that it uses var_before directly.  */
+      /* Rewrite the increment so that it uses var_before directly.  Missed
+	 optimization can result in a use IV with zero step, avoid
+	 crashing in that case.  */
       use = find_interesting_uses_op (data, cand->var_after);
-      group = data->vgroups[use->group_id];
-      group->selected = cand;
+      if (use)
+	{
+	  group = data->vgroups[use->group_id];
+	  group->selected = cand;
+	}
       return;
     }
 

@@ -1655,7 +1655,8 @@ was_declared (gfc_symbol *sym)
   if (a.allocatable || a.dimension || a.dummy || a.external || a.intrinsic
       || a.optional || a.pointer || a.save || a.target || a.volatile_
       || a.value || a.access != ACCESS_UNKNOWN || a.intent != INTENT_UNKNOWN
-      || a.asynchronous || a.codimension || a.subroutine || a.result)
+      || a.asynchronous || a.codimension
+      || (a.subroutine && a.proc != PROC_UNKNOWN) || a.result)
     return 1;
 
   return 0;
@@ -3292,7 +3293,7 @@ impure_stmt_fcn (gfc_expr *e, gfc_symbol *sym,
 	|| e->symtree->n.sym->attr.proc == PROC_ST_FUNCTION)
     return false;
 
-  return gfc_pure_function (e, &name) ? false : true;
+  return !gfc_pure_function (e, &name);
 }
 
 
@@ -10578,7 +10579,6 @@ static void
 resolve_assoc_var (gfc_symbol* sym, bool resolve_target)
 {
   gfc_expr* target;
-  bool parentheses = false;
 
   gcc_assert (sym->assoc);
   gcc_assert (sym->attr.flavor == FL_VARIABLE);
@@ -10608,16 +10608,6 @@ resolve_assoc_var (gfc_symbol* sym, bool resolve_target)
     return;
   gcc_assert (!sym->assoc->dangling);
 
-  if (target->expr_type == EXPR_OP
-      && target->value.op.op == INTRINSIC_PARENTHESES
-      && target->value.op.op1->expr_type == EXPR_VARIABLE)
-    {
-      sym->assoc->target = gfc_copy_expr (target->value.op.op1);
-      gfc_free_expr (target);
-      target = sym->assoc->target;
-      parentheses = true;
-    }
-
   if (resolve_target && !gfc_resolve_expr (target))
     return;
 
@@ -10638,12 +10628,15 @@ resolve_assoc_var (gfc_symbol* sym, bool resolve_target)
     }
 
   /* For variable targets, we get some attributes from the target.  */
-  if (target->expr_type == EXPR_VARIABLE)
+  if (target->expr_type == EXPR_VARIABLE
+      || (target->expr_type == EXPR_OP
+	  && target->value.op.op == INTRINSIC_PARENTHESES
+	  && target->value.op.op1->expr_type == EXPR_VARIABLE))
     {
       gfc_symbol *tsym, *dsym;
 
-      gcc_assert (target->symtree);
-      tsym = target->symtree->n.sym;
+      tsym = target->expr_type == EXPR_VARIABLE ? target->symtree->n.sym :
+				  target->value.op.op1->symtree->n.sym;
 
       if (gfc_expr_attr (target).proc_pointer)
 	{
@@ -10679,13 +10672,16 @@ resolve_assoc_var (gfc_symbol* sym, bool resolve_target)
 	    }
 	}
 
-      sym->attr.asynchronous = tsym->attr.asynchronous;
-      sym->attr.volatile_ = tsym->attr.volatile_;
+      if (target->expr_type == EXPR_VARIABLE)
+	{
+	  sym->attr.asynchronous = tsym->attr.asynchronous;
+	  sym->attr.volatile_ = tsym->attr.volatile_;
 
-      sym->attr.target = tsym->attr.target
-			 || gfc_expr_attr (target).pointer;
-      if (is_subref_array (target))
-	sym->attr.subref_array_pointer = 1;
+	  sym->attr.target = tsym->attr.target
+			     || gfc_expr_attr (target).pointer;
+	  if (is_subref_array (target))
+	    sym->attr.subref_array_pointer = 1;
+	}
     }
   else if (target->ts.type == BT_PROCEDURE)
     {
@@ -10772,7 +10768,6 @@ resolve_assoc_var (gfc_symbol* sym, bool resolve_target)
 
   /* See if this is a valid association-to-variable.  */
   sym->assoc->variable = ((target->expr_type == EXPR_VARIABLE
-			   && !parentheses
 			   && !gfc_has_vector_subscript (target))
 			  || gfc_is_ptr_fcn (target));
 
@@ -12970,10 +12965,29 @@ resolve_block_construct (gfc_code* code)
 
   /* For an ASSOCIATE block, the associations (and their targets) will be
      resolved by gfc_resolve_symbol, during resolution of the BLOCK's
-     namespace.  */
-  gfc_resolve (ns);
+     namespace.  However, marking variables as used ans defined requires
+     passing ext.block.assoc.  */
+  gfc_resolve (ns, code->ext.block.assoc);
 }
 
+/* Mark everything in an association list as used and set if applicable,
+   respectively.  */
+
+static void
+mark_assoc_used (gfc_association_list *a)
+{
+  while (a != NULL)
+    {
+      gfc_symbol *n_sym = a->st->n.sym;
+      if (n_sym->attr.value_used != VALUE_UNUSED)
+	gfc_value_used_expr (a->target, n_sym->attr.value_used);
+
+      if (a->variable && n_sym->attr.value_set != VALUE_UNSET)
+	gfc_expr_set_at (a->target, &n_sym->other_loc, n_sym->attr.value_set);
+
+      a = a->next;
+    }
+}
 
 /* Resolve lists of blocks found in IF, SELECT CASE, WHERE, FORALL, GOTO and
    DO code nodes.  */
@@ -13053,6 +13067,9 @@ gfc_resolve_blocks (gfc_code *b, gfc_namespace *ns)
 	case EXEC_OACC_ENTER_DATA:
 	case EXEC_OACC_EXIT_DATA:
 	case EXEC_OACC_ROUTINE:
+	case EXEC_OACC_INIT:
+	case EXEC_OACC_SHUTDOWN:
+	case EXEC_OACC_SET:
 	case EXEC_OMP_ALLOCATE:
 	case EXEC_OMP_ALLOCATORS:
 	case EXEC_OMP_ASSUME:
@@ -13798,6 +13815,7 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
   gfc_expr *tmp_expr = NULL;
   int error_count, depth;
   bool finalizable_lhs;
+  bool use_finalize_only;
 
   gfc_get_errors (NULL, &error_count);
 
@@ -13841,6 +13859,24 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
 
   finalizable_lhs = is_finalizable_type ((*code)->expr1->ts);
 
+  /* When the lhs is finalized as a whole and none of its components needs the
+     structure copy to handle it (no pointer or allocatable components), the
+     copy can be done component by component.  The whole-derived-type assignment
+     then only finalizes the lhs and a component with a defined assignment keeps
+     its post-finalization value for the INTENT (OUT) finalization in that
+     defined assignment.  */
+  use_finalize_only = finalizable_lhs;
+  if (use_finalize_only)
+    for (comp1 = (*code)->expr1->ts.u.derived->components; comp1;
+	 comp1 = comp1->next)
+      if (comp1->attr.pointer || comp1->attr.allocatable
+	  || comp1->attr.proc_pointer_comp || comp1->attr.class_pointer
+	  || comp1->attr.proc_pointer)
+	{
+	  use_finalize_only = false;
+	  break;
+	}
+
   /* Create a temporary so that functions get called only once.  */
   if ((*code)->expr2->expr_type != EXPR_VARIABLE
       && (*code)->expr2->expr_type != EXPR_CONSTANT)
@@ -13877,6 +13913,8 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
       this_code = build_assignment (EXEC_ASSIGN,
 				    (*code)->expr1, (*code)->expr2,
 				    NULL, NULL, (*code)->loc);
+      if (use_finalize_only)
+	this_code->expr1->finalize_only = 1;
       add_code_to_chain (&this_code, &head, &tail);
     }
 
@@ -13896,7 +13934,20 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
 	  || comp1->attr.proc_pointer_comp
 	  || comp1->attr.class_pointer
 	  || comp1->attr.proc_pointer)
-	continue;
+	{
+	  /* With finalize_only the whole-derived-type assignment does not copy
+	     the components, so emit the copy for this one here.  Only plain
+	     components reach this point, since use_finalize_only excludes
+	     pointer and allocatable components.  */
+	  if (use_finalize_only)
+	    {
+	      this_code = build_assignment (EXEC_ASSIGN,
+					    (*code)->expr1, (*code)->expr2,
+					    comp1, comp2, (*code)->loc);
+	      add_code_to_chain (&this_code, &head, &tail);
+	    }
+	  continue;
+	}
 
       finalizable_comp = is_finalizable_type (comp1->ts)
 			 && !finalizable_lhs;
@@ -13938,7 +13989,10 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
 			    && dummy_args->sym->attr.intent == INTENT_OUT;
 	  inout = dummy_args
 		  && dummy_args->sym->attr.intent == INTENT_INOUT;
-	  if ((inout || finalizable_out)
+	  /* With finalize_only the lhs component keeps its post-finalization
+	     value, so the defined assignment can finalize it directly through
+	     its INTENT (OUT) argument and no temporary is needed.  */
+	  if ((inout || (finalizable_out && !use_finalize_only))
 	      && !comp1->attr.allocatable)
 	    {
 	      gfc_code *temp_code;
@@ -14015,10 +14069,11 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
 	{
 	  /* Don't add intrinsic assignments since they are already
 	     effected by the intrinsic assignment of the structure, unless
-	     finalization is required.  */
+	     finalization is required or, with finalize_only, the structure
+	     assignment does not copy the components.  */
 	  if (finalizable_comp)
 	    this_code->expr1->must_finalize = 1;
-	  else
+	  else if (!use_finalize_only)
 	    {
 	      gfc_free_statements (this_code);
 	      this_code = NULL;
@@ -14039,7 +14094,7 @@ generate_component_assignments (gfc_code **code, gfc_namespace *ns)
 
       add_code_to_chain (&this_code, &head, &tail);
 
-      if (t1 && (inout || finalizable_out))
+      if (t1 && (inout || (finalizable_out && !use_finalize_only)))
 	{
 	  /* Transfer the value to the final result.  */
 	  this_code = build_assignment (EXEC_ASSIGN,
@@ -14839,6 +14894,9 @@ start:
 	case EXEC_OACC_EXIT_DATA:
 	case EXEC_OACC_ATOMIC:
 	case EXEC_OACC_DECLARE:
+	case EXEC_OACC_INIT:
+	case EXEC_OACC_SHUTDOWN:
+	case EXEC_OACC_SET:
 	  gfc_resolve_oacc_directive (code, ns);
 	  break;
 
@@ -18803,6 +18861,42 @@ skip_interfaces:
 		     "CODIMENSION attribute", &sym->declared_at);
 	  return;
 	}
+
+      /* F2008, C557 (F2018, C862; F2023, C867).  Assumed-shape and
+	 explicit-shape array dummies may have the VALUE attribute, but
+	 assumed-size arrays may not.  */
+      if (as->type == AS_ASSUMED_SIZE && sym->attr.value)
+	{
+	  gfc_error ("Assumed-size array %qs at %L may not have the VALUE "
+		     "attribute", sym->name, &sym->declared_at);
+	  return;
+	}
+      else if (sym->attr.value && sym->attr.dummy
+	       && (as->type == AS_EXPLICIT || as->type == AS_ASSUMED_SHAPE))
+	{
+	  if (!gfc_notify_std (GFC_STD_F2008, "Array dummy argument %qs at "
+			       "%L with VALUE attribute", sym->name,
+			       &sym->declared_at))
+	    return;
+
+	  /* F2023, 18.3.6 (4): only a scalar VALUE dummy is interoperable
+	     with a formal parameter of the C prototype.  */
+	  if (sym->ns->proc_name && sym->ns->proc_name->attr.is_bind_c)
+	    {
+	      gfc_error ("Array dummy argument %qs at %L with VALUE attribute "
+			 "not allowed in BIND(C) procedure %qs", sym->name,
+			 &sym->declared_at, sym->ns->proc_name->name);
+	      return;
+	    }
+
+	  if (sym->ts.type == BT_CLASS)
+	    {
+	      gfc_error ("Sorry, polymorphic array dummy argument %qs at %L "
+			 "with VALUE attribute is not yet implemented",
+			 sym->name, &sym->declared_at);
+	      return;
+	    }
+	}
     }
 
   /* Make sure symbols with known intent or optional are really dummy
@@ -18826,22 +18920,40 @@ skip_interfaces:
   if (sym->attr.value && sym->ts.type == BT_CHARACTER)
     {
       gfc_charlen *cl = sym->ts.u.cl;
-      if (!cl || !cl->length || cl->length->expr_type != EXPR_CONSTANT)
+      if (!cl)
 	{
 	  gfc_error ("Character dummy variable %qs at %L with VALUE "
-		     "attribute must have constant length",
+		     "attribute must have a length specification",
 		     sym->name, &sym->declared_at);
 	  return;
 	}
 
+      /* C interoperable character dummies must have length one.  */
       if (sym->ts.is_c_interop
-	  && mpz_cmp_si (cl->length->value.integer, 1) != 0)
+	  && (!cl->length
+	      || cl->length->expr_type != EXPR_CONSTANT
+	      || mpz_cmp_si (cl->length->value.integer, 1) != 0))
 	{
 	  gfc_error ("C interoperable character dummy variable %qs at %L "
 		     "with VALUE attribute must have length one",
 		     sym->name, &sym->declared_at);
 	  return;
 	}
+
+      /* Assumed-length character dummy with VALUE, valid since F2008.  */
+      if (!cl->length
+	  && !gfc_notify_std (GFC_STD_F2008, "Assumed-length character "
+			      "dummy variable %qs at %L with VALUE attribute",
+			      sym->name, &sym->declared_at))
+	return;
+
+      /* Likewise for a specified but non-constant length.  */
+      if (cl->length && cl->length->expr_type != EXPR_CONSTANT
+	  && !gfc_notify_std (GFC_STD_F2008, "Character dummy variable "
+			      "%qs at %L with VALUE attribute and "
+			      "non-constant length",
+			      sym->name, &sym->declared_at))
+	return;
     }
 
   if (sym->ts.type == BT_DERIVED && !sym->attr.is_iso_c
@@ -21031,7 +21143,7 @@ warn_unused_vs_set (gfc_namespace *ns)
    which functions or subroutines.  */
 
 void
-gfc_resolve (gfc_namespace *ns)
+gfc_resolve (gfc_namespace *ns, gfc_association_list *a)
 {
   gfc_namespace *old_ns;
   code_stack *old_cs_base;
@@ -21053,6 +21165,7 @@ gfc_resolve (gfc_namespace *ns)
   resolve_types (ns);
   component_assignment_level = 0;
   resolve_codes (ns);
+  mark_assoc_used (a);
 
   if (warn_unused_but_set_variable || warn_unused_intent_out
       || warn_unused_read || warn_undefined_vars)

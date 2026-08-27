@@ -172,6 +172,9 @@
 ;; BFmode vector modes.
 (define_mode_iterator VBF [V4BF V8BF])
 
+;; Fmode vector modes.
+(define_mode_iterator VF [V4HF V8HF])
+
 ;; This mode iterator allows :P to be used for patterns that operate on
 ;; addresses in different modes.  In LP64, only DI will match, while in
 ;; ILP32, either can match.
@@ -309,6 +312,10 @@
 
 ;; All quad integer widen-able modes.
 (define_mode_iterator VQW [V16QI V8HI V4SI])
+
+;; Quad integer modes that reach 64-bit elements through more than one
+;; pairwise widening step.
+(define_mode_iterator VQ_BH [V16QI V8HI])
 
 ;; Double vector modes for combines.
 (define_mode_iterator VDC [V8QI V4HI V4BF V4HF V2SI V2SF DI DF])
@@ -553,6 +560,14 @@
 				   (VNx4SF "TARGET_SVE2p1_OR_SME2")
 				   (VNx2DF "TARGET_SVE2p1_OR_SME2")])
 
+;; {u8, s8, mf8}{x1,x2}
+(define_mode_iterator SVE_FULL_BIx12   [VNx16QI VNx32QI])
+(define_mode_iterator SVE_FULL_BIx12_2 [SVE_FULL_BIx12])
+
+;; {u16, s16}{x1,x2}
+(define_mode_iterator SVE_FULL_HIx12   [VNx8HI VNx16HI])
+(define_mode_iterator SVE_FULL_HIx12_2 [SVE_FULL_HIx12])
+
 ;; Fully-packed SVE integer vector modes that have 8-bit or 16-bit elements.
 (define_mode_iterator SVE_FULL_BHI [VNx16QI VNx8HI])
 
@@ -568,6 +583,10 @@
 
 ;; Pairs of the above.
 (define_mode_iterator SVE_FULL_HFx2 [VNx16BF VNx16HF])
+
+;; {f16}{x1,x2}
+(define_mode_iterator SVE_FULL_HF_NO_BFx12   [VNx8HF VNx16HF])
+(define_mode_iterator SVE_FULL_HF_NO_BFx12_2 [SVE_FULL_HF_NO_BFx12])
 
 ;; Fully-packed SVE vector modes that have 16-bit, 32-bit or 64-bit elements.
 (define_mode_iterator SVE_FULL_HSD [VNx8HI VNx4SI VNx2DI
@@ -588,6 +607,18 @@
 ;; Fully-packed SVE floating-point vector modes that have 16-bit or 32-bit
 ;; elements.
 (define_mode_iterator SVE_FULL_HSF [VNx8HF VNx4SF])
+
+;; {bf16}{x1,x2}
+(define_mode_iterator SVE_FULL_BFx12   [VNx8BF VNx16BF])
+(define_mode_iterator SVE_FULL_BFx12_2 [SVE_FULL_BFx12])
+
+;; {f32}{x1,x2}
+(define_mode_iterator SVE_FULL_SFx12   [VNx4SF VNx8SF])
+(define_mode_iterator SVE_FULL_SFx12_2 [SVE_FULL_SFx12])
+
+;; {f64, f64x2}
+(define_mode_iterator SVE_FULL_DFx12 [VNx2DF VNx4DF])
+(define_mode_iterator SVE_FULL_DFx12_2 [SVE_FULL_DFx12])
 
 ;; Like SVE_FULL_HSF, but selectively enables those modes that are valid
 ;; for the variant of the SVE2 FP8 FDOT instruction associated with that
@@ -622,6 +653,8 @@
 
 ;; 2x and 4x tuples of the above, excluding 2x DI.
 (define_mode_iterator SVE_FULL_SIx2_SDIx4 [VNx8SI VNx16SI VNx8DI])
+
+(define_mode_iterator SVE_FULL_HIx2 [VNx16HI])
 
 ;; Fully-packed SVE floating-point vector modes that have 32-bit or 64-bit
 ;; elements.
@@ -707,6 +740,9 @@
 (define_mode_iterator SVE_SI [VNx2SI VNx4SI])
 
 (define_mode_iterator SVE_DIx24 [VNx4DI VNx8DI])
+
+;; SVE integer vector modes with 2 and 4 vectors of 8-bit elements.
+(define_mode_iterator SVE_QIx24 [VNx32QI VNx64QI])
 
 ;; SVE modes with 2 or 4 elements.
 (define_mode_iterator SVE_24 [VNx2QI VNx2HI VNx2HF VNx2BF VNx2SI VNx2SF
@@ -800,6 +836,9 @@
 (define_mode_iterator SME_ZA_I [VNx16QI VNx8HI VNx4SI VNx2DI VNx1TI])
 (define_mode_iterator SME_ZA_SDI [VNx4SI (VNx2DI "TARGET_SME_I16I64")])
 
+(define_mode_iterator SME_ZA_MF8 [(VNx8HI "TARGET_STREAMING_SME_F8F16")
+				  (VNx4SI "TARGET_STREAMING_SME_F8F32")])
+
 (define_mode_iterator SME_ZA_BIx24 [VNx32QI VNx64QI])
 
 (define_mode_iterator SME_ZA_BHIx124 [VNx16QI VNx32QI VNx64QI
@@ -846,6 +885,15 @@
 				    (VNx2DF "TARGET_SME_F64F64")
 				    (VNx8HF "TARGET_STREAMING_SME_F16F16")
 				    (VNx8BF "TARGET_STREAMING_SME_B16B16")])
+(define_mode_iterator SME_MOP4_F16 [
+	(VNx8HI "TARGET_STREAMING_SME_F16F16")
+	VNx4SI
+])
+
+(define_mode_iterator SME_MOP4_BF16 [
+	(VNx8HI "TARGET_STREAMING_SME_B16B16")
+	VNx4SI
+])
 
 ;; ------------------------------------------------------------------
 ;; Unspec enumerations for Advance SIMD. These could well go into
@@ -889,6 +937,8 @@
     UNSPEC_SQDMULH	; Used in aarch64-simd.md.
     UNSPEC_SQRDMULH	; Used in aarch64-simd.md.
     UNSPEC_PMUL		; Used in aarch64-simd.md.
+    UNSPEC_PMULL_PAIR   ; Used in aarch64-sve2.md.
+    UNSPEC_PMLAL_PAIR   ; Used in aarch64-sve2.md.
     UNSPEC_FMULX	; Used in aarch64-simd.md.
     UNSPEC_USQADD	; Used in aarch64-simd.md.
     UNSPEC_SUQADD	; Used in aarch64-simd.md.
@@ -1120,6 +1170,12 @@
     UNSPEC_COND_FCVTNT	; Used in aarch64-sve2.md.
     UNSPEC_COND_FCVTX	; Used in aarch64-sve2.md.
     UNSPEC_COND_FCVTXNT	; Used in aarch64-sve2.md.
+    UNSPEC_FCVTZSN	; Used in aarch64-sve2.md.
+    UNSPEC_FCVTZUN	; Used in aarch64-sve2.md.
+    UNSPEC_SCVTFB	; Used in aarch64-sve2.md.
+    UNSPEC_SCVTFLT	; Used in aarch64-sve2.md.
+    UNSPEC_UCVTFB	; Used in aarch64-sve2.md.
+    UNSPEC_UCVTFLT	; Used in aarch64-sve2.md.
     UNSPEC_COND_FLOGB	; Used in aarch64-sve2.md.
     UNSPEC_DOT_FP8	; Used in aarch64-sve2.md.
     UNSPEC_DOT_LANE_FP8	; Used in aarch64-sve2.md.
@@ -1172,6 +1228,7 @@
     UNSPEC_RSHRNT	; Used in aarch64-sve2.md.
     UNSPEC_RSUBHNB	; Used in aarch64-sve2.md.
     UNSPEC_RSUBHNT	; Used in aarch64-sve2.md.
+    UNSPEC_SABAL	; Used in aarch64-sve2.md.
     UNSPEC_SABDLB	; Used in aarch64-sve2.md.
     UNSPEC_SABDLT	; Used in aarch64-sve2.md.
     UNSPEC_SADDLB	; Used in aarch64-sve2.md.
@@ -1200,6 +1257,8 @@
     UNSPEC_SQRDCMLAH270	; Used in aarch64-sve2.md.
     UNSPEC_SQRDCMLAH90	; Used in aarch64-sve2.md.
     UNSPEC_SQRSHR	; Used in aarch64-sve2.md.
+    UNSPEC_SQSHRN	; Used in aarch64-sve2.md.
+    UNSPEC_SQSHRUN	; Used in aarch64-sve2.md.
     UNSPEC_SQRSHRN	; Used in aarch64-sve2.md.
     UNSPEC_SQRSHRNB	; Used in aarch64-sve2.md.
     UNSPEC_SQRSHRNT	; Used in aarch64-sve2.md.
@@ -1230,6 +1289,7 @@
     UNSPEC_SUBHNT	; Used in aarch64-sve2.md.
     UNSPEC_TBL2		; Used in aarch64-sve2.md.
     UNSPEC_TRN		; Used in aarch64-builtins.cc
+    UNSPEC_UABAL	; Used in aarch64-sve2.md.
     UNSPEC_UABDLB	; Used in aarch64-sve2.md.
     UNSPEC_UABDLT	; Used in aarch64-sve2.md.
     UNSPEC_UADDLB	; Used in aarch64-sve2.md.
@@ -1243,6 +1303,7 @@
     UNSPEC_UMULLB	; Used in aarch64-sve2.md.
     UNSPEC_UMULLT	; Used in aarch64-sve2.md.
     UNSPEC_UQRSHR	; Used in aarch64-sve2.md.
+    UNSPEC_UQSHRN	; Used in aarch64-sve2.md.
     UNSPEC_UQRSHRN	; Used in aarch64-sve2.md.
     UNSPEC_UQRSHRNB	; Used in aarch64-sve2.md.
     UNSPEC_UQRSHRNT	; Used in aarch64-sve2.md.
@@ -1339,6 +1400,8 @@
     UNSPEC_SME_FMLA
     UNSPEC_SME_FMLAL
     UNSPEC_SME_FMLS
+    UNSPEC_SME_FMOP4A
+    UNSPEC_SME_FMOP4S
     UNSPEC_SME_FMOPA
     UNSPEC_SME_FMOPS
     UNSPEC_SME_FSUB
@@ -1354,6 +1417,8 @@
     UNSPEC_SME_SVDOT
     UNSPEC_SME_SMLA
     UNSPEC_SME_SMLS
+    UNSPEC_SME_SMOP4A
+    UNSPEC_SME_SMOP4S
     UNSPEC_SME_SMOPA
     UNSPEC_SME_SMOPS
     UNSPEC_SME_ST1_HOR
@@ -1362,16 +1427,22 @@
     UNSPEC_SME_SUB_WRITE
     UNSPEC_SME_SUDOT
     UNSPEC_SME_SUVDOT
+    UNSPEC_SME_SUMOP4A
+    UNSPEC_SME_SUMOP4S
     UNSPEC_SME_SUMOPA
     UNSPEC_SME_SUMOPS
     UNSPEC_SME_UDOT
     UNSPEC_SME_UVDOT
     UNSPEC_SME_UMLA
     UNSPEC_SME_UMLS
+    UNSPEC_SME_UMOP4A
+    UNSPEC_SME_UMOP4S
     UNSPEC_SME_UMOPA
     UNSPEC_SME_UMOPS
     UNSPEC_SME_USDOT
     UNSPEC_SME_USVDOT
+    UNSPEC_SME_USMOP4A
+    UNSPEC_SME_USMOP4S
     UNSPEC_SME_USMOPA
     UNSPEC_SME_USMOPS
     UNSPEC_SME_WRITE
@@ -2138,7 +2209,7 @@
 			   (VNx4SI "VNx8HI") (VNx4SF "VNx8HF")
 			   (VNx2DI "VNx4SI") (VNx2DF "VNx4SF")
 			   (VNx8SI "VNx8HI") (VNx16SI "VNx16QI")
-			   (VNx8DI "VNx8HI")])
+			   (VNx8DI "VNx8HI") (VNx16HI "VNx16QI")])
 (define_mode_attr Vnarrow [(VNx8HI "vnx16qi")
 			   (VNx4SI "vnx8hi") (VNx4SF "vnx8hf")
 			   (VNx2DI "vnx4si") (VNx2DF "vnx4sf")
@@ -2275,11 +2346,11 @@
 			  (V8HI "4s") (V4SI "2d")])
 
 ;; SVE vector after narrowing.
-(define_mode_attr Ventype [(VNx8HI "b")
+(define_mode_attr Ventype [(VNx8HI "b") (VNx8HF "b")
 			   (VNx4SI "h") (VNx4SF "h")
 			   (VNx2DI "s") (VNx2DF "s")
 			   (VNx8SI "h") (VNx16SI "b")
-			   (VNx8DI "h")])
+			   (VNx8DI "h") (VNx16HI "b")])
 
 ;; SVE vector after widening.
 (define_mode_attr Vewtype [(VNx16QI "h")
@@ -2668,9 +2739,11 @@
 		      (V4HF "v") (V8HF  "v")])
 
 (define_mode_attr vsi2qi [(V2SI "v8qi") (V4SI "v16qi")
-			  (VNx4SI "vnx16qi") (VNx2DI "vnx8hi")])
+			  (VNx4SI "vnx16qi") (VNx2DI "vnx8hi")
+			  (V2SF "v4hf") (V4SF "v8hf")])
 (define_mode_attr VSI2QI [(V2SI "V8QI") (V4SI "V16QI")
-			  (VNx4SI "VNx16QI") (VNx2DI "VNx8HI")])
+			  (VNx4SI "VNx16QI") (VNx2DI "VNx8HI")
+			  (V2SF "V4HF") (V4SF "V8HF")])
 
 
 ;; Register suffix for DOTPROD input types from the return type.
@@ -2720,7 +2793,8 @@
 
 (define_mode_attr f16quad [(V2SF "") (V4SF "q")])
 
-(define_mode_attr isquadop [(V8QI "") (V16QI "q") (V4BF "") (V8BF "q")])
+(define_mode_attr isquadop [(V8QI "") (V16QI "q") (V4BF "") (V8BF "q")
+			    (V4HF "") (V8HF "q")])
 
 (define_code_attr f16mac [(plus "a") (minus "s")])
 
@@ -2903,6 +2977,14 @@
 				    (V4HF "<Vetype>[%4]") (V8HF "<Vetype>[%4]")
 				    ])
 
+(define_mode_attr FCVTZN_SRC [(VNx16QI "VNx16HF")
+			      (VNx8HI "VNx8SF")
+			      (VNx4SI "VNx4DF")])
+
+(define_mode_attr CVTTB_SRC [(VNx8HF "VNx16QI")
+			     (VNx4SF "VNx8HI")
+			     (VNx2DF "VNx4SI")])
+
 (define_mode_attr za16_offset_range [(VNx16QI "0_to_14_step_2")
 				     (VNx32QI "0_to_6_step_2")
 				     (VNx64QI "0_to_6_step_2")])
@@ -2950,6 +3032,8 @@
 (define_mode_attr z_suffix [(VNx16QI ".b") (VNx32QI "") (VNx64QI "")
 			    (VNx8BF ".h") (VNx16BF "") (VNx32BF "")
 			    (VNx8HF ".h") (VNx16HF "") (VNx32HF "")
+			    (VNx4SF ".s") (VNx8SF "") (VNx16SF "")
+			    (VNx2DF ".d") (VNx4DF "") (VNx8DF "")
 			    (VNx8HI ".h") (VNx16HI "") (VNx32HI "")])
 
 ;; The number of bytes controlled by a predicate
@@ -3382,6 +3466,9 @@
 (define_code_attr TRUNC_SHIFT [(ss_truncate "ashiftrt")
 			       (us_truncate "lshiftrt") (truncate "lshiftrt")])
 
+;; The optab prefix of a saturating truncation.
+(define_code_attr sat_trunc_op [(ss_truncate "ss") (us_truncate "us")])
+
 (define_code_attr shrn_op [(ss_truncate "sq")
 			   (us_truncate "uq") (truncate "")])
 
@@ -3678,6 +3765,9 @@
 
 (define_int_iterator CRYPTO_AES [UNSPEC_AESE UNSPEC_AESD])
 (define_int_iterator CRYPTO_AESMC [UNSPEC_AESMC UNSPEC_AESIMC])
+(define_int_attr aes_fused_op [(UNSPEC_AESE "emc") (UNSPEC_AESD "dimc")])
+(define_int_attr aes_mc_unspec [(UNSPEC_AESE "UNSPEC_AESMC")
+				      (UNSPEC_AESD "UNSPEC_AESIMC")])
 
 (define_int_iterator CRYPTO_SHA1 [UNSPEC_SHA1C UNSPEC_SHA1M UNSPEC_SHA1P])
 
@@ -3958,7 +4048,8 @@
 (define_int_iterator SVE2_INT_BINARY_LANE [UNSPEC_SQDMULH
 					   UNSPEC_SQRDMULH])
 
-(define_int_iterator SVE2_INT_BINARY_LONG [UNSPEC_SABDLB
+(define_int_iterator SVE2_INT_BINARY_LONG [UNSPEC_SABAL
+					   UNSPEC_SABDLB
 					   UNSPEC_SABDLT
 					   UNSPEC_SADDLB
 					   UNSPEC_SADDLBT
@@ -3971,6 +4062,7 @@
 					   UNSPEC_SSUBLBT
 					   UNSPEC_SSUBLT
 					   UNSPEC_SSUBLTB
+					   UNSPEC_UABAL
 					   UNSPEC_UABDLB
 					   UNSPEC_UABDLT
 					   UNSPEC_UADDLB
@@ -4045,10 +4137,13 @@
 
 (define_int_iterator SVE2_INT_SHIFT_IMM_NARROWxN
   [(UNSPEC_SQRSHR "TARGET_STREAMING_SME2")
+   (UNSPEC_SQSHRN "TARGET_SVE2p3_OR_SME2p3")
+   (UNSPEC_SQSHRUN "TARGET_SVE2p3_OR_SME2p3")
    (UNSPEC_SQRSHRN "TARGET_SVE2p1_OR_SME2")
    (UNSPEC_SQRSHRU "TARGET_STREAMING_SME2")
    (UNSPEC_SQRSHRUN "TARGET_SVE2p1_OR_SME2")
    (UNSPEC_UQRSHR "TARGET_STREAMING_SME2")
+   (UNSPEC_UQSHRN "TARGET_SVE2p3_OR_SME2p3")
    (UNSPEC_UQRSHRN "TARGET_SVE2p1_OR_SME2")])
 
 (define_int_iterator SVE2_INT_SHIFT_INSERT [UNSPEC_SLI UNSPEC_SRI])
@@ -4114,10 +4209,12 @@
 				    UNSPEC_CDOT180
 				    UNSPEC_CDOT270])
 
-(define_int_iterator SVE2_INT_ADD_BINARY_LONG [UNSPEC_SABDLB
+(define_int_iterator SVE2_INT_ADD_BINARY_LONG [UNSPEC_SABAL
+					       UNSPEC_SABDLB
 					       UNSPEC_SABDLT
 					       UNSPEC_SMULLB
 					       UNSPEC_SMULLT
+					       UNSPEC_UABAL
 					       UNSPEC_UABDLB
 					       UNSPEC_UABDLT
 					       UNSPEC_UMULLB
@@ -4263,6 +4360,13 @@
 				   UNSPEC_SME_UMOPA UNSPEC_SME_UMOPS])
 
 (define_int_iterator SME_FP_MOP [UNSPEC_SME_FMOPA UNSPEC_SME_FMOPS])
+
+(define_int_iterator SME_FP_MOP4 [UNSPEC_SME_FMOP4A UNSPEC_SME_FMOP4S])
+(define_int_iterator SME_FP8_MOP4 [UNSPEC_SME_FMOP4A])
+(define_int_iterator SME_INT_MOP4 [UNSPEC_SME_UMOP4A UNSPEC_SME_UMOP4S
+				   UNSPEC_SME_SMOP4A UNSPEC_SME_SMOP4S
+				   UNSPEC_SME_SUMOP4A UNSPEC_SME_SUMOP4S
+				   UNSPEC_SME_USMOP4A UNSPEC_SME_USMOP4S])
 
 (define_int_iterator SME2_BMOP [UNSPEC_SME_BMOPA UNSPEC_SME_BMOPS])
 
@@ -4455,6 +4559,8 @@
 			(UNSPEC_SME_FMLA "fmla")
 			(UNSPEC_SME_FMLAL "fmlal")
 			(UNSPEC_SME_FMLS "fmls")
+			(UNSPEC_SME_FMOP4A "fmop4a")
+			(UNSPEC_SME_FMOP4S "fmop4s")
 			(UNSPEC_SME_FMOPA "fmopa")
 			(UNSPEC_SME_FMOPS "fmops")
 			(UNSPEC_SME_FSUB "fsub")
@@ -4468,6 +4574,8 @@
 			(UNSPEC_SME_SVDOT "svdot")
 			(UNSPEC_SME_SMLA "smla")
 			(UNSPEC_SME_SMLS "smls")
+			(UNSPEC_SME_SMOP4A "smop4a")
+			(UNSPEC_SME_SMOP4S "smop4s")
 			(UNSPEC_SME_SMOPA "smopa")
 			(UNSPEC_SME_SMOPS "smops")
 			(UNSPEC_SME_ST1_HOR "st1_hor")
@@ -4476,16 +4584,22 @@
 			(UNSPEC_SME_SUB_WRITE "sub_write")
 			(UNSPEC_SME_SUDOT "sudot")
 			(UNSPEC_SME_SUVDOT "suvdot")
+			(UNSPEC_SME_SUMOP4A "sumop4a")
+			(UNSPEC_SME_SUMOP4S "sumop4s")
 			(UNSPEC_SME_SUMOPA "sumopa")
 			(UNSPEC_SME_SUMOPS "sumops")
 			(UNSPEC_SME_UDOT "udot")
 			(UNSPEC_SME_UVDOT "uvdot")
 			(UNSPEC_SME_UMLA "umla")
 			(UNSPEC_SME_UMLS "umls")
+			(UNSPEC_SME_UMOP4A "umop4a")
+			(UNSPEC_SME_UMOP4S "umop4s")
 			(UNSPEC_SME_UMOPA "umopa")
 			(UNSPEC_SME_UMOPS "umops")
 			(UNSPEC_SME_USDOT "usdot")
 			(UNSPEC_SME_USVDOT "usvdot")
+			(UNSPEC_SME_USMOP4A "usmop4a")
+			(UNSPEC_SME_USMOP4S "usmop4s")
 			(UNSPEC_SME_USMOPA "usmopa")
 			(UNSPEC_SME_USMOPS "usmops")
 			(UNSPEC_SME_WRITE_HOR "write_hor")
@@ -4543,7 +4657,7 @@
 			(UNSPEC_COND_FRINTA "round")
 			(UNSPEC_COND_FRINTI "nearbyint")
 			(UNSPEC_COND_FRINTM "floor")
-			(UNSPEC_COND_FRINTN "frintn")
+			(UNSPEC_COND_FRINTN "roundeven")
 			(UNSPEC_COND_FRINTP "ceil")
 			(UNSPEC_COND_FRINTX "rint")
 			(UNSPEC_COND_FRINTZ "btrunc")
@@ -4902,6 +5016,7 @@
 			     (UNSPEC_RSQRTE "ursqrte")
 			     (UNSPEC_RSUBHNB "rsubhnb")
 			     (UNSPEC_RSUBHNT "rsubhnt")
+			     (UNSPEC_SABAL "sabal")
 			     (UNSPEC_SABDLB "sabdlb")
 			     (UNSPEC_SABDLT "sabdlt")
 			     (UNSPEC_SADALP "sadalp")
@@ -4939,6 +5054,8 @@
 			     (UNSPEC_SQRDMULH "sqrdmulh")
 			     (UNSPEC_SQRSHL "sqrshl")
 			     (UNSPEC_SQRSHR "sqrshr")
+			     (UNSPEC_SQSHRN "sqshrn")
+			     (UNSPEC_SQSHRUN "sqshrun")
 			     (UNSPEC_SQRSHRN "sqrshrn")
 			     (UNSPEC_SQRSHRNB "sqrshrnb")
 			     (UNSPEC_SQRSHRNT "sqrshrnt")
@@ -4971,6 +5088,7 @@
 			     (UNSPEC_SUBHNB "subhnb")
 			     (UNSPEC_SUBHNT "subhnt")
 			     (UNSPEC_SUQADD "suqadd")
+			     (UNSPEC_UABAL "uabal")
 			     (UNSPEC_UABDLB "uabdlb")
 			     (UNSPEC_UABDLT "uabdlt")
 			     (UNSPEC_UADALP "uadalp")
@@ -4989,6 +5107,7 @@
 			     (UNSPEC_UMULLT "umullt")
 			     (UNSPEC_UQRSHL "uqrshl")
 			     (UNSPEC_UQRSHR "uqrshr")
+			     (UNSPEC_UQSHRN "uqshrn")
 			     (UNSPEC_UQRSHRN "uqrshrn")
 			     (UNSPEC_UQRSHRNB "uqrshrnb")
 			     (UNSPEC_UQRSHRNT "uqrshrnt")
@@ -5021,10 +5140,12 @@
 				 (UNSPEC_URHADD "urhadd")
 				 (UNSPEC_URSHL "urshlr")])
 
-(define_int_attr sve_int_add_op [(UNSPEC_SABDLB "sabalb")
+(define_int_attr sve_int_add_op [(UNSPEC_SABAL "sabal")
+				 (UNSPEC_SABDLB "sabalb")
 				 (UNSPEC_SABDLT "sabalt")
 				 (UNSPEC_SMULLB "smlalb")
 				 (UNSPEC_SMULLT "smlalt")
+				 (UNSPEC_UABAL "uabal")
 				 (UNSPEC_UABDLB "uabalb")
 				 (UNSPEC_UABDLT "uabalt")
 				 (UNSPEC_UMULLB "umlalb")
@@ -5089,6 +5210,7 @@
 				  (UNSPEC_SBCLT "int_general")
 				  (UNSPEC_SQRDMLAH "int_mul")
 				  (UNSPEC_SQRDMLSH "int_mul")
+				  (UNSPEC_SABAL "int_general")
 				  (UNSPEC_SABDLB "int_general")
 				  (UNSPEC_SABDLT "int_general")
 				  (UNSPEC_SADDLB "int_general")
@@ -5103,6 +5225,7 @@
 				  (UNSPEC_SSUBLBT "int_general")
 				  (UNSPEC_SSUBLT "int_general")
 				  (UNSPEC_SSUBLTB "int_general")
+				  (UNSPEC_UABAL "int_general")
 				  (UNSPEC_UABDLB "int_general")
 				  (UNSPEC_UABDLT "int_general")
 				  (UNSPEC_UADDLB "int_general")

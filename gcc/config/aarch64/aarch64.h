@@ -295,6 +295,8 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 			    && (AARCH64_HAVE_ISA (SSVE_AES) \
 				|| TARGET_NON_STREAMING))
 
+#define TARGET_SVE_AES2 (TARGET_SVE_AES && AARCH64_HAVE_ISA (SVE_AES2))
+
 /* SVE BITPERM instructions, enabled through +sve-bitperm+sve2 for non-streaming
    and +ssve-bitperm for streaming.  */
 #define TARGET_SVE_BITPERM (AARCH64_HAVE_ISA (SVE_BITPERM) \
@@ -317,6 +319,9 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 
 /* SVE2p2 instructions, enabled through +sve2p2.  */
 #define TARGET_SVE2p2 AARCH64_HAVE_ISA (SVE2p2)
+
+/* SVE2p3 instructions, enabled through +sve2p3.  */
+#define TARGET_SVE2p3 AARCH64_HAVE_ISA (SVE2p3)
 
 /* SME instructions, enabled through +sme.  Note that this does not
    imply anything about the state of PSTATE.SM; instructions that require
@@ -351,12 +356,17 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* SME2p2 instructions, enabled through +sme2p2.  */
 #define TARGET_SME2p2 AARCH64_HAVE_ISA (SME2p2)
 
+/* SME2p3 instructions, enabled through +sme2p3.  */
+#define TARGET_SME2p3 AARCH64_HAVE_ISA (SME2p3)
+
 /* Same with streaming mode enabled.  */
 #define TARGET_STREAMING_SME2 (TARGET_STREAMING && TARGET_SME2)
 
 #define TARGET_STREAMING_SME2p1 (TARGET_STREAMING && AARCH64_HAVE_ISA (SME2p1))
 
 #define TARGET_STREAMING_SME2p2 (TARGET_STREAMING && AARCH64_HAVE_ISA (SME2p2))
+
+#define TARGET_STREAMING_SME2p3 (TARGET_STREAMING && AARCH64_HAVE_ISA (SME2p3))
 
 #define TARGET_SME_B16B16 AARCH64_HAVE_ISA (SME_B16B16)
 
@@ -427,6 +437,8 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 #define TARGET_F8F16MM (AARCH64_HAVE_ISA (F8F16MM))
 /* SVE_F16F32MM instructions, enabled through +sve-f16f32mm.  */
 #define TARGET_SVE_F16F32MM (AARCH64_HAVE_ISA (SVE_F16F32MM))
+/* F16F32DOT instructions enabled through +f16f32dot.  */
+#define TARGET_F16F32DOT (AARCH64_HAVE_ISA (F16F32DOT))
 
 /* Make sure this is always defined so we don't have to check for ifdefs
    but rather use normal ifs.  */
@@ -499,6 +511,8 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
    elements are enabled through +sme-lutv2.  */
 #define TARGET_SME_LUTv2 AARCH64_HAVE_ISA (SME_LUTv2)
 
+#define TARGET_SME_MOP4 (AARCH64_HAVE_ISA (SME_MOP4) && TARGET_STREAMING)
+
 /* Prefer different predicate registers for the output of a predicated
    operation over re-using an existing input predicate.  */
 #define TARGET_SVE_PRED_CLOBBER (TARGET_SVE \
@@ -531,6 +545,8 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* There's no need to check TARGET_SME for streaming or streaming-compatible
    functions, since streaming mode itself implies SME.  */
 #define TARGET_SVE2p1_OR_SME (TARGET_SVE2p1 || TARGET_STREAMING)
+
+#define TARGET_SVE2p3_OR_SME2p3 (TARGET_SVE2p3 || TARGET_SME2p3)
 
 #define TARGET_SVE2p1_OR_SME2 \
   ((TARGET_SVE2p1 || TARGET_STREAMING) \
@@ -915,6 +931,7 @@ enum reg_class
   POINTER_REGS,
   FP_LO8_REGS,
   FP_LO_REGS,
+  FP_HI_REGS,
   FP_REGS,
   POINTER_AND_FP_REGS,
   PR_LO_REGS,
@@ -942,6 +959,7 @@ enum reg_class
   "POINTER_REGS",				\
   "FP_LO8_REGS",				\
   "FP_LO_REGS",					\
+  "FP_HI_REGS",					\
   "FP_REGS",					\
   "POINTER_AND_FP_REGS",			\
   "PR_LO_REGS",					\
@@ -966,6 +984,7 @@ enum reg_class
   { 0xffffffff, 0x00000000, 0x00000003 },	/* POINTER_REGS */	\
   { 0x00000000, 0x000000ff, 0x00000000 },       /* FP_LO8_REGS  */	\
   { 0x00000000, 0x0000ffff, 0x00000000 },       /* FP_LO_REGS  */	\
+  { 0x00000000, 0xffff0000, 0x00000000 },       /* FP_HI_REGS */	\
   { 0x00000000, 0xffffffff, 0x00000000 },       /* FP_REGS  */		\
   { 0xffffffff, 0xffffffff, 0x00000003 },	/* POINTER_AND_FP_REGS */\
   { 0x00000000, 0x00000000, 0x00000ff0 },	/* PR_LO_REGS */	\

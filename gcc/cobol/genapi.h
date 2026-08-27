@@ -80,12 +80,12 @@ void parser_accept_command_line(const cbl_refer_t &tgt,
                                 cbl_label_t *not_error );
 void parser_accept_command_line_count( const cbl_refer_t &tgt );
 
-void parser_accept_date_yymmdd( cbl_field_t *tgt );
-void parser_accept_date_yyyymmdd( cbl_field_t *tgt );
-void parser_accept_date_yyddd( cbl_field_t *tgt );
-void parser_accept_date_yyyyddd( cbl_field_t *tgt );
-void parser_accept_date_dow( cbl_field_t *tgt );
-void parser_accept_date_hhmmssff( cbl_field_t *tgt );
+void parser_accept_date_yymmdd( const cbl_refer_t& tgt );
+void parser_accept_date_yyyymmdd( const cbl_refer_t& tgt );
+void parser_accept_date_yyddd( const cbl_refer_t& tgt );
+void parser_accept_date_yyyyddd( const cbl_refer_t& tgt );
+void parser_accept_date_dow( const cbl_refer_t& tgt );
+void parser_accept_date_hhmmssff( const cbl_refer_t& tgt );
 
 void
 parser_alphabet( const cbl_alphabet_t *alphabet );
@@ -203,6 +203,18 @@ void
 parser_classify( struct cbl_field_t *tgt,
            const struct cbl_refer_t &srca,
                  enum                classify_t type );
+
+void
+parser_compute( cbl_refer_t *tgt,
+                const std::deque<rpn_t>& operations,
+                cbl_label_t *lbl );
+
+void
+parser_compute( std::vector<cbl_num_result_t>& results,
+                const std::deque<rpn_t>& operations,
+                cbl_label_t *on_error,
+                cbl_label_t *not_error,
+                cbl_label_t *compute_error);
 
 void
 parser_op( struct cbl_refer_t cref,

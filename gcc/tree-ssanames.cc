@@ -429,7 +429,7 @@ set_range_info (tree name, const vrange &r)
     {
       struct ptr_info_def *pi = get_ptr_info (name);
       // If R is nonnull and pi is not, set nonnull.
-      if (r.nonzero_p () && (!pi || pi->pt.null))
+      if (!r.contains_zero_p () && (!pi || pi->pt.null))
 	set_ptr_nonnull (name);
       else
 	return false;
@@ -927,6 +927,9 @@ reset_flow_sensitive_info (tree name)
     }
   else
     SSA_NAME_RANGE_INFO (name) = NULL;
+
+  // Clear range info in the current range query.
+  get_range_query (cfun)->reset_range_info (name);
 }
 
 /* Clear all flow sensitive data from all statements and PHI definitions

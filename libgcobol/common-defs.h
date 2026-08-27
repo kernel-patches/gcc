@@ -215,8 +215,8 @@ enum cbl_field_attr_t : uint64_t {
   refmod_e          =  0x0000040000, // Runtime; indicates a refmod is active
   based_e           =  0x0000080000, // pointer capacity, for ADDRESS OF or ALLOCATE
   any_length_e      =  0x0000100000, // inferred length of linkage in nested program
-  global_e          =  0x0000200000, // field has global scope
-  external_e        =  0x0000400000, // field has external scope
+  global_e          =  0x0000200000, // field is COBOL GLOBAL (not GCC global scope)
+  external_e        =  0x0000400000, // field is COBOL EXTERNAL (not GCC extern)
   blank_zero_e      =  0x0000800000, // BLANK WHEN ZERO
   // data division uses 2 low bits of high byte
   linkage_e         =  0x0001000000, // field is in linkage section
@@ -614,11 +614,15 @@ typedef std::vector<cbl_declarative_t> cbl_declaratives_t;
 
 class cbl_enabled_exceptions_t : protected std::set<cbl_enabled_exception_t>
 {
+  static void complain( ec_type_t ec );
+
   void apply( bool enabled, const cbl_enabled_exception_t& elem ) {
     if( ! enabled ) {
       erase(elem);
       return;
     }
+    complain( elem.ec );
+
     auto inserted = insert( elem );
     if( ! inserted.second ) {
       erase(inserted.first);

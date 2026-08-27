@@ -103,7 +103,7 @@ class irange;
    meant to be used for the construction of builtin functions.  They were only
    added because Fortran uses them for attributes of builtins.  */
 
-/* callback(1, 2) */
+/* callback_only (1, 2) */
 #define ECF_CB_1_2		  (1 << 17)
 
 /* Call argument flags.  */
@@ -602,6 +602,13 @@ enum omp_clause_code {
 
   /* OpenMP clause: uses_allocators.  */
   OMP_CLAUSE_USES_ALLOCATORS,
+
+  /* OpenMP clause: message (string-expr).
+     If the string expr is not null terminated, the length needs to be
+     stored in OMP_CLAUSE_MESSAGE_LEN.
+     Note that the 'severity' clause is handled as flag to 'message':
+     OMP_CLAUSE_MESSAGE_SEVERITY_WARN.  */
+  OMP_CLAUSE_MESSAGE
 };
 
 #undef DEFTREESTRUCT

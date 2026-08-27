@@ -256,16 +256,20 @@ is_cobol_charset( const char name[] ) {
 }
 
 bool
-in_procedure_division() {
-  return current_division == procedure_div_e;
+in_identification_division() {
+  return current_division == identification_div_e;
 }
 bool
 in_environment_division() {
   return current_division == environment_div_e;
 }
+bool
+in_procedure_division() {
+  return current_division == procedure_div_e;
+}
 
 static inline bool
-in_file_section(void) { return current_data_section == file_datasect_e; }
+in_file_section() { return current_data_section == file_datasect_e; }
 
 static cbl_refer_t *
 intrinsic_inconsistent_parameter( size_t n, cbl_refer_t *args );
@@ -592,11 +596,15 @@ struct arith_t {
   list<cbl_refer_t> A, B;
   cbl_refer_t remainder;
   cbl_label_t *on_error, *not_error;
+  struct locs_t {
+    cbl_loc_t A, B, tgts, remainder;
+  } locs;
 
   explicit arith_t( cbl_arith_format_t format )
     : format(format), on_error(NULL), not_error(NULL)
   {}
-  arith_t( cbl_arith_format_t format, refer_list_t * refers );
+  arith_t( const cbl_loc_t& loc,
+           cbl_arith_format_t format, refer_list_t * refers );
 
   bool corresponding() const { return format == corresponding_e; }
 
@@ -629,13 +637,189 @@ struct arith_t {
     }
     return "???";
   }
+
+  void numeric_ok() {
+    are_numeric(locs.A, A);
+    are_numeric(locs.B, B);
+    are_numeric(locs.tgts, tgts);
+    is_numeric(locs.remainder, cbl_num_result_t{prohibited_e,remainder});
+  }
+
+ protected:
+  static bool is_numeric( const cbl_loc_t& loc, const cbl_refer_t& r ) {
+    if( r.field && ! ::is_numeric(r.field) ) {
+      error_msg(loc, "%qs (%s) is not numeric",
+                nice_name_of(r.field),
+                cbl_field_type_name(r.field->type));
+      return false;
+    }
+    return true;
+  }
+  static bool is_numeric( const cbl_loc_t& loc, const cbl_num_result_t& res ) {
+    // only targets have rounding, and may be numeric-edited
+    bool edited = res.refer.field && res.refer.field->type == FldNumericEdited;
+    return edited || is_numeric( loc, res.refer );
+  }
+  template <typename T>
+  static bool are_numeric( const cbl_loc_t& loc, const T& args ) {
+    bool ok = true;
+    for (const auto& elem : args) {
+      ok = ok && is_numeric(loc, elem);
+    }
+    return ok;
+  }
 };
 
-static cbl_refer_t * ast_op( const cbl_loc_t& loc,
-                             cbl_refer_t *lhs, char op, cbl_refer_t *rhs );
+static void 
+ast_relop( const cbl_loc_t& loc, cbl_field_t *tgt,
+           cbl_refer_t lhs, relop_t op, cbl_refer_t rhs );
 
-static void ast_relop( const cbl_loc_t& loc, cbl_field_t *tgt,
-                       cbl_refer_t lhs, relop_t relop, cbl_refer_t rhs );
+
+/*
+ * Collect an RPN stack of operations.  The compute() member function calls
+ * parser_compute to processes the stack to a target.  Alternatively, the
+ * COMPUTE statement calls parser_compute with a list of one or more targets.
+ */
+struct ast_op_t : private std::stack<rpn_t>{  
+  cbl_label_t *lbl; // the COMPUTE error label
+ public:
+  ast_op_t() : lbl(nullptr) {}
+
+  cbl_refer_t * operator=( cbl_refer_t * term ) {
+    top() = rpn_t(*term);
+    return term;
+  }
+
+  static bool op_ok( const cbl_loc_t& loc, char op, const ast_op_t *rhs );
+
+  cbl_refer_t * expr( cbl_refer_t * term ) {
+    dbgmsg("ast_op_t::%s:%d: %s", __func__, __LINE__, field_str(term->field));
+    push( rpn_t(*term) );
+    return term;
+  }
+
+  ast_op_t&  push_op( char op, const ast_op_t& rhs = ast_op_t() ) {
+    c.insert( c.end(), rhs.c.begin(), rhs.c.end() );
+    push( rpn_t(op) );
+    rpn_dump(c);
+    return *this;
+  }
+
+  cbl_refer_t * compute( cbl_refer_t *tgt ) {
+    gcc_assert( ! empty() );
+    if( 1 < c.size() ) {
+      tgt = compute();
+    }
+    return tgt;
+  }
+  
+  cbl_refer_t * compute( ast_op_t *operand ) {
+    return c.size() == 1 ? &operand->top().term : compute();
+  }
+  
+  /*
+   * choose_intermediate_type is a functor that defaults to FldNumericBin5.  If
+   * while iterating over the operands it determines that one is FldFloat, or
+   * that the required digits exceeds the maximum, it selects FldFloat instead.
+   */
+  class choose_intermediate_type {
+    cbl_field_t output;
+    const cbl_field_t *operand;
+   public:
+    choose_intermediate_type() : output( FldNumericBin5,
+                                         (intermediate_e | signable_e),
+                                         {}, 0, "", {} )
+                               , operand(nullptr)
+    {
+      output.data.capacity(16);
+      output.data.digits   = MAX_FIXED_POINT_DIGITS;
+    }
+    choose_intermediate_type& select_highest( const rpn_t& rpn );
+    choose_intermediate_type& operator()( const rpn_t& rpn ) {
+      return select_highest(rpn);
+    }
+    cbl_field_t field() const { return output; }
+  };
+
+  cbl_field_t intermediate_type() const {
+    const auto& selected = std::for_each( c.rbegin(), c.rend(),
+                                          choose_intermediate_type() );
+    return selected.field();
+  }
+
+  const std::deque<rpn_t>& as_deque() const { return this->c; }
+  void reset() { c.clear(); }
+
+  void show( std::vector<cbl_num_result_t>& results ) {
+    if( yydebug ) {
+      int i=0;
+      for( const auto& result : results ) {
+        dbgmsg( "result %u: %s", i++, result.refer.str() );
+      }
+      rpn_dump(c);
+    }
+  }
+                
+  bool rpn_sanity_check() {
+    auto n = std::accumulate( c.rbegin(), c.rend(), 0,
+                              []( int n, const rpn_t& rpn ) {
+                                if( rpn.term.field ) return ++n;
+                                switch(rpn.op) {
+                                case '+': case '-':
+                                case '*': case '/': case '^': return --n;
+                                case '!': return n; // unuary minus
+                                }
+                                dbgmsg("rpn_sanity_check: n=%d, neither field nor op", n);
+                                gcc_unreachable();
+                              } );
+    if( n != 1 ) rpn_dump(c);
+    dbgmsg("rpn_sanity_check: n=%d, %s", n, n == 1? "ok" : "bzzt");
+    return n == 1;
+  }
+
+ protected:
+  bool valid_size() const {
+    return 2 < c.size() || top().op == '!';
+  }
+  cbl_refer_t * compute() {
+    gcc_assert( ! empty() );
+    gcc_assert( 1 < c.size() );
+
+    const cbl_field_t& skel = intermediate_type();
+    cbl_refer_t *tgt = new_reference_like(skel);
+    dbgmsg("ast_op_t::%s:%d: target %s capacity %u", __func__, __LINE__,
+           cbl_field_type_str(tgt->field->type), tgt->field->data.capacity());
+    if( !valid_size() ) {
+      yydebug = 1;
+      rpn_dump(c);
+    }
+    // We have at least 3 operands, or the first operator is unary negation.
+    gcc_assert( valid_size() );
+    rpn_dump(c); // for now
+    rpn_sanity_check();
+    
+    parser_compute(tgt, c, lbl);
+    
+    this->c.clear();
+    dbgmsg("ast_op_t::%s:%d: output %s %s capacity %u", __func__, __LINE__,
+           cbl_field_type_str(tgt->field->type), nice_name_of(tgt->field), 
+           tgt->field->data.capacity());
+    return tgt;
+  }
+
+  static void rpn_dump( const std::deque<rpn_t>& c ) {
+    dbgmsg("ast_op_t::%s:%d: %lu members", __func__, __LINE__, (unsigned long)c.size());
+    for( const auto& operand : c ) {
+      auto f = operand.term.field;
+      if( f ) {
+        auto type = cbl_field_type_str(f->type);
+        dbgmsg("ast_op_t::%s:%d: %-20s %s", __func__, __LINE__, type, field_str(f));
+      } else {
+        dbgmsg("ast_op_t::%s:%d: %c", __func__, __LINE__, operand.op);
+      }
+    }
+  }
+};
 
 static void ast_add( arith_t *arith );
 static bool ast_subtract( arith_t *arith );
@@ -1086,9 +1270,17 @@ struct refer_list_t {
       delete refer;
     }
   }
+  // the source is not always to be deleted
+  explicit refer_list_t( const cbl_refer_t& refer ) {
+    refers.push_back(refer);
+  }
   refer_list_t * push_back( cbl_refer_t *refer ) {
     refers.push_back(*refer);
     delete refer;
+    return this;
+  }
+  refer_list_t * push_back( const cbl_refer_t& refer ) {
+    refers.push_back(refer);
     return this;
   }
   inline list<cbl_refer_t>& items() { return  refers; }
@@ -1378,9 +1570,15 @@ static  list<cbl_refer_t> lhs;
 
 struct vargs_t {
   std::list<cbl_refer_t> args;
-    vargs_t() {}
-    explicit vargs_t( struct cbl_refer_t *p ) { args.push_back(*p); delete p; }
-    void push_back( cbl_refer_t *p ) { args.push_back(*p); delete p; }
+  vargs_t() {}
+  explicit vargs_t( struct cbl_refer_t *p ) { args.push_back(*p); delete p; }
+  void push_back( cbl_refer_t *p ) { args.push_back(*p); delete p; }
+  void dump() const {
+    int i=0;
+    for( auto arg : args ) {
+      dbgmsg("\t%3d: %s", i++, arg.str());
+    }
+  }
 };
 
 static const char intermediate[] = ":intermediate";
@@ -2982,8 +3180,6 @@ valid_redefine( const cbl_loc_t& loc,
             orig->level_str(), orig->name);
     return false;
   }
-  // We don't know about the redefining group until it's completely defined.
-
   /*
    * 8) The storage area required for the subject of the entry
    * shall not be larger than the storage area required for the
@@ -2996,13 +3192,15 @@ valid_redefine( const cbl_loc_t& loc,
       if( orig->level > 1 || orig->has_attr(external_e) ) {
         dbgmsg( "size error orig:  %s", field_str(orig) );
         dbgmsg( "size error redef: %s", field_str(field) );
-        error_msg(loc, "%s (%s size %u) larger than REDEFINES %s (%s size %u)",
-                  field->name,
-                  3 + cbl_field_type_str(field->type),
-                  field->size()/field->codeset.stride(),
-                  orig->name,
-                  3 + cbl_field_type_str(orig->type),
-                  orig->size()/field->codeset.stride() );
+        if( ! dialect_ok(loc, IsoRedefinesGrow, "REDEFINES larger") ) {
+          error_msg(loc, "%qs (%s size %u) larger than REDEFINES %qs (%s size %u)",
+                    field->name,
+                    3 + cbl_field_type_str(field->type),
+                    field->size()/field->codeset.stride(),
+                    orig->name,
+                    3 + cbl_field_type_str(orig->type),
+                    orig->size()/field->codeset.stride() );
+        }
       }
     }
   }
@@ -3030,6 +3228,19 @@ valid_redefine( const cbl_loc_t& loc,
   }
 
   return true;
+}
+
+void
+by_content_ok( const cbl_loc_t& loc,
+               const std::list<cbl_ffi_arg_t>& args ) {
+  for( const auto& arg : args ) {
+    if( arg.by_content() && arg.field()->has_attr(intermediate_e) ) {
+      auto e = symbol_program( 0, arg.field()->name, true ); // seek prototoype
+      if( ! e ) {
+        dialect_ok(loc, IbmContentExpr, "BY CONTENT expression");
+      }
+    }
+  }
 }
 
 static cbl_field_t *
@@ -3376,6 +3587,9 @@ set_real_from_capacity( const cbl_loc_t& loc,
     error_msg(loc, "cannot define %s via self-reference", field->name);
     return;
   }
+  if( field->type == FldGroup ) {
+    symbol_field_capacity_set(field);
+  }
   field->data.set_real_from_capacity(r);
 }
 
@@ -3433,11 +3647,11 @@ parser_move_carefully( const char */*F*/, int /*L*/,
 
     if( is_index ) {
       if( tgt.field->type != FldIndex && src.field->type != FldIndex) {
-        error_msg(src.loc, "invalid SET %qs (%s) TO %qs (%s): not a field index",
-                  name_of(tgt.field), 3 + cbl_field_type_str(tgt.field->type),
-                  name_of(src.field), 3 + cbl_field_type_str(src.field->type));
-        delete tgt_list;
-        return false;
+        auto msg = xasprintf("invalid SET %s (%s) TO %s (%s): not a field index",
+                             name_of(tgt.field), cbl_field_type_name(tgt.field->type),
+                             name_of(src.field), cbl_field_type_name(src.field->type));
+        dialect_ok(src.loc, MfSetNumeric, msg);
+        free(msg);
       }
     } else {
       if( ! valid_move( tgt.field, src.field ) ) {
@@ -3446,8 +3660,8 @@ parser_move_carefully( const char */*F*/, int /*L*/,
           dialect_ok(src.loc, MfMovePointer, "MOVE POINTER");
         } else {
           error_msg(src.loc, "cannot MOVE %qs (%s) TO %qs (%s)",
-                    nice_name_of(src.field), 3 + cbl_field_type_str(src.field->type),
-                    nice_name_of(tgt.field), 3 + cbl_field_type_str(tgt.field->type));
+                    nice_name_of(src.field), cbl_field_type_name(src.field->type),
+                    nice_name_of(tgt.field), cbl_field_type_name(tgt.field->type));
         }
       }
     }
@@ -3680,6 +3894,7 @@ procedure_division_ready( const cbl_loc_t& loc, cbl_field_t *returning, ffi_args
   // Apply ECs from the command line
   std::list<exception_turn_t>& exception_turns = current.pending_exceptions();
   for( const auto& exception_turn : exception_turns) {
+    //// exception_turn.dump();
     apply_cdf_turn(exception_turn);
   }
   exception_turns.clear();

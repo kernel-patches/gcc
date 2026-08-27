@@ -25,6 +25,7 @@ namespace aarch64_acle
   namespace functions
   {
     extern const function_base *const svaba;
+    extern const function_base *const svabal;
     extern const function_base *const svabalb;
     extern const function_base *const svabalt;
     extern const function_base *const svabdlb;
@@ -42,7 +43,11 @@ namespace aarch64_acle
     extern const function_base *const svaddwb;
     extern const function_base *const svaddwt;
     extern const function_base *const svaesd;
+    extern const function_base *const svaesd_lane;
+    extern const function_base *const svaesdimc_lane;
     extern const function_base *const svaese;
+    extern const function_base *const svaese_lane;
+    extern const function_base *const svaesemc_lane;
     extern const function_base *const svaesimc;
     extern const function_base *const svaesmc;
     extern const function_base *const svandqv;
@@ -70,6 +75,8 @@ namespace aarch64_acle
     extern const function_base *const svcvtlt1;
     extern const function_base *const svcvtlt2;
     extern const function_base *const svcvtn;
+    extern const function_base *const svcvtt;
+    extern const function_base *const svcvtb;
     extern const function_base *const svcvtnb;
     extern const function_base *const svcvtnt;
     extern const function_base *const svcvtx;
@@ -136,13 +143,16 @@ namespace aarch64_acle
     extern const function_base *const svnmatch;
     extern const function_base *const svorqv;
     extern const function_base *const svpext_lane;
+    extern const function_base *const svpmlal_pair;
     extern const function_base *const svpmov;
     extern const function_base *const svpmov_lane;
     extern const function_base *const svpmul;
+    extern const function_base *const svpmull_pair;
     extern const function_base *const svpmullb;
     extern const function_base *const svpmullb_pair;
     extern const function_base *const svpmullt;
     extern const function_base *const svpmullt_pair;
+    extern const function_base *const svpmlal_pair;
     extern const function_base *const svpsel_lane;
     extern const function_base *const svqabs;
     extern const function_base *const svqcadd;
@@ -175,6 +185,8 @@ namespace aarch64_acle
     extern const function_base *const svqrdmulh_lane;
     extern const function_base *const svqrshl;
     extern const function_base *const svqrshr;
+    extern const function_base *const svqshrn;
+    extern const function_base *const svqshrun;
     extern const function_base *const svqrshrn;
     extern const function_base *const svqrshrnb;
     extern const function_base *const svqrshrnt;

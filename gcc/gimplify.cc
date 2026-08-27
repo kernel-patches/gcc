@@ -3361,6 +3361,13 @@ recalculate_side_effects (tree t)
       /* No side-effects.  */
       return;
 
+    case tcc_declaration:
+      /* These can have side-effects if TREE_THIS_VOLATILE,
+	 but those should be set elsewhere, not in
+	 recalculate_side_effects.  Can be triggered e.g. if
+	 a comparison is folded into one of its operands.  */
+      return;
+
     default:
       if (code == SSA_NAME)
 	/* No side-effects.  */
@@ -14829,7 +14836,23 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 	case OMP_CLAUSE_WORKER:
 	case OMP_CLAUSE_VECTOR:
 	  if (OMP_CLAUSE_OPERAND (c, 0)
-	      && !is_gimple_min_invariant (OMP_CLAUSE_OPERAND (c, 0)))
+	      && TREE_CODE (OMP_CLAUSE_OPERAND (c, 0)) == TREE_LIST)
+	    {
+	      for (tree t = OMP_CLAUSE_OPERAND (c, 0); t; t = TREE_CHAIN (t))
+		if (!is_gimple_min_invariant (TREE_VALUE (t)))
+		  {
+		    if (error_operand_p (TREE_VALUE (t)))
+		      {
+			remove = true;
+			break;
+		      }
+		    TREE_VALUE (t)
+		      = get_initialized_tmp_var (TREE_VALUE (t), pre_p,
+						 NULL, true);
+		  }
+	    }
+	  else if (OMP_CLAUSE_OPERAND (c, 0)
+		   && !is_gimple_min_invariant (OMP_CLAUSE_OPERAND (c, 0)))
 	    {
 	      if (error_operand_p (OMP_CLAUSE_OPERAND (c, 0)))
 		{
@@ -14877,6 +14900,7 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 	case OMP_CLAUSE_SEQ:
 	case OMP_CLAUSE_INDEPENDENT:
 	case OMP_CLAUSE_MERGEABLE:
+	case OMP_CLAUSE_MESSAGE:
 	case OMP_CLAUSE_PROC_BIND:
 	case OMP_CLAUSE_SAFELEN:
 	case OMP_CLAUSE_SIMDLEN:
@@ -16432,6 +16456,7 @@ end_adjust_omp_map_clause:
 	case OMP_CLAUSE_EXCLUSIVE:
 	case OMP_CLAUSE_USES_ALLOCATORS:
 	case OMP_CLAUSE_DEVICE_TYPE:
+	case OMP_CLAUSE_MESSAGE:
 	  break;
 
 	case OMP_CLAUSE_NOHOST:
@@ -19000,15 +19025,8 @@ gimplify_omp_workshare (tree *expr_p, gimple_seq *pre_p)
 	    tree err = builtin_decl_explicit (BUILT_IN_GOMP_ERROR);
 	    const char *str = "Executing device-type 'nohost' target region "
 			      "on the host";
-	    const int len = strlen (str) + 1;
-	    tree msg = build_string (len, str);
-	    TREE_TYPE (msg) = build_array_type_nelts (char_type_node, len);
-	    TREE_READONLY (msg) = 1;
-	    TREE_STATIC (msg) = 1;
-	    msg = build_fold_addr_expr (msg);
-	    tree msglen = fold_build2 (MINUS_EXPR, size_type_node,
-				       build_all_ones_cst (size_type_node),
-				       size_one_node);
+	    tree msg = build_string_literal (strlen (str) + 1, str);
+	    tree msglen = build_int_cst (size_type_node, -2);
 	    err = build_call_expr_loc (loc, err, 2, msg, msglen);
 	    tree l1 = create_artificial_label (UNKNOWN_LOCATION);
 	    tree l2 = create_artificial_label (UNKNOWN_LOCATION);

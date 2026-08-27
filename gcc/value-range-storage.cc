@@ -507,15 +507,29 @@ debug (const irange_storage &storage)
 // frange_storage implementation
 //============================================================================
 
+// Return the number of bytes to allocate for an frange_storage holding R.
+
+size_t
+frange_storage::size (const frange &r)
+{
+  return sizeof (frange_storage) + (r.num_pairs () - 1) * sizeof (frange_pair);
+}
+
 // Allocate a new frange_storage object initialized to R.
 
 frange_storage *
 frange_storage::alloc (vrange_internal_alloc &allocator, const frange &r)
 {
-  size_t size = sizeof (frange_storage);
-  frange_storage *p = static_cast <frange_storage *> (allocator.alloc (size));
+  frange_storage *p
+    = static_cast <frange_storage *> (allocator.alloc (size (r)));
   new (p) frange_storage (r);
   return p;
+}
+
+frange_storage::frange_storage (const frange &r)
+  : vrange_storage (VR_FRANGE), m_max_ranges (r.num_pairs ())
+{
+  set_frange (r);
 }
 
 void
@@ -524,8 +538,9 @@ frange_storage::set_frange (const frange &r)
   gcc_checking_assert (fits_p (r));
 
   m_kind = r.m_kind;
-  m_min = r.m_min;
-  m_max = r.m_max;
+  m_num_ranges = r.m_num_ranges;
+  for (unsigned i = 0; i < r.m_num_ranges; ++i)
+    m_pairs[i] = r.m_pairs[i];
   m_pos_nan = r.m_pos_nan;
   m_neg_nan = r.m_neg_nan;
 }
@@ -554,14 +569,19 @@ frange_storage::get_frange (frange &r, tree type) const
       r.set_undefined ();
       return;
     }
+  if (m_kind == VR_VARYING)
+    {
+      r.set_varying (type);
+      return;
+    }
 
-  // We use the constructor to create the new range instead of writing
-  // out the bits into the frange directly, because the global range
-  // being read may be being inlined into a function with different
-  // restrictions as when it was originally written.  We want to make
-  // sure the resulting range is canonicalized correctly for the new
-  // consumer.
-  r = frange (type, m_min, m_max, m_kind);
+  // Rebuild piecewise, like irange_storage::get_irange().
+  r.set_undefined ();
+  for (unsigned i = 0; i < m_num_ranges; ++i)
+    {
+      frange tmp (type, m_pairs[i].min, m_pairs[i].max, m_kind);
+      r.union_ (tmp);
+    }
 
   // The constructor will set the NAN bits for HONOR_NANS, but we must
   // make sure to set the NAN sign if known.
@@ -583,9 +603,9 @@ frange_storage::equal_p (const frange &r) const
 }
 
 bool
-frange_storage::fits_p (const frange &) const
+frange_storage::fits_p (const frange &r) const
 {
-  return true;
+  return m_max_ranges >= r.num_pairs ();
 }
 
 //============================================================================
@@ -626,6 +646,23 @@ prange_storage::prange_storage (const prange &r) : vrange_storage (VR_PRANGE)
   set_prange (r);
 }
 
+// Return TRUE if R is exactly the nonzero set [1, MAX], which prange_storage
+// encodes compactly as PR_NONZERO.
+//
+// Compare the bounds against a fresh set_nonzero () rather than using
+// prange::operator==, because operator== also compares the bitmask and
+// points-to info, which are stored separately here, so a non-null pointer that
+// also carries e.g. an alignment bitmask still belongs in PR_NONZERO.
+
+static inline bool
+nonzero_range_p (const prange &r)
+{
+  prange nonzero (r.type ());
+  nonzero.set_nonzero (r.type ());
+  return (r.lower_bound () == nonzero.lower_bound ()
+	  && r.upper_bound () == nonzero.upper_bound ());
+}
+
 // Return the prange_kind for range R, and the number of words of storage
 // it requires in NUM_WORDS.
 
@@ -644,7 +681,7 @@ prange_storage::prange_format (const prange &r, unsigned &num_words)
 
   enum prange_kind kind = PR_NONZERO;
 
-  if (!r.nonzero_p ())
+  if (!nonzero_range_p (r))
     {
       prange tmp (r.type ());
       if (r.lower_bound () == tmp.lower_bound ()
@@ -783,7 +820,7 @@ prange_storage::equal_p (const prange &r) const
 	return r.zero_p ();
 
       case PR_NONZERO:
-	if (!r.nonzero_p ())
+	if (!nonzero_range_p (r))
 	  return false;
 	break;
 

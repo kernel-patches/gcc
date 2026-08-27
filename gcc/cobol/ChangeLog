@@ -1,3 +1,563 @@
+2026-08-26  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/126611
+	* parse.y: Modify COBOL WORDS grammar.
+	* scan.l: Add support for $DISPLAY.
+	* util.cc: Add Boolean bit-operators to reserved-word list.
+
+2026-08-26  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/126611
+	* cdf.y: Renumber tokens.
+	* parse.y: Add tokens from ISO CDF reserved word list.
+	* scan.l: Same, and reposition.
+	* token_names.h: Regenerate.
+
+2026-08-25  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (enum cbl_diag_id_t): Add ParDynamicCall.
+	* cdf-copy.cc (verify_bounds): Use diagnostic quotes.
+	* cobol1.cc (cobol_langhook_handle_option): Handle new option.
+	* gcobol.1: Document new option.
+	* lang-specs.h: Add new option to spec string.
+	* lang.opt: Add Wdynamic-call option.
+	* messages.cc (cbl_diagnostic_kind): Same.
+	(cobol_warning): Use diagnostics::kind::note for option.
+	* parse.y: Use new option.
+
+2026-08-25  James K. Lowden  <jklowden@cobolworx.com>
+
+	* lexio.cc (find_filter): Remove verbose_file_reader.
+	(cdftext::open_input): Remove reliance on GCOBOL_TEMPDIR.
+	* messages.cc (cobol_warning): Use diagnostics::kind::note.
+
+2026-08-25  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/126492
+	* cobol1.cc (enable_exceptions): Use diagnostic quotes.
+	(complain): New function honors EcUnknownW.
+	* exceptg.h (class exception_turn_t): Remove unconditional diagnostic.
+	* parse_ante.h (procedure_division_ready): Whitespace.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/123890
+	* Make-lang.in: Remove unneeded message suppression for scan.l.
+	* parse.y: SORT uses tableish, not tableref.
+	* scan.l: Use usual Procedure Division name recognition for SORT.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	* gcobol.1: Add new section.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse.y: Supply locations to arith_t object.
+	* parse_ante.h (struct arith_t): Add and use numeric_ok and
+	helper functions.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	* genapi.cc (parser_sleep): Use RETURN_IF_PARSE_ONLY.
+	* genmath.cc (parser_compute): Same.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (cbl_diagnostic_ignored): Declare function.
+	* lexio.cc (cdftext::free_form_reference_format):
+	Honor -Wno-stray-indicator.
+	* messages.cc (cbl_diagnostic_ignored): New function.
+	* parse.y: Persist in the face of lexio errors.
+	* parse_ante.h (parser_move_carefully): Use cbl_field_type_name.
+	* scan_post.h (start_condition_str): Add fd_state.
+	* util.cc (cbl_field_type_str): Report name as "???" if confused.
+	(valid_move): Allow MOVE literal to numeric-edited.
+	(ERROR_MSG_BODY): Remove macro.
+	(error_msg): Use old macro body directly in function.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse.y: Accept device name as filename in SELECT.
+	* scan.l: Remove CR exclusion and rename STRING to STRING2.
+
+2026-08-24  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (enum cbl_diag_id_t): Add IbmContentExpr.
+	* cobol1.cc (cobol_langhook_handle_option): Process OPT_Wcontent_expr.
+	* gcobol.1: Document Wno-content-expr and recent Wno-redefines-grow.
+	* genapi.cc (create_and_call): Remove unqualified diagnostic.
+	* lang-specs.h: Add option to spec string.
+	* lang.opt: Define Wno-content-expr.
+	* messages.cc: Add IbmContentExpr to ibm dialect.
+	* parse.y: Verify BY CONTENT with by_content_ok().
+	* parse_ante.h (by_content_ok): New function.
+	* scan.l: Reduce overambitious TITLE scan.
+	* symbols.h (struct cbl_ffi_arg_t): Add by_content() for convenience.
+
+2026-08-21  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (enum cbl_diag_id_t): Define IsoRedefinesGrow.
+	* cobol1.cc (cobol_langhook_handle_option): Handle Wredefines-grow.
+	* lang-specs.h: Same.
+	* lang.opt: Same.
+	* lexio.cc (preprocess_filter_add): Use xstrdup, not std::vector.
+	* messages.cc: Quell Wredefines-grow with -dialect ibm.
+	* parse_ante.h (valid_redefine): Conditional message.
+
+2026-08-19  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse_ante.h (in_procedure_division): Position alphabetically.
+	(in_identification_division): New function.
+	(in_file_section): Remove void argument declaration.
+	* scan.l: Add TITLE pattern and accept as NAME outside ID Division.
+	* scan_ante.h (in_procedure_division): Remove void argument declaration.
+	(in_environment_division): Same.
+	(in_identification_division): Declare new function.
+
+2026-08-19  Robert Dubner  <rdubner@symas.com>
+	    James K. Lowden  <jklowden@cobolworx.com>
+
+	* cdf.y: Revise debug message and token numbers.  Remove USED_TOKEN
+	macro, introduce SAVE_LOOKAHEAD.
+	* gengen.cc (class DECL_COUNTER): Add VAR_DECL creation counter.
+	(gg_define_from_declaration): Likewise.
+	* parse.y: Move named XML tokens to first token list and recognize
+	FILLER.
+	* scan.l: Eliminate scan used for debug message.
+	* scan_ante.h (level_found): Remove function.
+	(PUSH_CDF_STATE): Push cdf_state SC at most once.
+	(trim_location): Less verbose debug message.
+	(symbol_lower_name): New function.
+	(symbol_exists): Use symbol_lower_name and accept override parameter.
+	(scanner_cache_update):  New function.
+	(unquote):  New function for string literals.
+	* scan_post.h (start_condition_str):  Update with new SC names.
+	(run_cdf): Do not pop from cdf_state unconditionally.
+	(RECENT): Remove macro.
+	(same_end): Remove function.
+	(same_token): Same.
+	(next_token): Same.
+	(prelex): Use cdf::last_lexed and cdf::had_lookahead().
+	(yylex): Remove one early return.
+	* symbols.cc (symbol_program): Use new map of programs.
+	(symbol_function_impl): Use new map of functions.
+	(symbol_temporaries): Use new list of alphanumerics.
+	(symbol_temporary_alphanumerics): New class to house alphanumerics
+	list.
+	(symbol_program_add): Populate new maps.
+	* token_names.h: Regenerate.
+	* util.cc (cdf_field_add):  Use scanner_cache_update.
+
+2026-08-17  Robert Dubner  <rdubner@symas.com>
+
+	* cdf.y: Revert changes.
+	* lexio.cc (skip_quoted_literal): Likewise.
+	(remove_inline_comment): Likewise.
+	* parse.y: Likewise.
+	* scan.l: Likewise.
+	* scan_ante.h (skip_string): Likewise.
+	(yyinput): Likewise.
+	(yyunput): Likewise.
+	(is_refmod): Likewise.
+	* token_names.h: Likewise.
+
+2026-08-14  Robert Dubner  <rdubner@symas.com>
+
+	* move.cc (mh_binary_to_numdisp): Pass intermediates to __gg__move.
+	(mh_binary_to_packed): Likewise.
+	(mh_to_binary): Likewise.
+	(copy_intermediate_into_place): Eliminate.
+
+2026-08-12  Robert Dubner  <rdubner@symas.com>
+
+	* genapi.cc (get_level_88_domain): Expanded comment.
+	(create_and_call): Handle CALL USING BY VALUE ZERO.
+	* structs.cc: Updated comment.
+	* util.cc: Prevent segfault when the procedures_t(size_t)
+	constructor is invoked with exactly 512 symbols.
+
+2026-08-10  Robert Dubner  <rdubner@symas.com>
+
+	* gcobol.1: Documentation
+	* genapi.cc (create_cblc_string_variable): Use new vs_global enum
+	instead of old vs_external.
+	(SET_VAR_DECL): Use new vs_extern instead of vs_external_reference.
+	(parser_division): Likewise.
+	(parser_file_add): Use vs_weak instead of vs_external.
+	(psa_global): Likewise.
+	(psa_new_var_decl): Likewise; Use new naming convention.
+	(parser_symbol_add): Use vs_common instead of vs_external.
+	* gengen.cc (gg_declare_variable): Clean up VAR_DECL attibute
+	assignments; use new variable_scope constants.
+	* gengen.h (enum gg_variable_scope_t): Update the enum constants.
+
+2026-08-07  Robert Dubner  <rdubner@symas.com>
+	    James K. Lowden  <jklowden@cobolworx.com>
+
+	* genapi.cc (gg_array_of_field_pointers): Modified to return a
+	pointer to the first element of the array.
+	(gg_array_of_uchar_p): Formatting.
+	(parser_sort): Use updated gg_array_of_field_pointers().
+	(parser_file_sort): Likewise.
+	(parser_file_merge): Likewise.
+	* genapi.h (parser_compute): New declarations.
+	* gengen.h (gg_array_of_field_pointers): Modified declaration.
+	* genmath.cc (parser_compute): New declarations.
+	* genutil.h (gg_array_of_uchar_p): New declaration.
+	* move.cc (mh_binary_to_numdisp): Use new __gg__prohibited()
+	routine.
+	(parser_move): Formatting.
+	(parser_move_multi): Formatting.
+	* parse.y: RPN support.
+	* parse_ante.h (ast_op): Likewise.
+	(ast_relop): Likewise.
+	(struct ast_op_t): Likewise.
+	(struct refer_list_t): Likewise.
+	(struct vargs_t): Likewise.
+	* symbols.h (struct rpn_t): Likewise.
+	(struct expr_t): Likewise.
+
+2026-08-07  Robert Dubner  <rdubner@symas.com>
+
+	* cdf.y: Changes in support of CDF parsing.
+	* compare.cc (total_digits_tree): Use gg_define_variable().
+	(alpha_compare_figconst): Likewise.
+	(alpha_compare): Likewise.
+	(numeric_alpha_compare): Likewise.
+	(addr_of_compare): Likewise.
+	(compare_class): Likewise.
+	* genapi.cc (create_cblc_string_variable): Formatting.
+	(initialize_variable_internal): Use gg_define_variable().
+	(enter_program_common): Likewise.
+	(parser_accept): Likewise.
+	(parser_display): Likewise.
+	(parser_exhibit): Likewise.
+	(parser_assign): Likewise.
+	(parser_xml_parse): Likewise.
+	(establish_using): Likewise.
+	(parser_division): Likewise.
+	(parser_file_open): Likewise.
+	(parser_file_delete_file): Likewise.
+	(inspect_tally): Likewise.
+	(inspect_replacing): Likewise.
+	(parser_unstring): Likewise.
+	(parser_string): Likewise.
+	(create_and_call): Likewise.
+	(hijack_for_development):  Likewise.
+	* gengen.cc (gg_declare_variable): Clean up comments.  Early return
+	when "already_defined".  Clean up VAR_DECL attributes.
+	(gg_define_variable): Clean up how gg_declare_variable is used.
+	(gg_define_volatile_variable): Eliminate.
+	(gg_define_bool): Eliminate.
+	(gg_define_char): Eliminate.
+	(gg_define_uchar): Eliminate.
+	(gg_define_int): Eliminate.
+	(gg_define_size_t): Eliminate.
+	(gg_define_int128): Eliminate.
+	(gg_define_char_star): Eliminate.
+	(gg_define_uchar_star): Eliminate.
+	(gg_define_void_star): Eliminate.
+	(gg_define_longdouble): Eliminate.
+	(gg_fprintf): Use gg_define_variable().
+	(gg_read): Likewise.
+	(gg_memdup): Likewise.
+	* gengen.h (enum gg_variable_scope_t): Eliminate vs_file.
+	(gg_define_variable): New overloaded declaration.
+	(gg_define_volatile_variable): Eliminate.
+	(gg_define_bool): Eliminate.
+	(gg_define_char): Eliminate.
+	(gg_define_uchar): Eliminate.
+	(gg_define_int): Eliminate.
+	(gg_define_size_t): Eliminate.
+	(gg_define_int128): Eliminate.
+	(gg_define_longdouble): Eliminate.
+	(gg_define_void_star): Eliminate.
+	(gg_define_char_star): Eliminate.
+	(gg_define_uchar_star): Eliminate.
+	(gg_get_address_of): Formatting.
+	* genmath.cc (set_up_compute_error_label): Use gg_define_variable().
+	(add_litN_to_numdisp): Likewise.
+	* lexio.cc (skip_quoted_literal): Eliminate.
+	(remove_inline_comment): Change the algorithm.
+	* parse.y: CDF processing changes.
+	* scan.l: Likewise.
+	* scan_ante.h (yyinput): Likewise.
+	(yyunput): Likewise.
+	(skip_string): Likewise.
+	(is_refmod): Likewise.
+	* show_parse.h (TRACE1_INDENT): Use gg_define_variable().
+	* structs.cc: Change comment.
+	* token_names.h: Updated for CDF changes.
+
+2026-08-04  Jakub Jelinek  <jakub@redhat.com>
+
+	* parse.y (selected_name): Use %<-dialect ibm%> instead of just
+	-dialect ibm.
+
+2026-08-03  James K. Lowden  <jklowden@cobolworx.com>
+
+	* lexio.cc (skip_quoted_literal): New function.
+	(remove_inline_comment): Use new function.
+
+2026-08-03  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse.y: Add OTHER as assign target.
+
+2026-08-03  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cdf.y: Update tokens.
+	* parse.y: Remove TITLE token.
+	* scan.l: Remove scanning for TITLE.
+	* token_names.h: Remove TITLE from token set.
+
+2026-08-03  James K. Lowden  <jklowden@cobolworx.com>
+
+	* scan.l: Remove pattern that potentially matches until EOF.
+	* scan_ante.h (skip_string): Recast in terms of input/unput.
+	(yyinput): Declare function.
+	(yyunput): Declare function.
+	(is_refmod): Recast in terms of input/unput.
+
+2026-08-03  Robert Dubner  <rdubner@symas.com>
+
+	PR cobol/119461
+	* genapi.cc (array_of_long_long): Renamed array_of_uint64().
+	(array_of_uint64): Likewise.
+	(parser_compile_ecs): Use array_of_uint64().
+	(parser_compile_dcls): Likewise.
+	(parser_file_add): Likewise.
+	(gg_array_of_file_pointers): Use new cblc_file_pp_type_node;
+	* gengen.cc (gg_get_structure_type_decl): Moved to structs.cc and
+	renamed.
+	* gengen.h (ULONGLONG): #define removed and replaced with UINT64.
+	(UINT64): Likewise.
+	(gg_get_structure_type_decl): Declaration removed.
+	* structs.cc (create_structure_type): New function.
+	(get_structure_type_decl): Renamed version of
+	gg_get_structure_type_decl().
+	(create_cblc_field_t): Cleaned up structure creation.
+	(create_referlet_t): Likewise.
+	(create_refer_t): Likewise.
+	(create_our_type_nodes): Likewise.
+	* structs.h (GTY): New declaration for cblc_file_pp_type_node;
+	* symbols.h (enum cbl_ctype_t): Removed.
+
+2026-08-02  Robert Dubner  <rdubner@symas.com>
+
+	PR cobol/126391
+	* move.cc (move_helper): static tree stash has file-static scope.
+
+2026-08-01  Robert Dubner  <rdubner@symas.com>
+
+	* compare.cc (numeric_compare): Change comment.
+	* genutil.cc (get_power_of_ten): Likewise.
+
+2026-08-01  Robert Dubner  <rdubner@symas.com>
+
+	* copybook.h (_COPYBOOK_H): #include <sys/types.h> for macOS.
+	* lexio.h (struct filespan_t): Mollify cppcheck with a const variable.
+	* parse.y: Adjust a dbgmsg() call.
+	* util.cc (cobol_filename): Likewise.
+
+2026-07-31  James K. Lowden  <jklowden@cobolworx.com>
+
+	* scan.l: Add value pattern.
+
+2026-07-30  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse.y (dialect_ok): Enable messages without a quoted tagline.
+	* scan.l: Add SECTION pattern so it is not handled by general NAME pattern.
+
+2026-07-30  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/120804
+	* cbldiag.h (enum cbl_diag_id_t): Add MfRedefinesFirst.
+	* cobol1.cc (cobol_langhook_handle_option): Handle option.
+	* gcobol.1: Document option.
+	* lang-specs.h: Add -Wredefines-first to spec string.
+	* lang.opt: Add option.
+	* messages.cc: Add option to dialect map.
+	* parse.y: Error message depends on option value.
+
+2026-07-30  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/126495
+	PR cobol/126496
+	* gcobol.1: Update manual to reflect new syntax.
+	* parse.y: Allow void sentence and increment s/r expected count to 7.
+	* scan.l: Lex $END-IF, optionally, as $END.
+
+2026-07-30  James K. Lowden  <jklowden@cobolworx.com>
+
+	PR cobol/126393
+	* symbols.cc (symbol_redefines_root): Describe purpose in comment.
+	(symbol_explicitly_redefines): Remove function.
+	(symbols_update): Remove over-constrained validation.
+
+2026-07-29  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse_ante.h (parser_move_carefully): Use ordinary %s in message.
+
+2026-07-29  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (enum cbl_diag_id_t): Add MfSetNumeric and sort alphabetically.
+	* cobol1.cc (cobol_langhook_handle_option): Handle OPT_Wset_numeric.
+	* gcobol.1: Document Wset-numeric option.
+	* lang-specs.h: Add Wset-numeric to specs string.
+	* lang.opt: Add Wset-numeric option.
+	* messages.cc: Add MfSetNumeric to mf and gnu dialects, and sort alphabetically.
+	* parse_ante.h (parser_move_carefully): Report diagnotic per dialect.
+
+2026-07-29  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse.y: Report LPAREN token as '(', not ')'.
+	* scan.l: Remove newline exclusion from LPAREN pattern.
+	* scan_ante.h (rsearch): Helper function to ensure c++11 compatibility.
+	(trim_location): Use rsearch function.
+	(is_quote): New inline function to test quotiness.
+	(skip_string): New function to find end of string literal.
+	(is_refmod): Stay in bounds.
+	* util.cc (gcc_location_set): Decrease debug message verbosity.
+
+2026-07-28  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse_ante.h (set_real_from_capacity): Use symbol_field_capacity_set().
+	* symbols.cc (calculate_capacity): Whitespace.
+	(symbol_field_capacity_set): New function.
+	* symbols.h (symbol_field_capacity_set): Declare function.
+
+2026-07-28  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse.y: Remove value78 nonterminal, introduce
+	level_constant nonterminal for all constants.  Move validation
+	to level_constant.  Remove other special handling for Level 78.
+	* scan_post.h (prelex): Correct Level 78/88 typo.
+
+2026-07-28  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (location_dump): Only declare function.
+	* parse.y: Update numeric PICTURE parse, and better diagnostic.
+	* scan.l: Rewrite numeric and numeric-edited PICTURE scan.
+	* scan_ante.h (myless): Use "unique" local variable name.
+	(length_upto): New function.
+	(is_name_char): New function.
+	(length_of_name): New function.
+	(trim_location): Set location endpoint by addition, not subtraction.
+	(ndigit): Allow 'V' at beginning or end of PICTURE string.
+	* util.cc (gcc_location_set): Indentation, and more verbose debugging.
+	(yy_flex_debug): Undefine tree.h symbol.
+	(location_dump): Define function in .cc file, now public.
+
+2026-07-28  James K. Lowden  <jklowden@cobolworx.com>
+
+	* lexio.cc (cdftext::free_form_reference_format): Assign from char(0x8D).
+
+2026-07-27  James K. Lowden  <jklowden@cobolworx.com>
+
+	* lexio.cc (cdftext::free_form_reference_format): Use new sanitize_nul function.
+	* lexio.h (struct filespan_t): Define sanitize_nul().
+
+2026-07-27  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cbldiag.h (cdf_push_source_format): Remove declaration.
+	(cdf_pop_source_format): Same.
+	* cdf-copy.cc (is_fixed_format): Same.
+	(is_reference_format): Same.
+	(esc): Pass new format parameter and use new 0x8D Debug indicator.
+	* cdf.y: Ignore SOURCE FORMAT directive (handled in lexio.cc).
+	* lexio.cc (cdf_source_format): Delete function definition.
+	(source_format_t::infer): Same.
+	(is_fixed_format): Same.
+	(is_reference_format): Same.
+	(left_margin): Same.
+	(right_margin): Same.
+	(include_debug): Assume fixed format.
+	(set_debug): Same.
+	(continues_at): Remove unused function.
+	(indicated): Move function to source_format_t class.
+	(source_format_t::indicated): Replace ::indicated().
+	(filespan_t::tab_check): Delete function.
+	(check_push_pop_directive): Add format stack parameter.
+	(check_source_format_directive): Same.
+	(esc): Add format parameter and use 0x8D indicator.
+	(parse_replace_pairs): Add format parameter.
+	(parse_copy_directive): Same.
+	(parse_replace_text): Same.
+	(parse_replace_directive): Same.
+	(cdftext::lex_open): Instantiate and pass format stack.
+	(cdftext::free_form_reference_format): Add format stack parameter and 0x8D indicator.
+	(cobol_set_indicator_column): Stash command-line option.
+	(cdftext::process_file): Add format stack parameter.
+	* lexio.h (struct filespan_t): Remove tab_check() function.
+	(class source_format_t): Lift into header file to share with cdf-copy.cc.
+	(class cdftext): Add several functions, formerly file-scope.
+	(free_form_reference_format): Move to source_format_t.
+	* parse.y: Slightly simplify parse of WITH DEBUGGING MODE.
+	* scan.l: Recognize new 0x8D indicator.
+	* scan_ante.h (cobol_set_indicator_column): Remove declaration.
+	* util.cc (class cdf_directives_t): Remove source format support.
+	(cobol_set_indicator_column): Move function to lexio.cc.
+	(cdf_source_format): Delete function.
+	(cdf_push_source_format): Same.
+	(cdf_pop_source_format): Same.
+	* util.h (class source_format_t): Move to lexio.h.
+
+2026-07-27  Robert Dubner  <rdubner@symas.com>
+
+	* genapi.cc (array_of_long_long): Improved creation.
+	(gg_array_of_size_t): Likewise.
+	(gg_array_of_field_pointers): Likewise.
+	(gg_array_of_uchar_p): Likewise.
+	(parser_sort): Use modified routine.
+	(parser_file_sort): Likewise.
+	(parser_file_merge): Likewise.
+	* gengen.cc (gg_array_of_size_t): Improved creation.
+	* gengen.h (gg_array_of_field_pointers): Likewise.
+	(gg_array_of_size_t): Likewise.
+
+2026-07-25  Jakub Jelinek  <jakub@redhat.com>
+
+	* symbols.cc (symbols_dump): Use HOST_SIZE_T_PRINT_UNSIGNED instead
+	of "%zu" and add cast to fmt_size_t.
+
+2026-07-25  Robert Dubner  <rdubner@symas.com>
+
+	* cbldiag.h (struct cbl_loc_t): Mollify cppcheck.
+	* gcobol.1: Documentation.
+	* genapi.cc (parser_accept_date_yymmdd): Changes to ACCEPT.
+	(parser_accept_date_yyyymmdd): Likewise.
+	(parser_accept_date_yyddd): Likewise.
+	(parser_accept_date_yyyyddd): Likewise.
+	(parser_accept_date_dow): Likewise.
+	(parser_accept_date_hhmmssff): Likewise.
+	(walk_initialization): Propagate based_e attribute to child variables.
+	(parser_file_open): SELECT ASSIGN TO DEVICE changes.
+	(parser_call): Include function name in error message when the
+	function name cannot be found.
+	* genapi.h (parser_accept_date_yymmdd): Changes to ACCEPT.
+	(parser_accept_date_yyyymmdd): Likewise.
+	(parser_accept_date_yyddd): Likewise.
+	(parser_accept_date_yyyyddd): Likewise.
+	(parser_accept_date_dow): Likewise.
+	(parser_accept_date_hhmmssff): Likewise.
+	* genutil.cc (FIXED_WIDE_INT): Potential improvement to MOVE
+	statements involving intermediate_e variables.
+	(get_power_of_two): Likewise.
+	* genutil.h (FIXED_WIDE_INT): Likewise.
+	* lexio.h (struct filespan_t): Mollify cppcheck.
+	* move.cc (mh_identical): Improve MOVE execution speed.
+	(copy_native_into_place): Likewise.
+	(copy_intermediate_into_place): Likewise.
+	(mh_to_binary): Likewise.
+	(move_helper): Likewise.
+	* parse.y: Changes to ACCEPT.
+	* symbols.cc (symbol_table_init): Add external_e attribute to
+	DEBUG-ITEM and children.
+	(new_temporary_impl): Mollify cppcheck.
+	* symfind.cc (struct funcname): Likewise.
+	* util.cc (determine_intermediate_type): Set output.data.digits to
+	zero.
+
 2026-07-23  James K. Lowden  <jklowden@cobolworx.com>
 
 	* gcobc: Consolidate warning cases and update comments.

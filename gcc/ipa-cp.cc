@@ -132,6 +132,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "symtab-clones.h"
 #include "gimple-range.h"
 #include "attr-callback.h"
+#include "lto-streamer.h"
+#include "callback-info.h"
 
 /* Allocation pools for values and their sources in ipa-cp.  */
 
@@ -4618,25 +4620,43 @@ adjust_clone_incoming_counts (cgraph_node *node,
     if (cs->caller->thunk)
       {
 	adjust_clone_incoming_counts (cs->caller, desc);
-	profile_count sum = profile_count::zero ();
-	for (cgraph_edge *e = cs->caller->callers; e; e = e->next_caller)
-	  if (e->count.initialized_p ())
-	    sum += e->count.ipa ();
-	cs->count = cs->count.combine_with_ipa_count (sum);
+	/* Same rationale as commit 8c6b6adce45a550c52dc35e3df4e0c477f5404fa
+	   for scaling recursive edges in update_counts_for_self_gen_clones:
+	   adjusting non-IPA edge counts here does not update matching gimple
+	   BB frequencies and breaks verify_cgraph_node.  */
+	if (cs->count.ipa_p ())
+	  {
+	    profile_count sum = profile_count::zero ();
+	    for (cgraph_edge *e = cs->caller->callers; e; e = e->next_caller)
+	      if (e->count.initialized_p ())
+		sum += e->count.ipa ();
+	    cs->count = cs->count.combine_with_ipa_count (sum);
+	  }
+	else if (dump_file)
+	  fprintf (dump_file, "       Skipping adjustment of the count of an "
+		   "incoming edge of a clone %s -> %s\n",
+		   cs->caller->dump_name (), cs->callee->dump_name ());
       }
     else if (!desc->processed_edges->contains (cs)
 	     && cs->caller->clone_of == desc->orig
 	     && cs->count.compatible_p (desc->count))
       {
-	cs->count += desc->count;
-	if (dump_file)
+	if (cs->count.ipa_p ())
 	  {
-	    fprintf (dump_file, "       Adjusted count of an incoming edge of "
-		     "a clone %s -> %s to ", cs->caller->dump_name (),
-		     cs->callee->dump_name ());
-	    cs->count.dump (dump_file);
-	    fprintf (dump_file, "\n");
+	    cs->count += desc->count;
+	    if (dump_file)
+	      {
+		fprintf (dump_file, "       Adjusted count of an incoming edge "
+			 "of a clone %s -> %s to ", cs->caller->dump_name (),
+			 cs->callee->dump_name ());
+		cs->count.dump (dump_file);
+		fprintf (dump_file, "\n");
+	      }
 	  }
+	else if (dump_file)
+	  fprintf (dump_file, "       Skipping adjustment of the count of an "
+		   "incoming edge of a clone %s -> %s\n",
+		   cs->caller->dump_name (), cs->callee->dump_name ());
       }
 }
 
@@ -6477,7 +6497,7 @@ purge_useless_callback_edges ()
 	      if (dump_file)
 		fprintf (dump_file, "\tExamining callbacks of edge %s -> %s:\n",
 			 e->caller->dump_name (), e->callee->dump_name ());
-	      if (!lookup_attribute (CALLBACK_ATTR_IDENT,
+	      if (!lookup_attribute ("callback_only",
 				     DECL_ATTRIBUTES (e->callee->decl))
 		  && !callback_is_special_cased (e->callee->decl, e->call_stmt))
 		{
@@ -6736,6 +6756,7 @@ ipcp_driver (void)
 
   ipa_check_create_node_params ();
   ipa_check_create_edge_args ();
+  callback_info_sum_t::check_create_info_sum ();
   clone_num_suffixes = new hash_map<const char *, unsigned>;
 
   if (dump_file)

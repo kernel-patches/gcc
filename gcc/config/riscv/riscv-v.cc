@@ -1570,7 +1570,7 @@ expand_const_vector_single_step_npatterns (rtx target, rvv_builder *builder)
 	  rtx tmp2 = gen_reg_rtx (builder->mode ());
 	  rtx step
 	    = simplify_binary_operation (MINUS, builder->inner_mode (),
-					 builder->elt (v.npatterns()),
+					 builder->elt (builder->npatterns ()),
 					 builder->elt (0));
 	  expand_vec_series (tmp2, const0_rtx, step, tmp1);
 
@@ -1735,6 +1735,18 @@ expand_const_vector (rtx target, rtx src)
   rtx base, step;
   if (const_vec_series_p (src, &base, &step))
     return expand_const_vec_series (target, base, step);
+
+  /* It's often better to just load a constant vector rather than
+     trying to synthesize is.  For now, do that when we know we're
+     dealing with a VLS mode.  */
+  machine_mode mode = GET_MODE (src);
+  if (GET_MODE_NUNITS (mode).is_constant ()
+      && !targetm.cannot_force_const_mem (mode, src))
+    {
+      src = force_const_mem (mode, src);
+      emit_move_insn (target, src);
+      return;
+    }
 
   /* Handle variable-length vector.  */
   unsigned int nelts_per_pattern = CONST_VECTOR_NELTS_PER_PATTERN (src);
@@ -3829,6 +3841,13 @@ shuffle_slide_patterns (struct expand_vec_perm_d *d)
 	}
       else
 	return false;
+
+      /* Check if the beginning and end of the sequence corresponds
+	 to OP0 and OP1 respectively */
+      if (!(known_eq (d->perm[0], vlen - slideup_cnt)
+	  && known_eq (d->perm[vlen - 1], 2 * vlen - 1 - slideup_cnt)))
+	return false;
+
     }
 
   /* Check for a monotonic sequence with one or two pivots.  */
@@ -3841,8 +3860,14 @@ shuffle_slide_patterns (struct expand_vec_perm_d *d)
       if (i > 0 && i != pivot
 	  && maybe_ne (d->perm[i], d->perm[i - 1] + 1))
 	{
-	  /* A second pivot would indicate the vector length and is in OP0.  */
-	  if (known_ge (d->perm[i], vec_len) || pivot == -1 || len != 0)
+	  /* A second pivot would indicate the vector length and is in OP0.
+	     Also a second pivot would indicate three or more monotonic
+	     sequences in the given permutation which cannot be handled by
+	     slideup function. */
+	  if (known_ge (d->perm[i], vec_len)
+	      || pivot == -1
+	      || len != 0
+	      || need_slideup_p)
 	    return false;
 	  len = i;
 	}
@@ -4805,7 +4830,7 @@ get_gather_scatter_code (machine_mode vec_mode, machine_mode idx_mode,
 	  (UNSPEC_UNORDERED, vec_mode);
       else
 	return code_for_pred_indexed_store_same_eew
-	  (UNSPEC_UNORDERED, vec_mode);
+	  (UNSPEC_ORDERED, vec_mode);
     }
   else if (dst_eew_bitsize > src_eew_bitsize)
     {
@@ -4820,21 +4845,21 @@ get_gather_scatter_code (machine_mode vec_mode, machine_mode idx_mode,
 	  else
 	    return
 	      code_for_pred_indexed_store_x2_greater_eew
-		(UNSPEC_UNORDERED, vec_mode);
+		(UNSPEC_ORDERED, vec_mode);
 	case 4:
 	  if (is_load)
 	    return code_for_pred_indexed_load_x4_greater_eew
 		(UNSPEC_UNORDERED, vec_mode);
 	  else
 	    return code_for_pred_indexed_store_x4_greater_eew
-		(UNSPEC_UNORDERED, vec_mode);
+		(UNSPEC_ORDERED, vec_mode);
 	case 8:
 	  if (is_load)
 	    return code_for_pred_indexed_load_x8_greater_eew
 	      (UNSPEC_UNORDERED, vec_mode);
 	  else
 	    return code_for_pred_indexed_store_x8_greater_eew
-	      (UNSPEC_UNORDERED, vec_mode);
+	      (UNSPEC_ORDERED, vec_mode);
 	default:
 	  gcc_unreachable ();
 	}
@@ -4850,21 +4875,21 @@ get_gather_scatter_code (machine_mode vec_mode, machine_mode idx_mode,
 	      (UNSPEC_UNORDERED, vec_mode);
 	  else
 	    return code_for_pred_indexed_store_x2_smaller_eew
-	      (UNSPEC_UNORDERED, vec_mode);
+	      (UNSPEC_ORDERED, vec_mode);
 	case 4:
 	  if (is_load)
 	    return code_for_pred_indexed_load_x4_smaller_eew
 	      (UNSPEC_UNORDERED, vec_mode);
 	  else
 	    return code_for_pred_indexed_store_x4_smaller_eew
-	      (UNSPEC_UNORDERED, vec_mode);
+	      (UNSPEC_ORDERED, vec_mode);
 	case 8:
 	  if (is_load)
 	    return code_for_pred_indexed_load_x8_smaller_eew
 	      (UNSPEC_UNORDERED, vec_mode);
 	  else
 	    return code_for_pred_indexed_store_x8_smaller_eew
-	      (UNSPEC_UNORDERED, vec_mode);
+	      (UNSPEC_ORDERED, vec_mode);
 	default:
 	  gcc_unreachable ();
 	}
@@ -6520,7 +6545,7 @@ riscv_v_widen_constraint_ok (unsigned int regno, machine_mode mode,
   gcc_checking_assert (riscv_vector_mode_p (mode)
 		       && riscv_vector_mode_p (wide_mode));
 
-  if (riscv_tuple_mode_p (mode))
+  if (riscv_tuple_mode_p (mode) || wide_mode == mode)
      return false;
 
   unsigned int wide_nregs = riscv_hard_regno_nregs (wide_regno, wide_mode);

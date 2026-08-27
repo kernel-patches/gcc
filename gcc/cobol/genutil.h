@@ -73,6 +73,8 @@ FIXED_WIDE_INT(128) get_power_of_ten(int n);
 void      scale_by_power_of_ten_N(tree value,
                                 int N,
                                 bool check_for_fractional = false);
+// cppcheck-suppress unknownMacro
+FIXED_WIDE_INT(128) get_power_of_two(int nbytes);
 tree      scale_by_power_of_ten(tree value,
                                 tree N,
                                 bool check_for_fractional = false);
@@ -89,6 +91,7 @@ bool      process_this_exception(const ec_type_t ec);
 void      rt_error(const char *msg);
 tree      build_array_of_size_t( size_t  N,
                                  const size_t *values);
+tree      gg_array_of_uchar_p( const std::vector<tree> &uchar_p );
 void      parser_display_internal_field(tree file_descriptor,
                                         cbl_field_t *field,
                                         bool advance=DISPLAY_NO_ADVANCE);

@@ -56,8 +56,6 @@ const char * keyword_str( int token );
 
 int repository_function_tok( const char name[] );
 
-void cobol_set_indicator_column( int column );
-
 void next_sentence_label(cbl_label_t*);
 
 int repeat_count( const char picture[] );
@@ -353,20 +351,45 @@ static bool level_needed() {
   return scanner_normal() && parsing.need_level();
 }
 
-static void level_found() {
-  if( scanner_normal() ) parsing.need_level(false);
-}
+#define PUSH_CDF_STATE if( YY_START != cdf_state ) yy_push_state(cdf_state)
 
 /*
- * Trim the scanned location by the amount about to re-scanned. 
+ * Return all but the first N characters, to be rescanned by the nexst yylex.
+ * IOW, keep N characters as the token, and relinquish the rest. 
  * Must be a macro because it expands yyless. 
  */
 #define myless(N)				\
   do {						\
-    auto n(N);					\
-    trim_location(n);				\
-    yyless(n);					\
+    auto _n(N);					\
+    trim_location(_n);				\
+    yyless(_n);					\
   } while(0)
+
+static inline int
+length_upto( char ch ) {
+    auto pend = std::find( yytext, yytext + yyleng, ch );
+    return pend - yytext;
+}
+
+static inline bool
+is_name_char( char ch ) {
+  switch(ch) {
+  case '-': case '_':
+    return true;
+  }
+  return ISALNUM(ch);
+}
+
+static inline int
+length_of_name() {
+  // Find first character in yyext that is not a name character.
+  auto pend = std::find_if( yytext, yytext + yyleng,
+                            []( char ch ) {
+                              return ! is_name_char(ch);
+                            } );
+  assert(yytext < pend); // scanner ensures yytext begins with {NAME}
+  return pend - yytext;
+}
 
 class enter_leave_t {
   typedef void( parser_enter_file_f)(const char *filename);
@@ -476,36 +499,45 @@ reset_location() {
 
 #define YY_USER_ACTION update_location();
 
+template <typename T>
+T * rsearch( T* a, T* z, T sarg ) {
+  std::reverse_iterator<T*> beg(z), end(a);
+  auto p = std::find(beg, end, sarg);
+  return p != end? p.base() : nullptr;
+}
+
+/*
+ * Before calling yyless to tell the generated scanner to rescan nkeep
+ * characters, set the scanner's location to reflect the cbl_loc_t of what
+ * we're keeping.  Set last_line and last_column by adding the newline count
+ * and characters after the last newline (if any) of the kept region to the
+ * first_line and first_column.
+ */
 static void
 trim_location( int nkeep) {
   gcc_assert( 0 <= nkeep && nkeep <= yyleng );
-  struct { char *p, *pend;
-    size_t size() const { return pend - p; }
-  } rescan = { yytext + nkeep, yytext + yyleng };
+  auto nline = std::count(yytext, yytext + nkeep, '\n');
+  auto ntoss = yyleng - nkeep;
+  dbgmsg("%s:%d: yyless(%d), rescan '%.*s' (%d bytes)",
+         __func__, __LINE__, nkeep, ntoss, yytext + nkeep, ntoss);
 
-  auto nline = std::count(rescan.p, rescan.pend, '\n');
-  dbgmsg("%s:%d: yyless(%d), rescan '%.*s' (" HOST_SIZE_T_PRINT_UNSIGNED
-         " lines, " HOST_SIZE_T_PRINT_UNSIGNED " bytes)",
-         __func__, __LINE__,
-         nkeep,
-         int(rescan.size()), rescan.p,
-         (fmt_size_t)nline, (fmt_size_t)rescan.size());
-  if( nline ) {
-    gcc_assert( yylloc.first_line + nline <= yylloc.last_line );
-    yylloc.last_line -= int(nline);
-    gcc_assert( yylloc.first_line <= yylloc.last_line );
-    char *p = static_cast<char*>(memrchr(rescan.p, '\n', rescan.size()));
-    yylloc.last_column = rescan.pend - ++p;
-    return;
+  gcc_assert( yylloc.first_line + nline <= yylloc.last_line );
+  yylloc.last_line = yylloc.first_line + int(nline);
+  gcc_assert( yylloc.first_line <= yylloc.last_line );
+
+  if( nline == 0) {
+    yylloc.last_column = yylloc.first_column + nkeep;
+  } else {
+    auto eokeep = yytext + nkeep;
+    auto nl = rsearch(yytext, eokeep, '\n');
+    gcc_assert( nl != nullptr );
+    yylloc.last_column = 1 + (eokeep - nl);
   }
 
-  gcc_assert( int(rescan.size()) < yylloc.last_column );
-  yylloc.last_column -= rescan.size();
-  if( yylloc.last_column < yylloc.first_column ) {
-    yylloc.first_column = 1;
-  }
+  gcc_assert( yylloc.first_line <= yylloc.last_line );    
+  gcc_assert( 0 < yylloc.last_column );    
 
-  location_dump(__func__, __LINE__, "yylloc", yylloc);
+  ////location_dump(__func__, __LINE__, "yylloc", yylloc, true);
 }
 
 static void
@@ -680,9 +712,11 @@ level_of( const char input[] ) {
   return output;
 }
 
+// Called by lexer with leading or trailing V, which is ignored.
 static inline int
 ndigit(int len) {
-  char *input = TOUPPER(yytext[0]) == 'V'? yytext + 1 : yytext;
+  const char *input = yytext + (TOUPPER(yytext[0]) == 'V'? 1 : 0);
+  if( input == yytext + yyleng ) return 0; // Only the V
   int n = repeat_count(input);
   return n == -1? len : n;
 }
@@ -1106,11 +1140,36 @@ symbol_function_token( const char name[] ) {
   return 0;
 }
 
-bool in_procedure_division(void);
-bool in_environment_division(void );
+bool
+in_identification_division();
+bool in_procedure_division();
+bool in_environment_division();
+
+static const char *
+symbol_lower_name( const symbol_elem_t *e, cbl_name_t lname ) {
+  const char *pname = nullptr;
+
+  switch(e->type) {
+  case SymFile:
+    pname = cbl_file_of(e)->name;
+    break;
+  case SymField:
+    pname = cbl_field_of(e)->name;
+    break;
+  case SymLabel:
+    pname = cbl_label_of(e)->name;
+    break;
+  default:
+    return nullptr;
+  }
+  gcc_assert(pname);
+  std::fill(lname, lname + sizeof(cbl_name_t), '\0');
+  std::transform( pname, pname + strlen(pname) + 1, lname, tolower );
+  return lname;
+}
 
 static symbol_elem_t *
-symbol_exists( const char name[] ) {
+symbol_exists( const char name[], const symbol_elem_t *constant = nullptr ) {
   typedef std::map <std::string, size_t> name_cache_t;
   static std::map <size_t, name_cache_t> cachemap;
 
@@ -1118,33 +1177,40 @@ symbol_exists( const char name[] ) {
   std::transform( name, name + strlen(name) + 1, lname, tolower );
   auto& cache = cachemap[PROGRAM];
 
-  if( in_procedure_division() && cache.empty() ) {
-    for( auto e = symbols_begin(PROGRAM) + 1;
-         e < symbols_end() && PROGRAM == e->program; e++ ) {
-      if( e->type == SymFile ) {
-        cbl_file_t *f(cbl_file_of(e));
-        cbl_name_t lname;
-        std::transform( f->name, f->name + strlen(f->name) + 1, lname, tolower );
-        cache[lname] = symbol_index(e);
-        continue;
+  if( in_procedure_division() ) {
+    if( cache.empty() ) {
+      for( auto e = symbols_begin(PROGRAM) + 1;
+           e < symbols_end() && PROGRAM == e->program; e++ ) {
+        cbl_name_t name;
+        const char *pname = symbol_lower_name(e, name);
+        if( pname ) {
+          cache[pname] = symbol_index(e);
+        }
       }
-      if( e->type == SymField ) {
-        auto f(cbl_field_of(e));
-        cbl_name_t lname;
-        std::transform( f->name, f->name + strlen(f->name) + 1, lname, tolower );
-        cache[lname] = symbol_index(e);
-      }
+      cache.erase(""); // remove unnamed symbols
     }
-    cache.erase("");
+    if( constant ) { // Johnny-come-lately named literal from CDF.
+      gcc_assert(constant->type == SymField);
+      cache[lname] = symbol_index(constant);
+    }
+    auto p = cache.find(lname);
+    if( p == cache.end() ) return nullptr;
+    return symbol_at(p->second);
   }
-  auto p = cache.find(lname);
+  /*
+   * Before data division has been defined and the cache populated, search the
+   * symbol table in case of named literal.
+   */  
+  symbol_elem_t *e = symbol_field( PROGRAM, 0, name );
+  return e;
+}
 
-  if( p == cache.end() ) {
-    symbol_elem_t * e = symbol_field( PROGRAM, 0, name );
-    return e;
+void
+scanner_cache_update( const symbol_elem_t *elem ) {
+  if( elem->type == SymField ) {
+    auto f = cbl_field_of(elem);
+    symbol_exists(f->name, elem);
   }
-
-  return symbol_at(p->second);
 }
 
 static int
@@ -1281,6 +1347,37 @@ integer_of( const char input[], bool is_hex = false) {
   return output;
 }
 
+static inline bool is_quote( const char ch ) {
+  return ch == '\'' || ch == '"';
+}
+
+static int yyinput();
+static void yyunput(int ch, char yytext_ptr[]);
+
+static std::string
+skip_string(char delimiter) {
+  int ch;
+  std::string found;
+
+  while ((ch = yyinput()) != EOF ) {
+    dbgmsg("%s:%d: input '%c'", __func__, __LINE__, ch);
+    found += ch;
+    if (ch == delimiter) {
+      if( (ch = yyinput()) == EOF ) break;
+      dbgmsg("%s:%d: input '%c'", __func__, __LINE__, ch);
+      if (ch == delimiter) {
+        found += ch;
+        continue;
+      } else {
+        unput(ch);
+        dbgmsg("%s:%d: unput '%c'", __func__, __LINE__, ch);
+        return found; // Found valid closing delimiter
+      }
+    }
+  }
+  return found;
+}
+
 /*
  * Loosely parse what might be a refmod expression.  This is used to decide
  * whether to indicate a refmod to the parser with an LPAREN token, or not,
@@ -1292,41 +1389,89 @@ integer_of( const char input[], bool is_hex = false) {
  * parentheses in the left part, e.g. ((LENGTH OF x/2) - (y/2)) : 1.
  */
 static bool
-is_refmod( const char input[], const char enput[] ) {
-	if( input == enput || *input != '(' ) return false;
-	int depth = 0;
-	bool colon_at_depth1 = false;
-	const char *p = input;
+is_refmod() {
+  class yystr_t {
+    std::string text;
+  public:
+    ~yystr_t() {
+      while( ! text.empty() ) {
+        char ch = text.back();
+        text.pop_back();
+        unput(ch);
+        dbgmsg("%s:%d: unput '%c'", __func__, __LINE__, ch);
+      }
+    }
+    int input() {
+      int ch = yyinput();
+      dbgmsg("%s:%d: input '%c'", __func__, __LINE__, ch);
+      if( ch != EOF) text += ch;
+      return ch;
+    }
+    yystr_t& operator+=( const std::string& that ) {
+      text += that;
+      return *this;
+    }
+    const char * c_str() const { return text.c_str(); }
+    size_t size() const { return text.size(); }
+  } yystr;
 
-	while( p < enput ) {
-		char ch = *p++;
-		if( ch == '"' || ch == '\'' ) {
-			/* Skip quoted region; doubled quote is escape.  */
-			const char quote = ch;
-			while( p < enput ) {
-				ch = *p++;
-				if( ch == quote ) {
-					if( p < enput && *p == quote ) { p++; continue; }
-					break;
-				}
-			}
-			continue;
-		}
-		if( ch == '(' ) {
-			depth++;
-			continue;
-		}
-		if( ch == ')' ) {
-			depth--;
-			if( depth < 0 ) return false;
-			if( depth == 0 ) return colon_at_depth1;
-			continue;
-		}
-		if( ch == ':' && depth == 1 ) {
-			if( colon_at_depth1 ) return false;
-			colon_at_depth1 = true;
-			continue;
-		}
-	}
-	return false;
+  gcc_assert( *yytext == '(' );
+
+  int ch, depth = 1;
+  bool colon_at_depth1 = false;
+
+  while( (ch = yystr.input()) != EOF ) {
+    if( is_quote(ch) ) {
+      std::string s = skip_string(ch);
+      if( s.empty() ) {
+        break;
+      }
+      yystr += s;
+      continue;
+    }
+    if( ch == '(' ) {
+      depth++;
+      continue;
+    }
+    if( ch == ')' ) {
+      depth--;
+      if( depth < 0 ) return false;
+      if( depth == 0 ) return colon_at_depth1;
+      continue;
+    }
+    if( ch == ':' && depth == 1 ) {
+      if( colon_at_depth1 ) return false;
+      colon_at_depth1 = true;
+      continue;
+    }
+  }
+  dbgmsg("%s:%d: '%.*s' is %sa refmod", __func__, __LINE__,
+         int(yystr.size()), yystr.c_str(), colon_at_depth1? "" : "not ");
+  return colon_at_depth1;
 }
+
+/*
+ * Given a QSTRING in yytext, remove leading and trailing quotes, and undouble
+ * any in the body of the string.
+ */
+static char*
+unquote() {
+  char *p = yytext, *pend = yytext + yyleng;
+  char *output = xstrdup(yytext), quote = *p;
+  char prior = '\0';
+
+  pend = std::copy_if( ++p, --pend, output, 
+                       [quote, &prior]( char ch ) {
+                         if( ch == quote ) {
+                           if( ch == prior ) {
+                             prior = '\0';
+                             return false;
+                           }
+                           prior = ch;
+                         }
+                         return true;
+                       } );
+  *pend = '\0';
+  return output;
+}
+

@@ -603,58 +603,6 @@ gg_assign(tree dest, const tree source)
   return stmt;
   }
 
-tree
-gg_get_structure_type_decl(const char *type_name, ...)
-  {
-  tree record_type = make_node (RECORD_TYPE);
-
-  tree type_decl = build_decl(UNKNOWN_LOCATION,
-                              TYPE_DECL,
-                              get_identifier (type_name),
-                              record_type);
-  TYPE_NAME (record_type) = type_decl;
-  TYPE_STUB_DECL (record_type) = type_decl;
-  DECL_ARTIFICIAL (type_decl) = 1;
-
-  va_list ap;
-  va_start (ap, type_name);
-
-  tree first = NULL_TREE;
-  tree *link = &first;
-
-  for (;;)
-    {
-    tree arg_type = va_arg (ap, tree);
-    if (!arg_type)
-      {
-      break;
-      }
-
-    const char *member_name = va_arg (ap, const char *);
-
-    tree member_decl = build_decl (UNKNOWN_LOCATION,
-                                   FIELD_DECL,
-                                   get_identifier (member_name),
-                                   arg_type);
-
-    DECL_CONTEXT (member_decl) = record_type;
-    *link = member_decl;
-    link = &DECL_CHAIN (member_decl);
-    }
-  va_end (ap);
-
-  TYPE_FIELDS (record_type) = first;
-
-  layout_type (record_type);
-//  lang_hooks.decls.pushdecl (type_decl);
-
-  gcc_assert (TREE_CODE (record_type) == RECORD_TYPE);
-  gcc_assert (TYPE_NAME (record_type));
-  gcc_assert (TREE_CODE (TYPE_NAME (record_type)) == TYPE_DECL);
-  gcc_assert (TREE_TYPE (TYPE_NAME (record_type)) == record_type);
-
-  return record_type;
-  }
 
 void
 gg_structure_type_constructor(tree record_decl, ...)
@@ -835,8 +783,9 @@ gg_declare_variable(tree type_decl,
   // C programs with the fdump-generic-nodes option, and copying them as
   // necessary to accomplish specific tasks.
   //
-  // Specifically, this routine creates and returns a VAR_DECL, which is the
-  // prototype.
+  // This routine creates or retrieves the VAR_DECL representing the variable.
+  // For new variables, it establishes storage duration, linkage, context, and
+  // initialization properties.
   //
   // The gg_define_variable() routines take a VAR_DECL and create a DECL_EXPR
   // node from it.  When that DECL_EXPR is appended to the statement list, it
@@ -868,6 +817,7 @@ gg_declare_variable(tree type_decl,
       if( already_defined )
         {
         *already_defined = true;
+        return var_decl;
         }
       }
     else
@@ -897,40 +847,70 @@ gg_declare_variable(tree type_decl,
   switch(vs_scope)
     {
     case vs_stack:
-      // This is a stack variable
-      DECL_CONTEXT(var_decl) = current_function->function_decl;
+      // This is a stack local variable
+      TREE_STATIC(var_decl)    = 0;
+      TREE_PUBLIC(var_decl)    = 0;
+      DECL_EXTERNAL(var_decl)  = 0;
+      DECL_CONTEXT(var_decl)   = current_function->function_decl;
       break;
     case vs_static:
       // This is a function-level static variable
-      DECL_CONTEXT(var_decl) = current_function->function_decl;
-      TREE_STATIC(var_decl) = 1;
+      TREE_STATIC(var_decl)    = 1;
+      TREE_PUBLIC(var_decl)    = 0;
+      DECL_EXTERNAL(var_decl)  = 0;
+      DECL_CONTEXT(var_decl)   = current_function->function_decl;
       break;
     case vs_file_static:
       // File static variables have translation_unit_scope.  I have chosen to
       // provide access to them through a map; see gg_trans_unit_var_decl();
-      // TREE_STATIC seems to imply const.
-      DECL_CONTEXT (var_decl) = gg_trans_unit.trans_unit_decl;
-      TREE_STATIC(var_decl) = 1;
+      TREE_STATIC(var_decl)    = 1;
+      TREE_PUBLIC(var_decl)    = 0;
+      DECL_EXTERNAL(var_decl)  = 0;
+      DECL_CONTEXT (var_decl)  = gg_trans_unit.trans_unit_decl;
       break;
-    case vs_file:
-      // File variables have translation_unit_scope.
-      // When TREE_STATIC is on, they seem to get put into the .text section
-      DECL_CONTEXT (var_decl) = gg_trans_unit.trans_unit_decl;
+    case vs_weak:
+      DECL_CONTEXT (var_decl)   = gg_trans_unit.trans_unit_decl;
+      TREE_USED(var_decl)       = 1;
+      TREE_STATIC( var_decl )   = 1;
+      TREE_PUBLIC( var_decl )   = 1;
+      DECL_EXTERNAL( var_decl ) = 0;
+      DECL_COMMON( var_decl )   = 0;
+      DECL_WEAK( var_decl )     = 1;
+      // We are not allowed to try to create a COMMON variable more than once
+      // in a translation unit.
+      seen[unique_name]        = var_decl;
       break;
-    case vs_external:
+    case vs_common:
+      DECL_CONTEXT (var_decl)   = gg_trans_unit.trans_unit_decl;
+      TREE_USED(var_decl)       = 1;
+      TREE_STATIC( var_decl )   = 1;
+      TREE_PUBLIC( var_decl )   = 1;
+      DECL_EXTERNAL( var_decl ) = 0;
+      DECL_COMMON( var_decl )   = 1;
+      DECL_WEAK( var_decl )     = 0;
+      // We are not allowed to try to create a COMMON variable more than once
+      // in a translation unit.
+      seen[unique_name]        = var_decl;
+      // A COMMON value with an initializer gets converted to a .data or .bss.
+      // So, we make sure it has no initializer.
+      gcc_assert(!initial_value);
+      initial_value = NULL_TREE;
+      break;
+    case vs_global:
       // This is for defining variables with global scope
       DECL_CONTEXT (var_decl) = gg_trans_unit.trans_unit_decl;
-      TREE_USED(var_decl)   = 1;
-      TREE_STATIC(var_decl) = 1;
-      TREE_PUBLIC(var_decl) = 1;
-      seen[unique_name] = var_decl;
+      TREE_USED(var_decl)      = 1;
+      TREE_STATIC(var_decl)    = 1;
+      TREE_PUBLIC(var_decl)    = 1;
+      DECL_EXTERNAL(var_decl)  = 0;
       break;
-    case vs_external_reference:
+    case vs_extern:
       // This is for referencing variables defined elsewhere
       DECL_CONTEXT (var_decl) = gg_trans_unit.trans_unit_decl;
-      TREE_USED(var_decl)   = 1;
+      TREE_USED(var_decl)      = 1;
+      TREE_STATIC(var_decl)    = 0;
+      TREE_PUBLIC(var_decl)    = 1;
       DECL_EXTERNAL (var_decl) = 1;
-      TREE_PUBLIC(var_decl) = 1;
       break;
     }
   DECL_INITIAL(var_decl) = initial_value;
@@ -938,9 +918,68 @@ gg_declare_variable(tree type_decl,
   return var_decl;
   }
 
+class DECL_COUNTER
+  {
+  public:
+    unsigned long total;
+    unsigned long artificial;
+    unsigned long addressable;
+    unsigned long art_addr;
+
+    DECL_COUNTER()
+      : total( 0 ),
+        artificial( 0 ),
+        addressable( 0 ),
+        art_addr( 0 )
+      {
+      }
+
+    void
+    count( tree var_decl )
+      {
+      if( TREE_CODE( var_decl ) == VAR_DECL )
+        {
+        total += 1;
+
+        bool is_artificial = DECL_ARTIFICIAL( var_decl );
+        bool is_addressable = TREE_ADDRESSABLE( var_decl );
+
+        if( is_artificial )
+          {
+          artificial += 1;
+          }
+
+        if( is_addressable )
+          {
+          addressable += 1;
+          }
+
+        if( is_artificial && is_addressable )
+          {
+          art_addr += 1;
+          }
+        }
+      }
+
+    ~DECL_COUNTER()
+      {
+      if( getenv("VAR_DECL_COUNT") )
+        {
+        fprintf( stderr, "decl_counter VAR_DECL    = %lu\n", total );
+        fprintf( stderr, "decl_counter ARTIFICIAL  = %lu\n", artificial );
+        fprintf( stderr, "decl_counter ADDRESSABLE = %lu\n", addressable );
+        fprintf( stderr, "decl_counter BOTH        = %lu\n", art_addr );
+        }
+      }
+  };
+  
+static DECL_COUNTER decl_counter;
+
 tree
 gg_define_from_declaration(tree var_decl)
   {
+  decl_counter.count(var_decl);
+
   // Append the var_decl to either the chain for the current function or for
   // the translation_unit, depending on the var_decl's context:
   gg_append_var_decl(var_decl);
@@ -980,6 +1019,18 @@ gg_define_variable(tree type_decl, tree initial_value)
   }
 
 tree
+gg_define_variable(tree type_decl, ssize_t initial_value)
+  {
+  tree var_decl = gg_declare_variable(type_decl,
+                                      NULL,
+                                      build_int_cst_type(type_decl,
+                                                         initial_value),
+                                      vs_stack);
+  gg_define_from_declaration(var_decl);
+  return var_decl;
+  }
+
+tree
 gg_define_variable(tree type_decl, gg_variable_scope_t vs_scope)
   {
   tree var_decl = gg_declare_variable(type_decl, NULL, NULL_TREE, vs_scope);
@@ -1007,351 +1058,6 @@ gg_define_variable(tree type_decl, const char *name, gg_variable_scope_t vs_scop
     {
     gg_define_from_declaration(var_decl);
     }
-  return var_decl;
-  }
-
-tree
-gg_define_volatile_variable(tree type_decl,
-                            const char *name,
-                            gg_variable_scope_t vs_scope)
-  {
-  bool already_defined = false;
-
-  tree volatile_type = build_qualified_type(type_decl, TYPE_QUAL_VOLATILE);
-
-  tree var_decl = gg_declare_variable(volatile_type,
-                                      name,
-                                      NULL_TREE,
-                                      vs_scope,
-                                      &already_defined);
-
-  /* Helpful, especially while debugging the front end.  The volatile-qualified
-     type is the important part; these flags should agree with it. */
-  TREE_THIS_VOLATILE(var_decl) = 1;
-  TREE_SIDE_EFFECTS(var_decl) = 1;
-
-  if (!already_defined)
-    {
-    gg_define_from_declaration(var_decl);
-    }
-
-  return var_decl;
-  }
-
-tree
-gg_define_bool()
-  {
-  tree var_decl = gg_declare_variable(BOOL);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_char()
-  {
-  // The nearest C equivalent: "char name;", but this one is given a
-  // compiler-assigned name.
-  // Beware:  This is the "implementation specific" version of char, which
-  // in GENERIC seems to be signed on Windows/Linux Intel machines.  But we
-  // need to be careful if we use an 8-bit type for numerical calculation.
-  tree var_decl = gg_declare_variable(CHAR);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_char(const char *variable_name)
-  {
-  // The C equivalent: "char name;"
-  // Beware:  This is the "implementation specific" version of char, which
-  // in GENERIC seems to be signed on Windows/Linux Intel machines.  But we
-  // need to be careful if we use an 8-bit type for numerical calculation.
-  tree var_decl = gg_declare_variable(CHAR, variable_name);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_char(const char *variable_name, tree ch)
-  {
-  tree var_decl = gg_declare_variable(CHAR, variable_name, ch);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_char(const char *variable_name, int ch)
-  {
-  return gg_define_char(variable_name, char_nodes[ch&0xFF]);
-  }
-
-tree
-gg_define_uchar()
-  {
-  // The C equivalent: "char name;"
-  // Beware:  This is the "implementation specific" version of char, which
-  // in GENERIC seems to be signed on Windows/Linux Intel machines.  But we
-  // need to be careful if we use an 8-bit type for numerical calculation.
-  return gg_define_variable(UCHAR);
-  }
-
-tree
-gg_define_uchar(const char *variable_name)
-  {
-  // The C equivalent: "char name;"
-  // Beware:  This is the "implementation specific" version of char, which
-  // in GENERIC seems to be signed on Windows/Linux Intel machines.  But we
-  // need to be careful if we use an 8-bit type for numerical calculation.
-  return gg_define_variable(UCHAR, variable_name);
-  }
-
-tree
-gg_define_uchar(const char *variable_name, tree ch)
-  {
-  tree var_decl = gg_declare_variable(UCHAR, variable_name, ch);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_uchar(const char *variable_name, int ch)
-  {
-  return gg_define_char(variable_name, char_nodes[ch&0xFF]);
-  }
-
-tree
-gg_define_int()
-  {
-  tree var_decl = gg_declare_variable(INT);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_int(int N)
-  {
-  tree var_decl = gg_declare_variable(INT, NULL, build_int_cst_type(INT, N));
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_int(const char *variable_name)
-  {
-  tree var_decl = gg_declare_variable(INT, variable_name);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_int(const char *variable_name, tree N)
-  {
-  tree var_decl = gg_declare_variable(INT, variable_name, N);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_int(const char *variable_name, int N)
-  {
-  tree var_decl = gg_declare_variable(INT, variable_name, build_int_cst_type(INT, N));
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_size_t()
-  {
-  tree var_decl = gg_declare_variable(SIZE_T);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_size_t(const char *variable_name)
-  {
-  tree var_decl = gg_declare_variable(SIZE_T, variable_name);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_size_t(tree N)
-  {
-  tree retval = gg_define_variable(SIZE_T);
-  gg_assign(retval, N);
-  return retval;
-  }
-
-tree
-gg_define_size_t(size_t N)
-  {
-  tree var_decl = gg_declare_variable(SIZE_T, NULL, build_int_cst_type(SIZE_T, N));
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_size_t(const char *variable_name, tree N)
-  {
-  tree var_decl = gg_declare_variable(SIZE_T, variable_name, N);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_size_t(const char *variable_name, size_t N)
-  {
-  tree var_decl = gg_declare_variable(SIZE_T, variable_name, build_int_cst_type(SIZE_T, N));
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_int128()
-  {
-  // The C equivalent: "INT128 <compiler_name>;"
-  return gg_define_variable(INT128);
-  }
-
-tree
-gg_define_int128(const char *variable_name)
-  {
-  // The C equivalent: "INT128 name;"
-  return gg_define_variable(INT128, variable_name);
-  }
-
-tree
-gg_define_int128(const char *variable_name, tree N)
-  {
-  // The C equivalent: "INT128 name = N"
-  tree var_decl = gg_declare_variable(INT128, variable_name, N);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_int128(const char *variable_name, int N)
-  {
-  // The C equivalent: "INT128 name = N"
-  tree var_decl = gg_define_int128(variable_name, build_int_cst_type(INT128, N));
-  return var_decl;
-  }
-
-tree
-gg_define_char_star()
-  {
-  // The C equivalent: "char *name;"
-  return gg_define_variable(CHAR_P);
-  }
-
-tree
-gg_define_char_star(const char *variable_name)
-  {
-  return gg_define_variable(CHAR_P, variable_name);
-  }
-
-tree
-gg_define_char_star(const char *variable_name, gg_variable_scope_t scope)
-  {
-  tree var_decl = gg_declare_variable(CHAR_P, variable_name, NULL_TREE, scope);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_char_star(tree var)
-  {
-  tree var_decl = gg_declare_variable(CHAR_P, NULL, var);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_char_star(const char *variable_name, tree var)
-  {
-  tree var_decl = gg_declare_variable(CHAR_P, variable_name, var);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_uchar_star()
-  {
-  tree var_decl = gg_declare_variable(UCHAR_P);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_uchar_star(const char *variable_name)
-  {
-  tree var_decl = gg_declare_variable(UCHAR_P, variable_name);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_uchar_star(const char *variable_name, gg_variable_scope_t scope)
-  {
-  tree var_decl = gg_declare_variable(UCHAR_P, variable_name, NULL_TREE, scope);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_uchar_star(tree var)
-  {
-  tree var_decl = gg_declare_variable(UCHAR_P, NULL, var);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_uchar_star(const char *variable_name, tree var)
-  {
-  tree var_decl = gg_declare_variable(UCHAR_P, variable_name, var);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_void_star()
-  {
-  tree var_decl = gg_declare_variable(VOID_P);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_void_star(const char *variable_name)
-  {
-  tree var_decl = gg_declare_variable(VOID_P, variable_name);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_void_star(const char *variable_name, tree var)
-  {
-  tree var_decl = gg_declare_variable(VOID_P, variable_name, var);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_void_star(const char *variable_name, gg_variable_scope_t scope)
-  {
-  tree var_decl = gg_declare_variable(VOID_P, variable_name, NULL_TREE, scope);
-  gg_define_from_declaration(var_decl);
-  return var_decl;
-  }
-
-tree
-gg_define_longdouble()
-  {
-  tree var_decl = gg_declare_variable(LONGDOUBLE);
-  gg_define_from_declaration(var_decl);
   return var_decl;
   }
 
@@ -2287,9 +1993,9 @@ gg_printf(const char *format_string, ...)
 tree
 gg_fprintf(tree fd, int nargs, const char *format_string, ...)
   {
-  tree retval = gg_define_int();
+  tree retval = gg_define_variable(INT);
   gg_push_context();
-  tree buffer = gg_define_char_star();
+  tree buffer = gg_define_variable(CHAR_P);
   gg_assign(buffer, gg_cast(CHAR_P, gg_malloc(1024)));
 
   tree args[ARG_LIMIT];
@@ -2343,7 +2049,7 @@ gg_read(tree fd, tree buf, tree count)
   // Because the caller might need the ssize_t return value, this routine
   // returns the statement_decl for the call.  It is used this way:
 
-  // tree num_chars = gg_define_int("_num_chars");
+  // tree num_chars = gg_define_variable(INT, "_num_chars");
   // gg_assign(num_chars, gg_read(fd, buf, count));
 
   return gg_call_expr(SSIZE_T,
@@ -2426,7 +2132,7 @@ tree
 gg_memdup(tree data, tree length)
   {
   // Duplicates data; gg_free should eventually be called
-  tree retval = gg_define_char_star();
+  tree retval = gg_define_variable(CHAR_P);
   gg_assign(retval, gg_malloc(length));
   gg_memcpy(retval, data, length);
   return retval;
@@ -2436,7 +2142,7 @@ tree
 gg_memdup(tree data, size_t length)
   {
   // Duplicates data; gg_free should eventually be called
-  tree retval = gg_define_char_star();
+  tree retval = gg_define_variable(CHAR_P);
   gg_assign(retval, gg_malloc(length));
   gg_memcpy(retval, data, build_int_cst_type(SIZE_T, length));
   return retval;
@@ -3412,19 +3118,6 @@ gg_sizeof(tree node)
     size_in_bytes = TREE_INT_CST_LOW(TYPE_SIZE_UNIT(node));
     }
   return size_in_bytes;
-  }
-
-tree
-gg_array_of_size_t( size_t N, size_t *values)
-  {
-  tree retval = gg_define_variable(build_pointer_type(SIZE_T));
-  tree sz = build_int_cst_type(SIZE_T, N * int_size_in_bytes(SIZE_T));
-  gg_assign(retval, gg_cast(build_pointer_type(SIZE_T), gg_malloc(sz)));
-  for(size_t i=0; i<N; i++)
-    {
-    gg_assign(gg_array_value(retval, i), build_int_cst_type(SIZE_T, values[i]));
-    }
-  return retval;
   }
 
 tree

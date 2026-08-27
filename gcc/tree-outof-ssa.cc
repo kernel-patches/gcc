@@ -45,6 +45,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa-ter.h"
 #include "tree-ssa-coalesce.h"
 #include "tree-outof-ssa.h"
+#include "cfgexpand.h"
 #include "dojump.h"
 #include "internal-fn.h"
 #include "gimple-fold.h"
@@ -1061,8 +1062,9 @@ expand_phi_nodes (struct ssaexpand *sa)
    own artificial decl so the slots are distinguished at the source.
    The new decl carries a DECL_DEBUG_EXPR back to the user variable so debug
    info still attributes the storage to it (cf.  create_access_replacement in
-   tree-sra.cc).  PARM_DECLs and RESULT_DECLs are left alone, as they require
-   a single partition holding the canonical RTL.  */
+   tree-sra.cc).  A PARM_DECL or RESULT_DECL keeps the partition of its default
+   definition, which holds the canonical RTL, and only its other partitions are
+   split.  */
 
 static void
 split_overlapping_partition_decls (var_map map)
@@ -1072,14 +1074,44 @@ split_overlapping_partition_decls (var_map map)
   auto_vec<tree> new_decl;
   new_decl.safe_grow_cleared (n);
   bool any = false;
+  unsigned ver;
+  tree name;
+
+  /* set_rtl attaches the base variable of any name in a partition to that
+     partition's location, not just the one of its representative, so collect
+     what the names of each partition contribute.  A name with no base
+     variable contributes nothing, since set_rtl passes a type rather than a
+     decl for those and leaves the MEM_EXPR it has in place.  */
+  auto_vec<tree> part_var;
+  part_var.safe_grow_cleared (n);
+  FOR_EACH_SSA_NAME (ver, name, cfun)
+    {
+      int p = var_to_partition (map, name);
+      if (p == NO_PARTITION)
+	continue;
+      tree var = SSA_NAME_VAR (name);
+      if (!var)
+	continue;
+      part_var[p] = expand_leader_merge (part_var[p], var);
+    }
 
   for (unsigned i = 0; i < n; i++)
     {
       tree repr = partition_to_var (map, i);
       if (!repr)
 	continue;
+      /* Expansion hands set_rtl the representative before the other names,
+	 and expand_leader_merge keeps the variable it is given first unless a
+	 later one is DECL_IGNORED_P, so merging the two gives the variable
+	 this partition ends up with.  A partition holding the default
+	 definition of a parameter or of the result is instead seeded with that
+	 decl, and is given it back once its RTL is restored at the end of
+	 expansion, so the variable it ends up with is one that the rule below
+	 keeps for it alone.  */
       tree var = SSA_NAME_VAR (repr);
-      if (!var || !VAR_P (var))
+      if (part_var[i])
+	var = expand_leader_merge (var, part_var[i]);
+      if (!var)
 	continue;
       /* Only partitions that will live in memory can end up with a
 	 misleading shared MEM_EXPR.  Mirror the decision that
@@ -1123,8 +1155,6 @@ split_overlapping_partition_decls (var_map map)
   if (!any)
     return;
 
-  unsigned ver;
-  tree name;
   FOR_EACH_SSA_NAME (ver, name, cfun)
     {
       if (SSA_NAME_IS_DEFAULT_DEF (name))

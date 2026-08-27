@@ -431,6 +431,8 @@ get_or_alloc_expr_for_nary (vn_nary_op_t nary, unsigned value_id,
   unsigned int result_id;
 
   gcc_assert (value_id == 0 || !value_id_constant_p (value_id));
+  gcc_assert (nary->opcode != SSA_NAME
+	      && TREE_CODE_CLASS (nary->opcode) != tcc_constant);
 
   expr.kind = NARY;
   expr.id = 0;
@@ -1626,6 +1628,12 @@ phi_translate_1 (bitmap_set_t dest,
 	  {
 	    unsigned int new_val_id;
 
+	    vn_nary_op_t saved_newnary
+	      = XALLOCAVAR (struct vn_nary_op_s,
+			    sizeof_vn_nary_op (newnary->length));
+	    memcpy (saved_newnary, newnary,
+		    sizeof_vn_nary_op (newnary->length));
+
 	    /* Try to simplify the new NARY.  */
 	    tree res = vn_nary_simplify (newnary);
 	    if (res)
@@ -1673,6 +1681,10 @@ phi_translate_1 (bitmap_set_t dest,
 			return constant;
 		      }
 		  }
+		/* Restore the unsimplified newnary, it was simplified
+		   to a NAME that we do not want (not as NARY anyway).  */
+		memcpy (newnary, saved_newnary,
+			sizeof_vn_nary_op (saved_newnary->length));
 	      }
 
 	    tree result = vn_nary_op_lookup_pieces (newnary->length,
@@ -3023,7 +3035,7 @@ find_or_generate_expression (basic_block block, tree op, gimple_seq *stmts)
   gcc_assert (!value_id_constant_p (lookfor));
 
   /* It must be a complex expression, so generate it recursively.  Note
-     that this is only necessary to handle gcc.dg/tree-ssa/ssa-pre28.c
+     that this is only necessary to handle gcc.dg/tree-ssa/ssa-pre-28.c
      where the insert algorithm fails to insert a required expression.  */
   bitmap exprset = value_expressions[lookfor];
   bitmap_iterator bi;
@@ -3036,8 +3048,17 @@ find_or_generate_expression (basic_block block, tree op, gimple_seq *stmts)
 	   places.  We can insert NARYs which eventually re-materializes
 	   its operand values.  */
 	if (temp->kind == NARY)
-	  return create_expression_by_pieces (block, temp, stmts,
-					      TREE_TYPE (op));
+	  {
+	    static int depth;
+	    if (depth > 8)
+	      return NULL_TREE;
+
+	    depth++;
+	    tree res = create_expression_by_pieces (block, temp, stmts,
+						    TREE_TYPE (op));
+	    depth--;
+	    return res;
+	  }
       }
 
   /* Defer.  */

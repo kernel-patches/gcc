@@ -209,6 +209,7 @@ gfc_free_omp_clauses (gfc_omp_clauses *c)
   gfc_free_expr (c->num_gangs_expr);
   gfc_free_expr (c->num_workers_expr);
   gfc_free_expr (c->vector_length_expr);
+  gfc_free_expr (c->device_num_expr);
   for (enum gfc_omp_list_type t = OMP_LIST_FIRST; t < OMP_LIST_NUM;
        t = gfc_omp_list_type (t + 1))
     gfc_free_omp_namelist (c->lists[t], t);
@@ -832,6 +833,73 @@ cleanup:
   return MATCH_ERROR;
 }
 
+static int
+match_oacc_device_type_kind (void)
+{
+  char name[GFC_MAX_SYMBOL_LEN + 1];
+
+  /* Since device_type arg accept * as all,
+     we need to check first the case when
+     the user inputs * as the parameter.  */
+  gfc_gobble_whitespace ();
+  name[0] = (char) gfc_next_char ();
+
+  if (name[0] == '*')
+    return GOMP_DEVICE_NONE;
+
+  /* If is not *, we try to match the
+     pre-defined names.  */
+
+  match m = gfc_match (" %n ", name + 1);
+
+  if (m != MATCH_YES)
+    return -1;
+
+  if (strcmp (name ,"host") == 0)
+    return GOMP_DEVICE_HOST;
+  if (strcmp (name, "nvidia") == 0)
+    return GOMP_DEVICE_NVIDIA_PTX;
+  if (strcmp (name, "radeon") == 0)
+    return GOMP_DEVICE_GCN;
+
+  return -1;
+}
+
+static match
+match_oacc_device_type (gfc_omp_clauses *c)
+{
+  locus old_loc = gfc_current_locus;
+
+  int result = match_oacc_device_type_kind ();
+  match m;
+
+  if (result == -1)
+    goto syntax;
+
+  m = gfc_match_char (')', true);
+
+  if (m != MATCH_YES)
+    goto single_argument;
+
+  c->oacc_device_type = (unsigned) result;
+  c->oacc_device_type_present = 1;
+
+  return MATCH_YES;
+
+single_argument:
+  gfc_error ("OpenACC %<DEVICE_TYPE%> clause only accepts one argument, "
+	     "unexpected char at %C");
+  goto cleanup;
+
+syntax:
+  gfc_error ("Syntax error in OpenACC %<DEVICE_TYPE%> argument at %C.  Expected "
+	     "host, radeon, nvidia or * as argument.");
+
+cleanup:
+  gfc_current_locus = old_loc;
+  return MATCH_ERROR;
+}
+
 static match
 match_omp_oacc_expr_list (const char *str, gfc_expr_list **list,
 			  bool allow_asterisk, bool is_omp)
@@ -1182,6 +1250,7 @@ enum omp_mask2
   OMP_CLAUSE_INTEROP, /* OpenMP 5.1  */
   OMP_CLAUSE_LOCAL, /* OpenMP 6.0 */
   OMP_CLAUSE_DYN_GROUPPRIVATE, /* OpenMP 6.1 */
+  OMP_CLAUSE_DEVICE_NUM,
   /* This must come last.  */
   OMP_MASK2_LAST
 };
@@ -3156,7 +3225,12 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 					   OMP_MAP_FORCE_DEVICEPTR, false,
 					   allow_derived))
 	    continue;
-	  if ((mask & OMP_CLAUSE_DEVICE_TYPE)
+	  if ((mask & OMP_CLAUSE_DEVICE_TYPE) && openacc
+	      && gfc_match_dupl_check (!c->oacc_device_type_present,
+				       "device_type", true) == MATCH_YES
+	      && match_oacc_device_type (c) == MATCH_YES)
+	    continue;
+	  if ((mask & OMP_CLAUSE_DEVICE_TYPE) && !openacc
 	      && gfc_match_dupl_check (c->device_type == OMP_DEVICE_TYPE_UNSET,
 				       "device_type", true) == MATCH_YES)
 	    {
@@ -3173,6 +3247,16 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 		}
 	      if (gfc_match (" )") != MATCH_YES)
 		break;
+	      continue;
+	    }
+	  if ((mask & OMP_CLAUSE_DEVICE_NUM)
+	      && (m = gfc_match_dupl_check (!c->device_num_expr,
+					    "device_num")) != MATCH_NO)
+	    {
+	      if (m == MATCH_ERROR)
+		goto error;
+	      if (gfc_match ("( %e )", &c->device_num_expr) != MATCH_YES)
+		goto error;
 	      continue;
 	    }
 	  if ((mask & OMP_CLAUSE_DEVICE_RESIDENT)
@@ -4135,6 +4219,7 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 		      goto error;
 		    }
 		  c->num_teams_dims = true;
+		  continue;
 		}
 	      else if (gfc_match ("%e ", &expr) == MATCH_YES)
 		{
@@ -4143,21 +4228,20 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 		  if (gfc_peek_ascii_char () == ':')
 		    {
 		      expr = NULL;
-		      if (gfc_match (": %e ", &expr) != MATCH_YES)
-			goto error;
-		      c->num_teams_list->next = gfc_get_expr_list();
-		      c->num_teams_list->next->expr = expr;
+		      if (gfc_match (": %e ", &expr) == MATCH_YES)
+			{
+			  c->num_teams_list->next = gfc_get_expr_list();
+			  c->num_teams_list->next->expr = expr;
+			  if (gfc_match (") ") == MATCH_YES)
+			    continue;
+			}
 		    }
-		  if (gfc_match (") ") != MATCH_YES)
-		    goto error;
+		  else if (gfc_match (") ") == MATCH_YES)
+		    continue;
 		}
-	      else
-		{
-		  gfc_error ("Expected either %<[lower-expr : ] upper-expr%> or "
+	      gfc_error ("Expected either %<[lower-expr : ] upper-expr%> or "
 			     "%<dims(N): expr-list%> at %C");
-		  goto error;
-		}
-	      continue;
+	      goto error;
 	    }
 	  if ((mask & OMP_CLAUSE_NUM_THREADS)
 	      && (m = gfc_match_dupl_check (!c->num_threads_list,
@@ -5007,6 +5091,12 @@ error:
   (omp_mask (OMP_CLAUSE_GANG) | OMP_CLAUSE_WORKER | OMP_CLAUSE_VECTOR	      \
    | OMP_CLAUSE_SEQ							      \
    | OMP_CLAUSE_NOHOST)
+#define OACC_INIT_CLAUSES                                                      \
+  (omp_mask (OMP_CLAUSE_IF) | OMP_CLAUSE_DEVICE_NUM | OMP_CLAUSE_DEVICE_TYPE)
+#define OACC_SHUTDOWN_CLAUSES                                                  \
+  (omp_mask (OMP_CLAUSE_IF) | OMP_CLAUSE_DEVICE_NUM | OMP_CLAUSE_DEVICE_TYPE)
+#define OACC_SET_CLAUSES                                                       \
+  (omp_mask (OMP_CLAUSE_IF) | OMP_CLAUSE_DEVICE_NUM | OMP_CLAUSE_DEVICE_TYPE)
 
 
 static match
@@ -5301,6 +5391,24 @@ gfc_match_oacc_cache (void)
   return MATCH_YES;
 }
 
+match
+gfc_match_oacc_init (void)
+{
+  return match_acc (EXEC_OACC_INIT, OACC_INIT_CLAUSES);
+}
+
+match
+gfc_match_oacc_shutdown (void)
+{
+  return match_acc (EXEC_OACC_SHUTDOWN, OACC_SHUTDOWN_CLAUSES);
+}
+
+match
+gfc_match_oacc_set (void)
+{
+  return match_acc (EXEC_OACC_SET, OACC_SET_CLAUSES);
+}
+
 /* Determine the OpenACC 'routine' directive's level of parallelism.  */
 
 static oacc_routine_lop
@@ -5534,7 +5642,8 @@ cleanup:
   (omp_mask (OMP_CLAUSE_PRIVATE) | OMP_CLAUSE_FIRSTPRIVATE		\
    | OMP_CLAUSE_SHARED | OMP_CLAUSE_COPYIN | OMP_CLAUSE_REDUCTION	\
    | OMP_CLAUSE_IF | OMP_CLAUSE_NUM_THREADS | OMP_CLAUSE_DEFAULT	\
-   | OMP_CLAUSE_PROC_BIND | OMP_CLAUSE_ALLOCATE)
+   | OMP_CLAUSE_PROC_BIND | OMP_CLAUSE_ALLOCATE | OMP_CLAUSE_MESSAGE	\
+   | OMP_CLAUSE_SEVERITY)
 #define OMP_DECLARE_SIMD_CLAUSES \
   (omp_mask (OMP_CLAUSE_SIMDLEN) | OMP_CLAUSE_LINEAR			\
    | OMP_CLAUSE_UNIFORM	| OMP_CLAUSE_ALIGNED | OMP_CLAUSE_INBRANCH	\
@@ -5583,7 +5692,8 @@ cleanup:
    | OMP_CLAUSE_IS_DEVICE_PTR | OMP_CLAUSE_IN_REDUCTION			\
    | OMP_CLAUSE_THREAD_LIMIT | OMP_CLAUSE_ALLOCATE			\
    | OMP_CLAUSE_HAS_DEVICE_ADDR | OMP_CLAUSE_USES_ALLOCATORS		\
-   | OMP_CLAUSE_DYN_GROUPPRIVATE | OMP_CLAUSE_DEVICE_TYPE)
+   | OMP_CLAUSE_DYN_GROUPPRIVATE | OMP_CLAUSE_DEVICE_TYPE		\
+   | OMP_CLAUSE_MESSAGE | OMP_CLAUSE_SEVERITY)
 #define OMP_TARGET_DATA_CLAUSES \
   (omp_mask (OMP_CLAUSE_DEVICE) | OMP_CLAUSE_MAP | OMP_CLAUSE_IF	\
    | OMP_CLAUSE_USE_DEVICE_PTR | OMP_CLAUSE_USE_DEVICE_ADDR)
@@ -5599,7 +5709,8 @@ cleanup:
 #define OMP_TEAMS_CLAUSES \
   (omp_mask (OMP_CLAUSE_NUM_TEAMS) | OMP_CLAUSE_THREAD_LIMIT		\
    | OMP_CLAUSE_DEFAULT | OMP_CLAUSE_PRIVATE | OMP_CLAUSE_FIRSTPRIVATE	\
-   | OMP_CLAUSE_SHARED | OMP_CLAUSE_REDUCTION | OMP_CLAUSE_ALLOCATE)
+   | OMP_CLAUSE_SHARED | OMP_CLAUSE_REDUCTION | OMP_CLAUSE_ALLOCATE	\
+   | OMP_CLAUSE_MESSAGE | OMP_CLAUSE_SEVERITY)
 #define OMP_DISTRIBUTE_CLAUSES \
   (omp_mask (OMP_CLAUSE_PRIVATE) | OMP_CLAUSE_FIRSTPRIVATE		\
    | OMP_CLAUSE_LASTPRIVATE | OMP_CLAUSE_COLLAPSE | OMP_CLAUSE_DIST_SCHEDULE \
@@ -11383,6 +11494,13 @@ resolve_omp_clauses (gfc_code *code, gfc_omp_clauses *omp_clauses,
   if (omp_clauses->async)
     if (omp_clauses->async_expr)
       resolve_scalar_int_expr (omp_clauses->async_expr, "ASYNC");
+  if (omp_clauses->device_num_expr)
+    resolve_scalar_int_expr (omp_clauses->device_num_expr, "DEVICE_NUM");
+  if (code && code->op == EXEC_OACC_SET
+      && !omp_clauses->device_num_expr
+      && !omp_clauses->oacc_device_type_present)
+    gfc_error ("At least one of the clauses %<DEVICE_TYPE%> and %<DEVICE_NUM%> "
+	       "should be present in %<SET%> directive at %L", &code->loc);
   if (omp_clauses->num_gangs_expr)
     resolve_positive_int_expr (omp_clauses->num_gangs_expr, "NUM_GANGS");
   if (omp_clauses->num_workers_expr)
@@ -13635,6 +13753,12 @@ oacc_code_to_statement (gfc_code *code)
       return ST_OACC_EXIT_DATA;
     case EXEC_OACC_DECLARE:
       return ST_OACC_DECLARE;
+    case EXEC_OACC_INIT:
+      return ST_OACC_INIT;
+    case EXEC_OACC_SHUTDOWN:
+      return ST_OACC_SHUTDOWN;
+    case EXEC_OACC_SET:
+      return ST_OACC_SET;
     default:
       gcc_unreachable ();
     }
@@ -13968,6 +14092,9 @@ gfc_resolve_oacc_directive (gfc_code *code, gfc_namespace *ns ATTRIBUTE_UNUSED)
     case EXEC_OACC_EXIT_DATA:
     case EXEC_OACC_WAIT:
     case EXEC_OACC_CACHE:
+    case EXEC_OACC_INIT:
+    case EXEC_OACC_SHUTDOWN:
+    case EXEC_OACC_SET:
       resolve_omp_clauses (code, code->ext.omp_clauses, NULL, true);
       break;
     case EXEC_OACC_PARALLEL_LOOP:

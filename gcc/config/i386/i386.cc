@@ -69,6 +69,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "target-globals.h"
 #include "gimple-iterator.h"
 #include "gimple-fold.h"
+#include "internal-fn.h"
 #include "tree-vectorizer.h"
 #include "shrink-wrap.h"
 #include "builtins.h"
@@ -8596,18 +8597,23 @@ struct stack_access_data
   unsigned int *stack_alignment;
 };
 
-/* Return true if OP references an argument passed on stack.  */
+/* Return true if OP is a stack argument set up by the caller.  */
 
 static bool
 ix86_argument_passed_on_stack_p (const_rtx op)
 {
   tree mem_expr = MEM_EXPR (op);
-  if (mem_expr)
-    {
-      tree var = get_base_address (mem_expr);
-      return TREE_CODE (var) == PARM_DECL;
-    }
-  return false;
+  if (!mem_expr)
+    return false;
+
+  tree var = get_base_address (mem_expr);
+  if (TREE_CODE (var) != PARM_DECL)
+    return false;
+
+  /* For PARM_DECL, DECL_INCOMING_RTL holds an RTL for the stack slot
+     or register where the data was actually passed.  Return true if
+     OP is passed in memory.  */
+  return DECL_INCOMING_RTL (var) && MEM_P (DECL_INCOMING_RTL (var));
 }
 
 /* Update the maximum stack slot alignment from memory alignment in PAT.  */
@@ -19827,6 +19833,58 @@ ix86_gimple_fold_builtin (gimple_stmt_iterator *gsi)
 	}
       break;
 
+    case IX86_BUILTIN_PAVGUSB:
+    case IX86_BUILTIN_PAVGB:
+    case IX86_BUILTIN_PAVGW:
+    case IX86_BUILTIN_PAVGB128:
+    case IX86_BUILTIN_PAVGW128:
+    case IX86_BUILTIN_PAVGB256:
+    case IX86_BUILTIN_PAVGW256:
+    case IX86_BUILTIN_PAVGB128_MASK:
+    case IX86_BUILTIN_PAVGW128_MASK:
+    case IX86_BUILTIN_PAVGB256_MASK:
+    case IX86_BUILTIN_PAVGW256_MASK:
+    case IX86_BUILTIN_PAVGB512:
+    case IX86_BUILTIN_PAVGW512:
+      gcc_assert (n_args == 2 || n_args == 4);
+      if (!gimple_call_lhs (stmt))
+	break;
+      arg0 = gimple_call_arg (stmt, 0);
+      arg1 = gimple_call_arg (stmt, 1);
+      /* For masked PAVG, only canonicalize if the mask is all ones.  */
+      if (n_args == 4)
+	{
+	  elems = TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0));
+	  if (!ix86_masked_all_ones (elems, gimple_call_arg (stmt, 3)))
+	    break;
+	}
+      {
+	/* PAVG computes an unsigned average rounded towards positive
+	   infinity.  The IFN selects signedness from its operand type.  */
+	tree utype = unsigned_type_for (TREE_TYPE (arg0));
+	bool equal_p = operand_equal_p (arg0, arg1, 0);
+	if (!equal_p
+	    && !direct_internal_fn_supported_p (IFN_AVG_CEIL, utype,
+						OPTIMIZE_FOR_BOTH))
+	  break;
+
+	loc = gimple_location (stmt);
+	tree uarg0 = gimple_build (&stmts, loc, VIEW_CONVERT_EXPR,
+				    utype, arg0);
+	tree uarg1 = equal_p
+	  ? uarg0
+	  : gimple_build (&stmts, loc, VIEW_CONVERT_EXPR, utype, arg1);
+	tree res = gimple_build (&stmts, loc, IFN_AVG_CEIL, utype,
+				 uarg0, uarg1);
+	res = gimple_build (&stmts, loc, VIEW_CONVERT_EXPR,
+			    TREE_TYPE (gimple_call_lhs (stmt)), res);
+	gsi_insert_seq_before (gsi, stmts, GSI_SAME_STMT);
+	g = gimple_build_assign (gimple_call_lhs (stmt), res);
+	gimple_set_location (g, loc);
+	gsi_replace (gsi, g, false);
+	return true;
+      }
+
     case IX86_BUILTIN_PBLENDVB256:
     case IX86_BUILTIN_BLENDVPS256:
     case IX86_BUILTIN_BLENDVPD256:
@@ -21019,14 +21077,21 @@ ix86_preferred_reload_class (rtx x, reg_class_t regclass)
   if (x == CONST0_RTX (mode))
     return regclass;
 
-  /* Force constants into memory if we are loading a (nonzero) constant into
-     an MMX, SSE or MASK register.  This is because there are no MMX/SSE/MASK
-     instructions to load from a constant.  */
-  if (CONSTANT_P (x)
-      && (MAYBE_MMX_CLASS_P (regclass)
-	  || MAYBE_SSE_CLASS_P (regclass)
-	  || MAYBE_MASK_CLASS_P (regclass)))
-    return NO_REGS;
+  /* Force constants into memory if we are loading a non-zero constant
+     into an MMX, SSE or MASK register.  This is because there are no
+     MMX/SSE/MASK instructions to load from a constant.  Exceptions are
+     minus ones for MASK register and standard SSE constants for SSE
+     register.  */
+  if (CONSTANT_P (x))
+    {
+      if (MAYBE_MMX_CLASS_P (regclass))
+	return NO_REGS;
+       if (MAYBE_MASK_CLASS_P (regclass))
+	 return x == constm1_rtx ? regclass : NO_REGS;
+       if (MAYBE_SSE_CLASS_P (regclass))
+	 return (mode != VOIDmode && standard_sse_constant_p (x, mode)
+		 ? regclass : NO_REGS);
+    }
 
   /* Floating-point constants need more complex checks.  */
   if (CONST_DOUBLE_P (x))
@@ -21798,6 +21863,10 @@ ix86_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 
       /* xmm16-xmm31 are only available for AVX-512.  */
       if (EXT_REX_SSE_REGNO_P (regno))
+	return false;
+
+      /* Without SSE2, 16-bit moves are not supported.  */
+      if (!TARGET_SSE2 && GET_MODE_SIZE (mode) == GET_MODE_SIZE (HImode))
 	return false;
 
       /* OImode and AVX modes are available only when AVX is enabled.  */
@@ -22714,6 +22783,13 @@ ix86_insn_cost (rtx_insn *insn, bool speed)
 					       : COSTS_N_INSNS (3) + 1;
 	}
     }
+  /* Cost *h{add,sub}<mode>[_low] directly as pattern cost for the
+     variants with outer vec_concat are artificially low.  */
+  if (INSN_CODE (insn) >= 0
+      && get_attr_cost_special (insn) == COST_SPECIAL_HADDSUB)
+    return insn_cost + ix86_vec_cost (GET_MODE (pat),
+				      (speed ? ix86_tune_cost
+				       : &ix86_size_cost)->addss);
 
   return insn_cost + pattern_cost (pat, speed);
 }
@@ -26410,6 +26486,7 @@ public:
 
 private:
 
+  bool better_fold_left_reduc_than_p (const vector_costs *) const;
   /* Estimate register pressure of the vectorized code.  */
   void ix86_vect_estimate_reg_pressure ();
   /* Number of GENERAL_REGS/SSE_REGS used in the vectorizer, it's used for
@@ -26426,6 +26503,8 @@ private:
   unsigned m_num_reduc[X86_REDUC_LAST];
   /* Don't do unroll if m_prefer_unroll is false, default is true.  */
   bool m_prefer_unroll;
+  /* Scalar lanes in fold-left reductions.  */
+  unsigned int m_num_fold_left_reduc_lanes;
 };
 
 ix86_vector_costs::ix86_vector_costs (vec_info* vinfo, bool costing_for_scalar)
@@ -26435,7 +26514,8 @@ ix86_vector_costs::ix86_vector_costs (vec_info* vinfo, bool costing_for_scalar)
     m_num_avx256_vec_perm (),
     m_num_avx512_vec_perm (),
     m_num_reduc (),
-    m_prefer_unroll (true)
+    m_prefer_unroll (true),
+    m_num_fold_left_reduc_lanes (0)
 {}
 
 /* Implement targetm.vectorize.create_costs.  */
@@ -27141,6 +27221,20 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
   loop_vec_info loop_vinfo = dyn_cast<loop_vec_info> (m_vinfo);
   if (loop_vinfo && !m_costing_for_scalar)
     {
+      unsigned int vf = vect_vf_for_cost (loop_vinfo);
+      for (auto inst : LOOP_VINFO_SLP_INSTANCES (loop_vinfo))
+	if ((SLP_INSTANCE_KIND (inst) == slp_inst_kind_reduc_group
+	     || SLP_INSTANCE_KIND (inst) == slp_inst_kind_reduc_chain)
+	    && (vect_reduc_type (loop_vinfo, SLP_INSTANCE_TREE (inst))
+		== FOLD_LEFT_REDUCTION))
+	  m_num_fold_left_reduc_lanes
+	    += vf * SLP_TREE_LANES (SLP_INSTANCE_TREE (inst));
+
+      if (m_num_fold_left_reduc_lanes && dump_enabled_p ())
+	dump_printf_loc (MSG_NOTE, vect_location,
+			 "in-order FP reduction lanes: %u\n",
+			 m_num_fold_left_reduc_lanes);
+
       /* We are currently not asking the vectorizer to compare costs
 	 between different vector mode sizes.  When using predication
 	 that will end up always choosing the preferred mode size even
@@ -27305,6 +27399,21 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
   vector_costs::finish_cost (scalar_costs);
 }
 
+/* Return true if THIS has a shorter fold-left reduction chain than OTHER.  */
+
+bool
+ix86_vector_costs::better_fold_left_reduc_than_p
+  (const vector_costs *other) const
+{
+  auto other_costs = static_cast<const ix86_vector_costs *> (other);
+  if (m_num_fold_left_reduc_lanes >= other_costs->m_num_fold_left_reduc_lanes)
+    return false;
+
+  /* Do not let emulated sub-SSE modes win on this alone.  */
+  loop_vec_info loop_vinfo = as_a<loop_vec_info> (m_vinfo);
+  return known_ge (GET_MODE_SIZE (loop_vinfo->vector_mode), 16);
+}
+
 /* Return true if THIS should be preferred over OTHER as main vector loop.  */
 
 bool
@@ -27312,6 +27421,9 @@ ix86_vector_costs::better_main_loop_than_p (const vector_costs *other) const
 {
   loop_vec_info this_loop_vinfo = as_a<loop_vec_info> (this->vinfo ());
   loop_vec_info other_loop_vinfo = as_a<loop_vec_info> (other->vinfo ());
+
+  if (better_fold_left_reduc_than_p (other))
+    return true;
 
   /* If the other loop is masked it does not need an epilog.  Prefer that
      if the current loop cannot be vectorized fully with a vector
@@ -27335,6 +27447,10 @@ ix86_vector_costs::better_epilogue_loop_than_p (const vector_costs *other,
 						loop_vec_info main_loop) const
 {
   loop_vec_info this_loop_info = as_a <loop_vec_info> (this->vinfo ());
+
+  if (better_fold_left_reduc_than_p (other))
+    return true;
+
   /* The x86 target allows for multiple vector epilogues, if THIS is
      the suggested epilog mode of OTHER then keep the latter unless
      THIS has a VF of one which means no further epilog needed.  */

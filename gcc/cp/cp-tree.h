@@ -442,7 +442,6 @@ extern GTY(()) tree cp_global_trees[CPTI_MAX];
       PACK_EXPANSION_LOCAL_P (in *_PACK_EXPANSION)
       TINFO_HAS_ACCESS_ERRORS (in TEMPLATE_INFO)
       SIZEOF_EXPR_TYPE_P (in SIZEOF_EXPR)
-      COMPOUND_REQ_NOEXCEPT_P (in COMPOUND_REQ)
       BLOCK_OUTER_CURLY_BRACE_P (in BLOCK)
       FOLD_EXPR_MODIFY_P (*_FOLD_EXPR)
       IF_STMT_CONSTEXPR_P (IF_STMT)
@@ -1749,10 +1748,6 @@ check_constraint_info (tree t)
 #define TEMPLATE_PARM_CONSTRAINTS(NODE) \
   TREE_TYPE (TREE_LIST_CHECK (NODE))
 
-/* Non-zero if the noexcept is present in a compound requirement.  */
-#define COMPOUND_REQ_NOEXCEPT_P(NODE) \
-  TREE_LANG_FLAG_0 (TREE_CHECK (NODE, COMPOUND_REQ))
-
 /* A TREE_LIST whose TREE_VALUE is the constraints on the 'auto' placeholder
    type NODE, used in an argument deduction constraint.  The TREE_PURPOSE
    holds the set of template parameters that were in-scope when this 'auto'
@@ -2270,57 +2265,6 @@ public:
     input_location = saved_loc;
   }
 };
-
-/* Wrapping a template parameter in type_identity_t hides it from template
-   argument deduction.  */
-#if __cpp_lib_type_identity
-using std::type_identity_t;
-#else
-template <typename T>
-struct type_identity { typedef T type; };
-template <typename T>
-using type_identity_t = typename type_identity<T>::type;
-#endif
-
-/* RAII sentinel that saves the value of a variable, optionally
-   overrides it right away, and restores its value when the sentinel
-   id destructed.  */
-
-template <typename T>
-class temp_override
-{
-  T& overridden_variable;
-  T saved_value;
-public:
-  temp_override (T& var) : overridden_variable (var), saved_value (var) {}
-  temp_override (T& var, type_identity_t<T> overrider)
-    : overridden_variable (var), saved_value (var)
-  {
-    overridden_variable = overrider;
-  }
-  ~temp_override() { overridden_variable = saved_value; }
-};
-
-/* Object generator function for temp_override, so you don't need to write the
-   type of the object as a template argument.
-
-   Use as auto x = make_temp_override (flag); */
-
-template <typename T>
-inline temp_override<T>
-make_temp_override (T& var)
-{
-  return { var };
-}
-
-/* Likewise, but use as auto x = make_temp_override (flag, value); */
-
-template <typename T>
-inline temp_override<T>
-make_temp_override (T& var, type_identity_t<T> overrider)
-{
-  return { var, overrider };
-}
 
 /* temp_override for in_consteval_if_p, which can't use make_temp_override
    because it is a bitfield.  */
@@ -3193,8 +3137,8 @@ enum lang_decl_selector
    not make this struct larger than 32 bits.  */
 
 struct GTY(()) lang_decl_base {
-  ENUM_BITFIELD(lang_decl_selector) selector : 3;
-  ENUM_BITFIELD(languages) language : 1;
+  enum lang_decl_selector selector : 3;
+  enum languages language : 1;
   unsigned use_template : 2;
   unsigned not_really_extern : 1;	   /* var or fn */
   unsigned initialized_in_class : 1;	   /* var or fn */
@@ -3296,7 +3240,7 @@ struct GTY(()) lang_decl_fn {
 
   unsigned xobj_func : 1;
   unsigned contract_wrapper : 1;
-  ENUM_BITFIELD(lang_contract_helper) contract_helper : 2;
+  enum lang_contract_helper contract_helper : 2;
 
   unsigned spare : 4;
 
@@ -7081,7 +7025,7 @@ struct cp_parameter_declarator {
 /* A declarator.  */
 struct cp_declarator {
   /* The kind of declarator.  */
-  ENUM_BITFIELD (cp_declarator_kind) kind : 4;
+  enum cp_declarator_kind kind : 4;
   /* Whether we parsed an ellipsis (`...') just before the declarator,
      to indicate this is a parameter pack.  */
   bool parameter_pack_p : 1;
@@ -8413,10 +8357,10 @@ extern tree convert_reflect_constant_arg	(tree, tree);
 extern GTY(()) vec<tree, va_gc> *unemitted_tinfo_decls;
 
 extern void init_rtti_processing		(void);
-extern tree build_typeid			(tree, tsubst_flags_t);
+extern tree build_typeid			(tree, tsubst_flags_t, tree = NULL_TREE);
 extern tree get_tinfo_decl_direct	        (tree, tree, int);
 extern tree get_tinfo_decl			(tree);
-extern tree get_typeid				(tree, tsubst_flags_t);
+extern tree get_typeid				(tree, tsubst_flags_t, tree = NULL_TREE);
 extern tree build_headof			(tree);
 extern tree build_dynamic_cast			(location_t, tree, tree,
 						 tsubst_flags_t);
@@ -8683,7 +8627,7 @@ extern void finish_transaction_stmt		(tree, tree, int, tree);
 extern tree build_transaction_expr		(location_t, tree, int, tree);
 extern bool cxx_omp_create_clause_info		(tree, tree, bool, bool,
 						 bool, bool);
-extern tree baselink_for_fns                    (tree);
+extern tree baselink_for_fns                    (tree, bool = false);
 extern void finish_static_assert                (tree, tree, location_t,
 						 bool, bool, bool = false);
 extern tree finish_decltype_type                (tree, bool, tsubst_flags_t);
@@ -9363,7 +9307,7 @@ extern tree finish_shorthand_constraint         (tree, tree, bool);
 extern tree finish_requires_expr                (location_t, tree, tree);
 extern tree finish_simple_requirement           (location_t, tree);
 extern tree finish_type_requirement             (location_t, tree);
-extern tree finish_compound_requirement         (location_t, tree, tree, bool);
+extern tree finish_compound_requirement         (location_t, tree, tree, tree);
 extern tree finish_nested_requirement           (location_t, tree);
 extern tree tsubst_requires_expr                (tree, tree, tsubst_flags_t, tree);
 extern tree evaluate_requires_expr		(tree);

@@ -126,6 +126,7 @@ discard_pending_charlen (gfc_charlen *cl)
   if (!cl || !gfc_current_ns || gfc_current_ns->cl_list != cl)
     return;
 
+  gfc_remove_saved_charlen (cl);
   gfc_current_ns->cl_list = cl->next;
   gfc_free_expr (cl->length);
   free (cl);
@@ -146,6 +147,7 @@ discard_pending_charlens (gfc_charlen *saved_cl)
       gfc_charlen *cl = gfc_current_ns->cl_list;
 
       gcc_assert (cl);
+      gfc_remove_saved_charlen (cl);
       gfc_current_ns->cl_list = cl->next;
       gfc_free_expr (cl->length);
       free (cl);
@@ -2515,7 +2517,12 @@ build_struct (const char *name, gfc_charlen *cl, gfc_expr **init,
 
   c->ts = current_ts;
   if (c->ts.type == BT_CHARACTER)
-    c->ts.u.cl = cl;
+    {
+      c->ts.u.cl = cl;
+      /* The component struct is not tracked by the symbol undo mechanism,
+	 so free the charlen here to prevent a double-free.  */
+      gfc_remove_saved_charlen (cl);
+    }
 
   if (c->ts.type != BT_CLASS && c->ts.type != BT_DERIVED
       && (c->ts.kind == 0 || c->ts.type == BT_CHARACTER)
@@ -6592,8 +6599,7 @@ bool
 gfc_verify_c_interop (gfc_typespec *ts)
 {
   if (ts->type == BT_DERIVED && ts->u.derived != NULL)
-    return (ts->u.derived->ts.is_c_interop || ts->u.derived->attr.is_bind_c)
-	   ? true : false;
+    return ts->u.derived->ts.is_c_interop || ts->u.derived->attr.is_bind_c;
   else if (ts->type == BT_CLASS)
     return false;
   else if (ts->is_c_interop != 1 && ts->type != BT_ASSUMED)
@@ -7878,6 +7884,13 @@ match_procedure_decl (void)
   m = match_attr_spec();
   if (m == MATCH_ERROR)
     return MATCH_ERROR;
+
+  if (current_attr.allocatable)
+    {
+      current_attr.procedure = 1;
+      gfc_check_conflict (&current_attr, NULL, &gfc_current_locus);
+      return MATCH_ERROR;
+    }
 
   if (proc_if && proc_if->attr.is_bind_c && !current_attr.is_bind_c)
     {

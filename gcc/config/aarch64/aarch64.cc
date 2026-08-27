@@ -2456,6 +2456,7 @@ aarch64_hard_regno_nregs (unsigned regno, machine_mode mode)
     case FP_REGS:
     case FP_LO_REGS:
     case FP_LO8_REGS:
+    case FP_HI_REGS:
       {
 	unsigned int vec_flags = aarch64_classify_vector_mode (mode);
 	if (vec_flags & VEC_SVE_DATA)
@@ -7265,7 +7266,7 @@ aarch64_replace_reg_mode (rtx x, machine_mode mode)
 /* Return the SVE REV[BHW] unspec for reversing quantities of mode MODE
    stored in wider integer containers.  */
 
-static unsigned int
+static unspec
 aarch64_sve_rev_unspec (machine_mode mode)
 {
   switch (GET_MODE_UNIT_SIZE (mode))
@@ -7292,7 +7293,7 @@ aarch64_split_sve_subreg_move (rtx dest, rtx ptrue, rtx src)
       < GET_MODE_UNIT_SIZE (mode_with_narrower_elts))
     std::swap (mode_with_wider_elts, mode_with_narrower_elts);
 
-  unsigned int unspec = aarch64_sve_rev_unspec (mode_with_narrower_elts);
+  unspec unspec = aarch64_sve_rev_unspec (mode_with_narrower_elts);
   machine_mode pred_mode = aarch64_sve_pred_mode (mode_with_wider_elts);
 
   /* Get the operands in the appropriate modes and emit the instruction.  */
@@ -9615,7 +9616,7 @@ aarch_pac_insn_p (rtx x)
       rtx sub = *iter;
       if (sub && GET_CODE (sub) == UNSPEC)
 	{
-	  int unspec_val = XINT (sub, 1);
+	  unspec unspec_val = (unspec) XINT (sub, 1);
 	  switch (unspec_val)
 	    {
 	    case UNSPEC_PACIASP:
@@ -12674,40 +12675,49 @@ aarch64_emit_call_insn (rtx pat)
   return as_a<rtx_call_insn *> (insn);
 }
 
+/* Return the condition code mode for comparison CODE of MODE floating-point
+   operands.  FCMP and FCMPE set the same flags, but FCMPE also raises Invalid
+   for a quiet NaN.  Use CCFPE only when that exception is observable.  */
+
+static machine_mode
+aarch64_fp_cc_mode (rtx_code code, machine_mode mode)
+{
+  if (!HONOR_NANS (mode) || !flag_trapping_math)
+    return CCFPmode;
+
+  switch (code)
+    {
+    case EQ:
+    case NE:
+    case UNORDERED:
+    case ORDERED:
+    case UNLT:
+    case UNLE:
+    case UNGT:
+    case UNGE:
+    case UNEQ:
+      return CCFPmode;
+
+    case LT:
+    case LE:
+    case GT:
+    case GE:
+    case LTGT:
+      return CCFPEmode;
+
+    default:
+      gcc_unreachable ();
+    }
+}
+
 machine_mode
 aarch64_select_cc_mode (RTX_CODE code, rtx x, rtx y)
 {
   machine_mode mode_x = GET_MODE (x);
   rtx_code code_x = GET_CODE (x);
 
-  /* All floating point compares return CCFP if it is an equality
-     comparison, and CCFPE otherwise.  */
   if (GET_MODE_CLASS (mode_x) == MODE_FLOAT)
-    {
-      switch (code)
-	{
-	case EQ:
-	case NE:
-	case UNORDERED:
-	case ORDERED:
-	case UNLT:
-	case UNLE:
-	case UNGT:
-	case UNGE:
-	case UNEQ:
-	  return CCFPmode;
-
-	case LT:
-	case LE:
-	case GT:
-	case GE:
-	case LTGT:
-	  return CCFPEmode;
-
-	default:
-	  gcc_unreachable ();
-	}
-    }
+    return aarch64_fp_cc_mode (code, mode_x);
 
   /* Equality comparisons of short modes against zero can be performed
      using the TST instruction with the appropriate bitmask.  */
@@ -14293,6 +14303,7 @@ aarch64_class_max_nregs (reg_class_t regclass, machine_mode mode)
     case FP_REGS:
     case FP_LO_REGS:
     case FP_LO8_REGS:
+    case FP_HI_REGS:
       vec_flags = aarch64_classify_vector_mode (mode);
       if ((vec_flags & VEC_SVE_DATA)
 	  && constant_multiple_p (GET_MODE_SIZE (mode),
@@ -18247,9 +18258,12 @@ aarch64_detect_scalar_stmt_subtype (vec_info *vinfo, vect_cost_for_stmt kind,
 				    stmt_vec_info stmt_info,
 				    fractional_cost stmt_cost)
 {
-  /* Detect an extension of a loaded value.  In general, we'll be able to fuse
-     the extension with the load.  */
-  if (kind == scalar_stmt && vect_is_extending_load (vinfo, stmt_info))
+  /* Detect an extension of a loaded value or truncation of a value being
+     stored.  In general, we'll be able to fuse the extension/truncation with
+     the load/store.  */
+  if (kind == scalar_stmt
+      && (vect_is_extending_load (vinfo, stmt_info)
+	  || vect_is_truncating_store (vinfo, stmt_info)))
     return 0;
 
   return stmt_cost;
@@ -18375,6 +18389,13 @@ aarch64_sve_adjust_stmt_cost (class vec_info *vinfo, vect_cost_for_stmt kind,
      will fold to this form during combine, and that the extension therefore
      comes for free.  */
   if (kind == vector_stmt && vect_is_extending_load (vinfo, stmt_info))
+    stmt_cost = 0;
+
+  /* Most stores have truncating forms that can do the truncation on the fly.
+     Optimistically assume that a truncation followed by a store will fold to
+     this form during combine, and that the truncation therefore comes for free.
+   */
+  if (kind == vector_stmt && vect_is_truncating_store (vinfo, stmt_info))
     stmt_cost = 0;
 
   /* For similar reasons, vector_stmt integer truncations are a no-op,
@@ -26317,6 +26338,69 @@ aarch64_expand_vector_init (rtx target, rtx vals)
   emit_insn (seq_total_cost < fallback_seq_cost ? seq : fallback_seq);
 }
 
+/* Expand the widening sum reduction DEST = ACC + (WIDE) SRC, where the
+   Advanced SIMD vector SRC holds an even multiple of the number of lanes
+   of the accumulator ACC and of the result DEST.  EXTEND_CODE is
+   SIGN_EXTEND or ZERO_EXTEND and selects the signed or unsigned form.
+   Quarter the lane count of a vector of bytes with a [SU]DOT against a
+   vector of ones where that is available, halve it with [SU]ADDLP until a
+   single pairwise step is left, then accumulate into ACC with [SU]ADALP.  */
+
+void
+aarch64_expand_reduc_widen_sum (rtx dest, rtx acc, rtx src,
+				rtx_code extend_code)
+{
+  unsigned int dest_nunits = GET_MODE_NUNITS (GET_MODE (dest)).to_constant ();
+  machine_mode mode = GET_MODE (src);
+  unsigned int nunits = GET_MODE_NUNITS (mode).to_constant ();
+  gcc_assert (nunits % (dest_nunits * 2) == 0);
+
+  /* [SU]DOT against a vector of ones turns += a into += (a * 1), which
+     sums four bytes into each 32-bit element and so covers two halving
+     steps in one operation.  The widest intermediate is 4 * 255, so no
+     product sum can overflow.  Only a step from bytes to words qualifies,
+     and only if the accumulator is at least that wide.  */
+  if (TARGET_DOTPROD
+      && GET_MODE_INNER (mode) == QImode
+      && nunits >= dest_nunits * 4)
+    {
+      machine_mode sum_mode
+	= related_vector_mode (mode, SImode, nunits / 4).require ();
+      convert_optab dot = (extend_code == SIGN_EXTEND
+			   ? sdot_prod_optab : udot_prod_optab);
+      insn_code icode = convert_optab_handler (dot, sum_mode, mode);
+      rtx ones = force_reg (mode, CONST1_RTX (mode));
+
+      /* A dot product that already reaches the element width of DEST
+	 accumulates into ACC itself, otherwise it starts from zero and the
+	 remaining steps carry its result into ACC.  */
+      if (sum_mode == GET_MODE (dest))
+	{
+	  emit_insn (GEN_FCN (icode) (dest, src, ones, acc));
+	  return;
+	}
+
+      rtx tmp = gen_reg_rtx (sum_mode);
+      emit_insn (GEN_FCN (icode) (tmp, src, ones,
+				  force_reg (sum_mode,
+					     CONST0_RTX (sum_mode))));
+      src = tmp;
+      mode = sum_mode;
+    }
+
+  while (GET_MODE_NUNITS (mode).to_constant () > dest_nunits * 2)
+    {
+      insn_code icode = code_for_aarch64_addlp (extend_code, mode);
+      mode = insn_data[icode].operand[0].mode;
+      rtx tmp = gen_reg_rtx (mode);
+      emit_insn (GEN_FCN (icode) (tmp, src));
+      src = tmp;
+    }
+
+  emit_insn (GEN_FCN (code_for_aarch64_adalp (extend_code, mode)) (dest, acc,
+								   src));
+}
+
 /* Emit RTL corresponding to:
    insr TARGET, ELEM.  */
 
@@ -28188,6 +28272,46 @@ aarch64_evpc_ext (struct expand_vec_perm_d *d)
   return true;
 }
 
+/* Return true if D describes a scalable-vector permutation that takes the
+   last DIST elements from the first input and the remaining elements from
+   the second input.  */
+
+static bool
+aarch64_evpc_splice (struct expand_vec_perm_d *d)
+{
+  poly_int64 nelt = d->perm.length ();
+  HOST_WIDE_INT dist;
+
+  if (d->vec_flags != VEC_SVE_DATA
+      || d->one_vector_p
+      || nelt.is_constant ()
+      || !(nelt - d->perm[0]).is_constant (&dist)
+      || !IN_RANGE (dist, 1, INT_MAX)
+      || !d->perm.series_p (0, 1, nelt - dist, 1))
+    return false;
+
+  machine_mode pred_mode = aarch64_sve_pred_mode (d->vmode);
+  if (aarch64_svpattern_for_vl (pred_mode, dist)
+      == AARCH64_NUM_SVPATTERNS)
+    return false;
+
+  if (d->testing_p)
+    return true;
+
+  rtx_vector_builder builder (pred_mode, dist, 2);
+  for (HOST_WIDE_INT i = 0; i < dist; ++i)
+    builder.quick_push (CONST1_RTX (BImode));
+  for (HOST_WIDE_INT i = 0; i < dist; ++i)
+    builder.quick_push (CONST0_RTX (BImode));
+
+  rtx head = force_reg (pred_mode, builder.build ());
+  rtx pred = gen_reg_rtx (pred_mode);
+  emit_insn (gen_aarch64_sve_rev (pred_mode, pred, head));
+  emit_insn (gen_aarch64_sve_splice (d->vmode, d->target, pred,
+				     d->op0, d->op1));
+  return true;
+}
+
 /* Recognize patterns for the REV{64,32,16} insns, which reverse elements
    within each 64-bit, 32-bit or 16-bit granule.  */
 
@@ -28332,7 +28456,7 @@ aarch64_evpc_hvla (struct expand_vec_perm_d *d)
       return false;
 
   /* Used once we have verified that we can use UNSPEC to do the operation.  */
-  auto use_binary = [&](int unspec) -> bool
+  auto use_binary = [&](unspec unspec) -> bool
     {
       if (!d->testing_p)
 	{
@@ -28699,6 +28823,7 @@ aarch64_expand_vec_perm_const_1 (struct expand_vec_perm_d *d)
     {
       d->perm.rotate_inputs (1);
       std::swap (d->op0, d->op1);
+      std::swap (d->zero_op0_p, d->zero_op1_p);
     }
 
   if (((d->vec_flags == VEC_ADVSIMD && TARGET_SIMD)
@@ -28712,6 +28837,8 @@ aarch64_expand_vec_perm_const_1 (struct expand_vec_perm_d *d)
 	  if (aarch64_evpc_rev_local (d))
 	    return true;
 	  else if (aarch64_evpc_rev_global (d))
+	    return true;
+	  else if (aarch64_evpc_splice (d))
 	    return true;
 	  else if (aarch64_evpc_ext (d))
 	    return true;
@@ -29611,6 +29738,17 @@ aarch64_gen_ccmp_first (rtx_insn **prep_seq, rtx_insn **gen_seq,
       icode = CODE_FOR_cmpdi;
       break;
 
+    case E_HFmode:
+      if (!TARGET_FP_F16INST)
+	{
+	  end_sequence ();
+	  return NULL_RTX;
+	}
+      cmp_mode = HFmode;
+      cc_mode = aarch64_select_cc_mode (code, op0, op1);
+      icode = cc_mode == CCFPEmode ? CODE_FOR_fcmpehf : CODE_FOR_fcmphf;
+      break;
+
     case E_SFmode:
       cmp_mode = SFmode;
       cc_mode = aarch64_select_cc_mode (code, op0, op1);
@@ -29667,8 +29805,19 @@ aarch64_gen_ccmp_next (rtx_insn **prep_seq, rtx_insn **gen_seq, rtx prev,
   /* Exit early for modes that are ot handled to avoid O(n^2) part of expand_operands. */
   op_mode = TYPE_MODE (TREE_TYPE (treeop0));
   if (!(op_mode == QImode || op_mode == HImode || op_mode == SImode || op_mode == DImode
+	|| (op_mode == HFmode && TARGET_FP_F16INST)
 	|| op_mode == SFmode || op_mode == DFmode))
    return NULL_RTX;
+
+  /* A conditional comparison does not compare its operands when the preceding
+     condition is false, so it cannot raise the exception that the comparison
+     it replaces would raise.  CCFPE marks a comparison that raises Invalid for
+     a quiet NaN, and every comparison raises it for a signalling NaN.  Reject
+     it here, before the operands are expanded.  */
+  if (FLOAT_MODE_P (op_mode)
+      && (aarch64_fp_cc_mode (cmp_code, op_mode) == CCFPEmode
+	  || HONOR_SNANS (op_mode)))
+    return NULL_RTX;
 
   push_to_sequence (*prep_seq);
   expand_operands (treeop0, treeop1, NULL_RTX, &op0, &op1, EXPAND_NORMAL);
@@ -29692,13 +29841,10 @@ aarch64_gen_ccmp_next (rtx_insn **prep_seq, rtx_insn **gen_seq, rtx prev,
       cmp_mode = DImode;
       break;
 
+    case E_HFmode:
     case E_SFmode:
-      cmp_mode = SFmode;
-      cc_mode = aarch64_select_cc_mode (cmp_code, op0, op1);
-      break;
-
     case E_DFmode:
-      cmp_mode = DFmode;
+      cmp_mode = op_mode;
       cc_mode = aarch64_select_cc_mode (cmp_code, op0, op1);
       break;
 
@@ -31208,6 +31354,14 @@ aarch64_estimated_poly_value (poly_int64 val,
   /* If the core provides width information, use that.  */
   HOST_WIDE_INT over_128 = width_source - 128;
   return val.coeffs[0] + val.coeffs[1] * over_128 / 128;
+}
+
+/* Implement TARGET_POLY_INT_INDETERMINATE_BOUND.  */
+
+static poly_uint64
+aarch64_poly_int_indeterminate_bound ()
+{
+  return poly_uint64 (0, 15);
 }
 
 
@@ -34531,6 +34685,9 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_ESTIMATED_POLY_VALUE
 #define TARGET_ESTIMATED_POLY_VALUE aarch64_estimated_poly_value
+
+#undef TARGET_POLY_INT_INDETERMINATE_BOUND
+#define TARGET_POLY_INT_INDETERMINATE_BOUND aarch64_poly_int_indeterminate_bound
 
 #undef TARGET_ATTRIBUTE_TABLE
 #define TARGET_ATTRIBUTE_TABLE aarch64_attribute_table

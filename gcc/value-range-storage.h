@@ -58,7 +58,7 @@ public:
 
   // Stack initialization disallowed.
   vrange_storage (enum value_range_discriminator d) : m_discriminator (d) { }
-  const ENUM_BITFIELD(value_range_discriminator) m_discriminator : 4;
+  const enum value_range_discriminator m_discriminator : 4;
 };
 
 // Efficient memory storage for an irange.
@@ -162,15 +162,17 @@ class GTY((tag ("VR_FRANGE"))) frange_storage : public vrange_storage
   bool equal_p (const frange &r) const;
   bool fits_p (const frange &) const;
  private:
-  frange_storage (const frange &r) : vrange_storage (VR_FRANGE)
-    { set_frange (r); }
+  frange_storage (const frange &r);
   DISABLE_COPY_AND_ASSIGN (frange_storage);
+  static size_t size (const frange &r);
 
   enum value_range_kind m_kind;
-  REAL_VALUE_TYPE m_min;
-  REAL_VALUE_TYPE m_max;
+  // The max number of sub-ranges that fit in this storage.
+  const unsigned char m_max_ranges;
+  unsigned char m_num_ranges;
   bool m_pos_nan;
   bool m_neg_nan;
+  frange_pair m_pairs[1];
 };
 
 extern vrange_storage *ggc_alloc_vrange_storage (tree type);

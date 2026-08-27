@@ -31,6 +31,7 @@ typedef struct _slp_tree *slp_tree;
 #include "tree-ssa-operands.h"
 #include "gimple-match.h"
 #include "dominance.h"
+#include "ssa.h"
 
 /* Used for naming of new temporaries.  */
 enum vect_var_kind {
@@ -327,16 +328,18 @@ struct _slp_tree {
   /* Nodes that contain def-stmts of this node statements operands.  */
   vec<slp_tree> children;
 
-  /* A group of scalar stmts to be vectorized together.  */
+  /* A group of scalar stmts to be vectorized together.  Unused when
+     def_type is vect_external_def or vect_costant_def.  */
   vec<stmt_vec_info> stmts;
-  /* A group of scalar operands to be vectorized together.  */
+  /* A group of scalar operands to be vectorized together.  Unused
+     unless def_type is vect_external_def or vect_constant_def.  */
   vec<tree> ops;
   /* A set of lane indices that are live and to be code-generated from
      this SLP node.  */
   vec<unsigned> live_lanes;
 
   /* The representative that should be used for analysis and
-     code generation.  */
+     code generation.  NULL when code is VEC_PERM_EXPR.  */
   stmt_vec_info representative;
 
   struct {
@@ -346,28 +349,30 @@ struct _slp_tree {
       int reduc_idx;
   } cycle_info;
 
-  /* Load permutation relative to the stores, NULL if there is no
-     permutation.  */
+  /* Load permutation mapping outgoing vector lanes to lanes of
+     the single DR group the load accesses.  NULL if there is no
+     permutation.  Unused when this is not a load.  */
   load_permutation_t load_permutation;
   /* Lane permutation of the operands scalar lanes encoded as pairs
      of { operand number, lane number }.  The number of elements
-     denotes the number of output lanes.  */
+     denotes the number of output lanes.  Unused unless code is
+     VEC_PERM_EXPR.  */
   lane_permutation_t lane_permutation;
 
   tree vectype;
   /* Vectorized defs.  */
   vec<tree> vec_defs;
+  /* Insertion place for verification purposes.  Only set for
+     BB vectorization.  NULL denotes region entry.  */
+  gimple *si;
 
   /* Reference count in the SLP graph.  */
   unsigned int refcnt;
-  /* The maximum number of vector elements for the subtree rooted
-     at this node.  */
-  poly_uint64 max_nunits;
   /* The DEF type of this node.  */
   enum vect_def_type def_type;
   /* The number of scalar lanes produced by this node.  */
   unsigned int lanes;
-  /* The operation of this node.  */
+  /* The operation of this node.  Either VEC_PERM_EXPR or ERROR_MARK.  */
   enum tree_code code;
   /* For gather/scatter memory operations the scale each offset element
      should be multiplied by before being added to the base.  */
@@ -381,6 +386,7 @@ struct _slp_tree {
      as to avoid STLF fails because of related stores.  */
   bool avoid_stlf_fail;
 
+  /* The vertex index of this node when a full graph is built.  */
   int vertex;
 
   /* The kind of operation as determined by analysis and optional
@@ -2355,28 +2361,6 @@ vect_get_num_copies (vec_info *vinfo, slp_tree node)
   return vect_get_num_vectors (vf, vectype);
 }
 
-/* Update maximum unit count *MAX_NUNITS so that it accounts for
-   NUNITS.  *MAX_NUNITS can be 1 if we haven't yet recorded anything.  */
-
-inline void
-vect_update_max_nunits (poly_uint64 *max_nunits, poly_uint64 nunits)
-{
-  /* All unit counts have the form vec_info::vector_size * X for some
-     rational X, so two unit sizes must have a common multiple.
-     Everything is a multiple of the initial value of 1.  */
-  *max_nunits = force_common_multiple (*max_nunits, nunits);
-}
-
-/* Update maximum unit count *MAX_NUNITS so that it accounts for
-   the number of units in vector type VECTYPE.  *MAX_NUNITS can be 1
-   if we haven't yet recorded any vector types.  */
-
-inline void
-vect_update_max_nunits (poly_uint64 *max_nunits, tree vectype)
-{
-  vect_update_max_nunits (max_nunits, TYPE_VECTOR_SUBPARTS (vectype));
-}
-
 /* Return the vectorization factor that should be used for costing
    purposes while vectorizing the loop described by LOOP_VINFO.
    Pick a reasonable estimate if the vectorization factor isn't
@@ -2532,6 +2516,9 @@ extern bool vect_is_simple_use (vec_info *, slp_tree,
 				unsigned, tree *, slp_tree *,
 				enum vect_def_type *,
 				tree *, stmt_vec_info * = NULL);
+extern bool vect_is_simple_use (vec_info *, slp_tree,
+				unsigned, slp_tree *,
+				enum vect_def_type *, tree *);
 extern bool vect_maybe_update_slp_op_vectype (slp_tree, tree);
 extern tree perm_mask_for_reverse (tree);
 extern bool supportable_widening_operation (code_helper, tree, tree, bool,
@@ -2543,7 +2530,6 @@ extern bool supportable_narrowing_operation (code_helper, tree, tree,
 extern bool supportable_indirect_convert_operation (code_helper,
 						    tree, tree,
 						    vec<std::pair<tree, tree_code> > &,
-						    tree = NULL_TREE,
 						    slp_tree = NULL);
 extern int compare_step_with_zero (vec_info *, stmt_vec_info);
 
@@ -2589,10 +2575,10 @@ extern void vect_finish_stmt_generation (vec_info *, stmt_vec_info, gimple *,
 extern opt_result vect_mark_stmts_to_be_vectorized (loop_vec_info, bool *);
 extern tree vect_get_store_rhs (stmt_vec_info);
 void vect_get_vec_defs (vec_info *, slp_tree,
-			tree, vec<tree> *,
-			tree = NULL, vec<tree> * = NULL,
-			tree = NULL, vec<tree> * = NULL,
-			tree = NULL, vec<tree> * = NULL);
+			bool, vec<tree> *,
+			bool = false, vec<tree> * = NULL,
+			bool = false, vec<tree> * = NULL,
+			bool = false, vec<tree> * = NULL);
 extern tree vect_init_vector (vec_info *, stmt_vec_info, tree, tree,
                               gimple_stmt_iterator *);
 extern tree vect_get_slp_vect_def (slp_tree, unsigned);
@@ -2620,7 +2606,7 @@ extern tree vect_gen_while (gimple_seq *, tree, tree, tree,
 extern tree vect_gen_while_not (gimple_seq *, tree, tree, tree);
 extern opt_result vect_get_vector_types_for_stmt (vec_info *,
 						  stmt_vec_info, tree *,
-						  tree *, unsigned int = 0);
+						  unsigned int = 0);
 extern opt_tree vect_get_mask_type_for_stmt (stmt_vec_info, unsigned int = 0);
 
 /* In tree-if-conv.cc.  */
@@ -2631,7 +2617,6 @@ extern bool vect_can_force_dr_alignment_p (const_tree, poly_uint64);
 extern enum dr_alignment_support vect_supportable_dr_alignment
 				   (vec_info *, dr_vec_info *, tree, int,
 				    bool = false);
-extern tree vect_get_smallest_scalar_type (stmt_vec_info, tree);
 extern opt_result vect_analyze_data_ref_dependences (loop_vec_info, unsigned int *);
 extern bool vect_slp_analyze_instance_dependence (vec_info *, slp_instance);
 extern opt_result vect_enhance_data_refs_alignment (loop_vec_info);
@@ -2774,7 +2759,7 @@ extern bool vect_transform_slp_perm_load (vec_info *, slp_tree, const vec<tree> 
 extern bool vectorizable_slp_permutation (vec_info *, gimple_stmt_iterator *,
 					  slp_tree, stmt_vector_for_cost *);
 extern bool vect_slp_analyze_operations (vec_info *);
-extern void vect_schedule_slp (vec_info *, const vec<slp_instance> &);
+extern bool vect_schedule_slp (vec_info *, vec<slp_instance> &, bool);
 extern opt_result vect_analyze_slp (vec_info *, unsigned, bool);
 extern bool vect_make_slp_decision (loop_vec_info);
 extern bool vect_detect_hybrid_slp (loop_vec_info);
@@ -2804,6 +2789,8 @@ extern tree prepare_vec_mask (loop_vec_info, tree, tree, tree,
 			      gimple_stmt_iterator *);
 extern tree vect_get_mask_load_else (int, tree);
 extern bool vect_load_perm_consecutive_p (slp_tree, unsigned = UINT_MAX);
+extern bool vect_get_num_copies_for_invariant (vec_info *, slp_tree,
+					       unsigned *);
 
 /* In tree-vect-patterns.cc.  */
 extern void
@@ -2998,6 +2985,34 @@ vect_is_extending_load (class vec_info *vinfo, stmt_vec_info stmt_info)
   return (def_stmt_info
 	  && STMT_VINFO_DATA_REF (def_stmt_info)
 	  && DR_IS_READ (STMT_VINFO_DATA_REF (def_stmt_info)));
+}
+
+/* Return true if STMT_INFO truncates the input of a store.  */
+inline bool
+vect_is_truncating_store (class vec_info *vinfo, stmt_vec_info stmt_info)
+{
+  /* Although this is quite large for an inline function, this part
+     at least should be inline.  */
+  gassign *assign = dyn_cast<gassign *> (stmt_info->stmt);
+  if (!assign || !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (assign)))
+    return false;
+
+  tree rhs = gimple_assign_rhs1 (stmt_info->stmt);
+  tree lhs = gimple_assign_lhs (assign);
+  tree lhs_type = TREE_TYPE (lhs);
+  tree rhs_type = TREE_TYPE (rhs);
+  if (!INTEGRAL_TYPE_P (lhs_type) || !INTEGRAL_TYPE_P (rhs_type)
+      || TYPE_PRECISION (lhs_type) >= TYPE_PRECISION (rhs_type))
+    return false;
+
+  gimple *use_stmt;
+  use_operand_p use_p;
+  if (!single_imm_use (lhs, &use_p, &use_stmt))
+    return false;
+
+  stmt_vec_info use_stmt_info = vinfo->lookup_stmt (use_stmt);
+  return (use_stmt_info && STMT_VINFO_DATA_REF (use_stmt_info)
+	  && DR_IS_WRITE (STMT_VINFO_DATA_REF (use_stmt_info)));
 }
 
 /* Return true if STMT_INFO is an integer truncation.  */

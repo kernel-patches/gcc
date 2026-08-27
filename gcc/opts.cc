@@ -1499,9 +1499,8 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
       opts->x_flag_var_tracking_assignments = 0;
     }
 
-  /* One could use EnabledBy, but it would lead to a circular dependency.  */
-  if (!opts_set->x_flag_var_tracking_uninit)
-    opts->x_flag_var_tracking_uninit = opts->x_flag_var_tracking;
+  if (opts_set->x_flag_var_tracking_uninit && opts->x_flag_var_tracking_uninit)
+    opts->x_flag_var_tracking = 1;
 
   if (!opts_set->x_flag_var_tracking_assignments)
     opts->x_flag_var_tracking_assignments
@@ -1537,11 +1536,8 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
 		    " %<-fstrict-flex-arrays%> is not present");
       }
 
-  if ((opts->x_flag_openmp_ompt || opts->x_flag_openmp_ompt_detailed)
-      && !opts->x_flag_openmp)
-    error_at (
-      loc,
-      "%<-fopenmp-ompt%> and %<-fopenmp-ompt-detailed%> require %<-fopenmp%>");
+  if (opts->x_flag_openmp_ompt && !opts->x_flag_openmp)
+    error_at (loc, "%<-fopenmp-ompt%> requires %<-fopenmp%>");
 
   diagnose_options (opts, opts_set, loc);
 }

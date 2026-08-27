@@ -2843,6 +2843,9 @@ DEFHOOK
  or @code{gen_ccmp_next}.  It may return @code{NULL} if the combination of\n\
  @var{prev} and this comparison is not supported, otherwise the result must\n\
  be appropriate for passing to @code{gen_ccmp_next} or @code{cbranch_optab}.\n\
+ The comparison is not performed when @var{prev} is false, so this function\n\
+ has to return @code{NULL} for a comparison that raises an exception which\n\
+ has to be preserved.\n\
  @var{code} is the @code{rtx_code} of the compare for @var{op0} and @var{op1}.\n\
  @var{bit_code} is @code{AND} or @code{IOR}, which is the op on the compares.",
  rtx, (rtx_insn **prep_seq, rtx_insn **gen_seq, rtx prev, rtx_code cmp_code, tree op0, tree op1, rtx_code bit_code),
@@ -4216,6 +4219,16 @@ the @code{POLY_VALUE_MIN}, @code{POLY_VALUE_MAX} and\n\
 implementation returns the lowest possible value of @var{val}.",
  HOST_WIDE_INT, (poly_int64 val, poly_value_estimate_kind kind),
  default_estimated_poly_value)
+
+DEFHOOK
+(poly_int_indeterminate_bound,
+ "Return a @code{poly_uint64} whose coefficients give conservative\n\
+inclusive upper bounds for the corresponding @code{poly_int}\n\
+indeterminates.  The constant coefficient is ignored and should be zero.\n\
+This hook is used for correctness rather than for costing, so the returned\n\
+bounds must be safe for all architecturally-valid runtime values.",
+ poly_uint64, (void),
+ NULL)
 
 /* Permit speculative instructions in delay slots during delayed-branch
    scheduling.  */

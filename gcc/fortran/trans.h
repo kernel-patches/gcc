@@ -564,7 +564,8 @@ void gfc_conv_subref_array_arg (gfc_se *, gfc_expr *, int, sym_intent, bool,
 				const gfc_symbol *fsym = NULL,
 				const char *proc_name = NULL,
 				gfc_symbol *sym = NULL,
-				bool check_contiguous = false);
+				bool check_contiguous = false,
+				bool deep_copy = false);
 
 void gfc_conv_is_contiguous_expr (gfc_se *, gfc_expr *);
 
@@ -640,6 +641,9 @@ tree gfc_build_array_ref (tree, tree, tree,
 
 /* Build an array ref using pointer arithmetic.  */
 tree gfc_build_spanned_array_ref (tree base, tree offset, tree span);
+
+/* Return the descriptor holding the span of a pointer array decl.  */
+tree gfc_get_span_descriptor (tree);
 
 /* Creates a label.  Decl is artificial if label_id == NULL_TREE.  */
 tree gfc_build_label_decl (tree);
@@ -1015,12 +1019,6 @@ extern GTY(()) tree gfor_fndecl_cfi_deep_copy_array;
 
 /* gfortran-specific declaration information, the _CONT versions denote
    arrays with CONTIGUOUS attribute.  */
-
-#define GFC_DTYPE_ELEM_LEN 0
-#define GFC_DTYPE_VERSION 1
-#define GFC_DTYPE_RANK 2
-#define GFC_DTYPE_TYPE 3
-#define GFC_DTYPE_ATTRIBUTE 4
 
 enum gfc_array_kind
 {

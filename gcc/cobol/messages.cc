@@ -126,6 +126,7 @@ std::set<cbl_diag_t> cbl_diagnostics {
 
   { IbmCallFd, "-Wcall-fd", diagnostics::kind::error, dialect_ibm_e },
   { IbmCdf, "-Wibm-cdf", diagnostics::kind::error, dialect_ibm_e },
+  { IbmContentExpr, "-Wcontent-expr", diagnostics::kind::error, dialect_ibm_e },
   { IbmEjectE, "-Wcobol-eject", diagnostics::kind::error, dialect_ibm_e },
   { IbmLengthOf, "-Wlength-of", diagnostics::kind::error, dialect_ibm_mf_gnu },
   { IbmEqualAssignE, "-Wequal-assign", diagnostics::kind::error, dialect_ibm_e },
@@ -137,12 +138,14 @@ std::set<cbl_diag_t> cbl_diagnostics {
   { IbmVolatileE, "-Wcobol-volatile", diagnostics::kind::error, dialect_ibm_e },
   { IbmVolatileW, "-Wcobol-volatile", diagnostics::kind::warning, dialect_ibm_e },
 
-  // RESUME not supported by IBM
-  { IsoResume, "-Wcobol-resume", diagnostics::kind::error, dialect_ibm_e },
   // IBM, MF, and GNU all support ASSIGN TO filename, so we keep mum. 
   { IsoAssignFile, "-Wassign-file", diagnostics::kind::ignored, dialect_ibm_mf_gnu },
-  
+  // ISO says for B REDEFINES A, Length(B) <= Length(A), others disagree
+  { IsoRedefinesGrow, "-Wredefines-grow", diagnostics::kind::error, dialect_ibm_mf_gnu },
+  // RESUME not supported by IBM
+  { IsoResume, "-Wcobol-resume", diagnostics::kind::error, dialect_ibm_e },
 
+  { MfAnyLength, "-Wany-length", diagnostics::kind::error, dialect_mf_gnu },
   { MfAssignExternal, "-Wassign-external", diagnostics::kind::error, dialect_mf_gnu },
   { MfBinaryLongLong, "-Wbinary-long-long", diagnostics::kind::error, dialect_mf_gnu },
   { MfCallGiving, "-Wcall-giving", diagnostics::kind::error, dialect_mf_gnu },
@@ -150,19 +153,20 @@ std::set<cbl_diag_t> cbl_diagnostics {
   { MfCdfDollar, "-Wcdf-dollar", diagnostics::kind::error, dialect_mf_gnu },
   { MfComp6, "-Wcomp-6", diagnostics::kind::error, dialect_mf_gnu },
   { MfCompX, "-Wcomp-x", diagnostics::kind::error, dialect_mf_gnu },
-  { MfLevel_1_Occurs, "-Wlevel-1-occurs", diagnostics::kind::error, dialect_mf_gnu },
   { MfLevel78, "-Wlevel-78", diagnostics::kind::error, dialect_mf_gnu },
-  { MfAnyLength, "-Wany-length", diagnostics::kind::error, dialect_mf_gnu },
+  { MfLevel_1_Occurs, "-Wlevel-1-occurs", diagnostics::kind::error, dialect_mf_gnu },
   { MfMoveIndex, "-Wmove-index", diagnostics::kind::error, dialect_gnu_e },
   { MfMovePointer, "-Wmove-pointer", diagnostics::kind::error, dialect_mf_gnu },
+  { MfRedefinesFirst, "-Wredefines-first", diagnostics::kind::error, dialect_mf_gnu },
   { MfReturningNum, "-Wreturning-number", diagnostics::kind::error, dialect_mf_gnu },
-  { MfUsageTypename, "-Wusage-typename", diagnostics::kind::error, dialect_mf_gnu },
+  { MfSetNumeric, "-Wset-numeric", diagnostics::kind::error, dialect_mf_gnu },
   { MfTrailing, "-Winspect-trailing", diagnostics::kind::error, dialect_mf_gnu },
+  { MfUsageTypename, "-Wusage-typename", diagnostics::kind::error, dialect_mf_gnu },
 
   { LexIncludeE, "-Winclude-file-not-found", diagnostics::kind::error }, 
   { LexIncludeOkN, "-Winclude-file-found", diagnostics::kind::note }, 
   { LexIndicatorE, "-Wstray-indicator", diagnostics::kind::error }, 
-  { LexInputN, "-Wcopybook-found", diagnostics::kind::note }, 
+  { LexInputN, "-Wcopybook-found", diagnostics::kind::ignored }, 
   { LexLineE, "-Wbad-line-directive", diagnostics::kind::error }, 
   { LexPreprocessE, "-Wpreprocessor-error", diagnostics::kind::error }, 
   { LexReplaceE, "-Wreplace-error", diagnostics::kind::error },
@@ -170,6 +174,7 @@ std::set<cbl_diag_t> cbl_diagnostics {
   { LexSeparatorE, "-Woperator-space", diagnostics::kind::error, dialect_mf_gnu }, 
 
   { Par78CdfDefinedW, "-Wlevel-78-defined", diagnostics::kind::warning },
+  { ParDynamicCall, "-Wdynamic-call", diagnostics::kind::ignored }, 
   { ParIconvE, "-Wiconv-error", diagnostics::kind::note }, 
   { ParInfoI, "-Wentry-convention", diagnostics::kind::note }, 
   { ParLangInfoW, "-Wnllanginfo-error", diagnostics::kind::warning },
@@ -232,18 +237,47 @@ cbl_diagnostic_kind( cbl_diag_id_t id, diagnostics::kind kind ) {
   return false;
 }
 
+/*
+ * Implementation note: lang.opt sets the initial value for each variable
+ * associated with an option.  We ignore that value in the cbl_diagnostics
+ * table, above.  Consequently there is no indication in that table whether or
+ * not an option is off by default.
+ *
+ * For the most part it doesn't matter.  Warnings are on by default and
+ * generally defeated by dialect settings.  Notes however cannot have a default
+ * setting to diagnostics::kind::note because then they would always appear.
+ * So, in this function for those options we ignore the table, too, and
+ * hard-code the diagnositic's kind.
+ */
 void
 cobol_warning( cbl_diag_id_t id, int yn, bool warning_as_error ) {
   gcc_assert( 0 <= yn && yn <= 1 );
 
   diagnostics::kind kind = yn?
     diagnostics::kind::warning : diagnostics::kind::ignored;
+
+  // Some warnings are just notes.
+  if( kind == diagnostics::kind::warning ) {
+    switch(id) {
+    case LexInputN:
+    case ParDynamicCall:
+      kind = diagnostics::kind::note;
+      break;
+    default:
+      break;
+    }
+  }
   
   if( warning_as_error ) {
     kind = diagnostics::kind::error;
   }
   
   cbl_diagnostic_kind(id, kind);
+}
+
+bool
+cbl_diagnostic_ignored( cbl_diag_id_t id ) {
+  return diagnostics::kind::ignored == kind_of(id);
 }
 
 /*
@@ -404,8 +438,14 @@ dialect_ok( const cbl_loc_t& loc, cbl_diag_id_t id, const char term[], bool ok )
     if( !ok ) return true; // current dialect correctly does not match the feature
   }
 
-  cbl_message(loc, id, "%qs %s %<-dialect %s%>",
-              term, verb, cbl_dialect_str(diag->dialect));
+  if( term[0] == '-' ) {
+    term++; // do not quote
+    cbl_message(loc, id, "%s %s %<-dialect %s%>",
+                term, verb, cbl_dialect_str(diag->dialect));
+  } else {
+    cbl_message(loc, id, "%qs %s %<-dialect %s%>",
+                term, verb, cbl_dialect_str(diag->dialect));
+  }
   return false;
 }
 

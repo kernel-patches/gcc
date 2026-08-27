@@ -196,7 +196,7 @@ struct reg_stat_type {
 
   unsigned HOST_WIDE_INT	last_set_nonzero_bits;
   unsigned short		last_set_sign_bit_copies;
-  ENUM_BITFIELD(machine_mode)	last_set_mode : MACHINE_MODE_BITSIZE;
+  machine_mode			last_set_mode : MACHINE_MODE_BITSIZE;
 
   /* Set to true if references to register n in expressions should not be
      used.  last_set_invalid is set nonzero when this register is being
@@ -231,7 +231,7 @@ struct reg_stat_type {
      truncation if we know that value already contains a truncated
      value.  */
 
-  ENUM_BITFIELD(machine_mode)	truncated_to_mode : MACHINE_MODE_BITSIZE;
+  machine_mode			truncated_to_mode : MACHINE_MODE_BITSIZE;
 };
 
 
@@ -825,7 +825,8 @@ do_SUBST_LINK (struct insn_link **into, struct insn_link *newval)
 
 static bool
 combine_validate_cost (rtx_insn *i0, rtx_insn *i1, rtx_insn *i2, rtx_insn *i3,
-		       rtx newpat, rtx newi2pat, rtx newotherpat)
+		       rtx newpat, rtx newi2pat, rtx newotherpat,
+		       int insn_code, int i2_code, int other_code)
 {
   int i0_cost, i1_cost, i2_cost, i3_cost;
   int new_i2_cost, new_i3_cost;
@@ -867,7 +868,7 @@ combine_validate_cost (rtx_insn *i0, rtx_insn *i1, rtx_insn *i2, rtx_insn *i3,
   rtx tmp = PATTERN (i3);
   PATTERN (i3) = newpat;
   int tmpi = INSN_CODE (i3);
-  INSN_CODE (i3) = -1;
+  INSN_CODE (i3) = insn_code;
   new_i3_cost = insn_cost (i3, optimize_this_for_speed_p);
   PATTERN (i3) = tmp;
   INSN_CODE (i3) = tmpi;
@@ -876,7 +877,7 @@ combine_validate_cost (rtx_insn *i0, rtx_insn *i1, rtx_insn *i2, rtx_insn *i3,
       tmp = PATTERN (i2);
       PATTERN (i2) = newi2pat;
       tmpi = INSN_CODE (i2);
-      INSN_CODE (i2) = -1;
+      INSN_CODE (i2) = i2_code;
       new_i2_cost = insn_cost (i2, optimize_this_for_speed_p);
       PATTERN (i2) = tmp;
       INSN_CODE (i2) = tmpi;
@@ -897,7 +898,7 @@ combine_validate_cost (rtx_insn *i0, rtx_insn *i1, rtx_insn *i2, rtx_insn *i3,
       tmp = PATTERN (undobuf.other_insn);
       PATTERN (undobuf.other_insn) = newotherpat;
       tmpi = INSN_CODE (undobuf.other_insn);
-      INSN_CODE (undobuf.other_insn) = -1;
+      INSN_CODE (undobuf.other_insn) = other_code;
       new_other_cost = insn_cost (undobuf.other_insn,
 				  optimize_this_for_speed_p);
       PATTERN (undobuf.other_insn) = tmp;
@@ -4134,7 +4135,9 @@ try_combine (rtx_insn *i3, rtx_insn *i2, rtx_insn *i1, rtx_insn *i0,
 
   /* Reject this combination if insn_cost reports that the replacement
      instructions are more expensive than the originals.  */
-  if (!combine_validate_cost (i0, i1, i2, i3, newpat, newi2pat, other_pat))
+  if (!combine_validate_cost (i0, i1, i2, i3, newpat, newi2pat, other_pat,
+			      insn_code_number, i2_code_number,
+			      other_code_number))
     {
       undo_all ();
       return 0;
@@ -5951,6 +5954,10 @@ combine_simplify_rtx (rtx x, machine_mode op0_mode, bool in_dest, bool in_cond)
   /* A little bit of algebraic simplification here.  */
   switch (code)
     {
+    case PREFETCH:
+      /* A prefetch reaches memory through an address, and targets recognize
+	 that address with the same predicates they use for a MEM, so it
+	 needs the same treatment.  */
     case MEM:
       /* Ensure that our address has any ASHIFTs converted to MULT in case
 	 address-recognizing predicates are called later.  */
@@ -12867,50 +12874,6 @@ simplify_comparison (enum rtx_code code, rtx *pop0, rtx *pop1)
 	    {
 	      op0 = gen_lowpart_or_truncate (tmode, XEXP (op0, 0));
 	      continue;
-	    }
-
-	  /* If this is (and:M1 (subreg:M1 X:M2 0) (const_int C1)) where C1
-	     fits in both M1 and M2 and the SUBREG is either paradoxical
-	     or represents the low part, permute the SUBREG and the AND
-	     and try again.  */
-	  if (GET_CODE (XEXP (op0, 0)) == SUBREG
-	      && CONST_INT_P (XEXP (op0, 1)))
-	    {
-	      unsigned HOST_WIDE_INT c1 = INTVAL (XEXP (op0, 1));
-	      /* Require an integral mode, to avoid creating something like
-		 (AND:SF ...).  */
-	      if ((is_a <scalar_int_mode>
-		   (GET_MODE (SUBREG_REG (XEXP (op0, 0))), &tmode))
-		  /* It is unsafe to commute the AND into the SUBREG if the
-		     SUBREG is paradoxical and WORD_REGISTER_OPERATIONS is
-		     not defined.  As originally written the upper bits
-		     have a defined value due to the AND operation.
-		     However, if we commute the AND inside the SUBREG then
-		     they no longer have defined values and the meaning of
-		     the code has been changed.
-		     Also C1 should not change value in the smaller mode,
-		     see PR67028 (a positive C1 can become negative in the
-		     smaller mode, so that the AND does no longer mask the
-		     upper bits).  */
-		  && ((WORD_REGISTER_OPERATIONS
-		       && mode_width > GET_MODE_PRECISION (tmode)
-		       && mode_width <= BITS_PER_WORD
-		       && trunc_int_for_mode (c1, tmode) == (HOST_WIDE_INT) c1)
-		      || (mode_width <= GET_MODE_PRECISION (tmode)
-			  && subreg_lowpart_p (XEXP (op0, 0))))
-		  && mode_width <= HOST_BITS_PER_WIDE_INT
-		  && HWI_COMPUTABLE_MODE_P (tmode)
-		  && (c1 & ~mask) == 0
-		  && (c1 & ~GET_MODE_MASK (tmode)) == 0
-		  && c1 != mask
-		  && c1 != GET_MODE_MASK (tmode))
-		{
-		  op0 = simplify_gen_binary (AND, tmode,
-					     SUBREG_REG (XEXP (op0, 0)),
-					     gen_int_mode (c1, tmode));
-		  op0 = gen_lowpart (mode, op0);
-		  continue;
-		}
 	    }
 
 	  /* Convert (ne (and (not X) 1) 0) to (eq (and X 1) 0).  */

@@ -155,10 +155,11 @@ gimple_assign_rhs_to_tree (gimple *stmt)
 /* Choose either CUR or NEXT as the leader DECL for a partition.
    Prefer ignored decls, to simplify debug dumps and reduce ambiguity
    out of the same user variable being in multiple partitions (this is
-   less likely for compiler-introduced temps).  */
+   less likely for compiler-introduced temps).  Also used by out-of-SSA
+   to work out which variable a partition will be given.  */
 
-static tree
-leader_merge (tree cur, tree next)
+tree
+expand_leader_merge (tree cur, tree next)
 {
   if (cur == NULL || cur == next)
     return next;
@@ -251,7 +252,8 @@ set_rtl (tree t, rtx x)
       else
 	gcc_unreachable ();
 
-      tree next = skip ? cur : leader_merge (cur, SSAVAR (t) ? SSAVAR (t) : t);
+      tree next
+	= skip ? cur : expand_leader_merge (cur, SSAVAR (t) ? SSAVAR (t) : t);
 
       if (cur != next)
 	{
@@ -1993,9 +1995,11 @@ defer_stack_allocation (tree var, bool toplevel)
   if (flag_stack_protect || asan_sanitize_stack_p ())
     return true;
 
-  unsigned int align = TREE_CODE (var) == SSA_NAME
-    ? TYPE_ALIGN (TREE_TYPE (var))
-    : DECL_ALIGN (var);
+  /* Use the same effective alignment that expand_one_stack_var_1 would use.
+     If that alignment exceeds MAX_SUPPORTED_STACK_ALIGNMENT, defer
+     the variable so that expand_stack_vars handles its large alignment,
+     rather than calling expand_one_stack_var_1 and failing its assertion.  */
+  unsigned int align = align_local_variable (var, false) * BITS_PER_UNIT;
 
   /* We handle "large" alignment via dynamic allocation.  We want to handle
      this extra complication in only one place, so defer them.  */
@@ -2458,6 +2462,36 @@ stack_protect_return_slot_p ()
 	  return true;
       }
   return false;
+}
+
+/* Verify that partitions which claim to be the same object really are at the
+   same address.  MEM_EXPR-based disambiguation identifies a location by a
+   MEM_EXPR base and an offset from it, so two stack slots carrying one
+   MEM_EXPR read as a single object, which lets an access to one be redirected
+   to the other.  out-of-SSA keeps them apart, see the comment above
+   split_overlapping_partition_decls.
+
+   Call this once the RTL of every partition is final.  The partition of a
+   PARM_DECL or RESULT_DECL default definition is given the MEM_EXPR of any
+   other variable in it while its names are walked, and only gets the decl
+   back when its RTL is restored in pass_expand::execute.  */
+
+static void
+verify_partition_mem_exprs (void)
+{
+  hash_map<tree, rtx> slots;
+  for (unsigned i = 0; i < num_var_partitions (SA.map); i++)
+    {
+      rtx x = SA.partition_to_pseudo[i];
+      if (!x || !MEM_P (x) || !MEM_EXPR (x))
+	continue;
+      bool existed;
+      rtx &known = slots.get_or_insert (MEM_EXPR (x), &existed);
+      if (!existed)
+	known = x;
+      else
+	gcc_assert (rtx_equal_p (XEXP (known, 0), XEXP (x, 0)));
+    }
 }
 
 /* Expand all variables used in the function.  */
@@ -7216,6 +7250,9 @@ pass_expand::execute (function *fun)
 	  SET_DECL_RTL (var, in);
 	}
     }
+
+  if (flag_checking)
+    verify_partition_mem_exprs ();
 
   /* If this function is `main', emit a call to `__main'
      to run global initializers, etc.  */

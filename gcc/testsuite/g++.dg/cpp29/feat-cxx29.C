@@ -469,8 +469,8 @@
 
 #ifndef __cpp_designated_initializers
 #  error "__cpp_designated_initializers"
-#elif __cpp_designated_initializers != 201707
-#  error "__cpp_designated_initializers != 201707"
+#elif __cpp_designated_initializers != 202606
+#  error "__cpp_designated_initializers != 202606"
 #endif
 
 #ifndef __cpp_constexpr_in_decltype
@@ -487,8 +487,8 @@
 
 #ifndef __cpp_concepts
 #  error "__cpp_concepts"
-#elif __cpp_concepts != 202002
-#  error "__cpp_concepts != 202002"
+#elif __cpp_concepts != 202606
+#  error "__cpp_concepts != 202606"
 #endif
 
 #ifndef __cpp_using_enum
@@ -563,8 +563,8 @@
 
 #ifndef __cpp_named_character_escapes
 #  error "__cpp_named_character_escapes"
-#elif __cpp_named_character_escapes != 202207
-#  error "__cpp_named_character_escapes != 202207"
+#elif __cpp_named_character_escapes != 202606
+#  error "__cpp_named_character_escapes != 202606"
 #endif
 
 #ifndef __cpp_static_call_operator

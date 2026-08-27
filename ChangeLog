@@ -1,3 +1,86 @@
+2026-08-21  David Faust  <david.faust@oss.qualcomm.com>
+
+	* MAINTAINERS: Regenerate.
+	* MAINTAINERS.yml: Update my email and add myself to DCO.
+
+2026-08-19  Claudio Bantaloukas  <claudio.bantaloukas@arm.com>
+
+	PR other/126226
+	* .gitignore: Ignore python eggs.
+	* pyproject.toml: New file.
+
+2026-08-19  Longjun Luo  <luolongjuna@gmail.com>
+
+	* MAINTAINERS.yml: Add myself.
+	* MAINTAINERS (Write After Approval): Regenerate.
+	(Contributing under the DCO): Regenerate.
+
+2026-08-18  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS.yml (users): Add forgeid for some users.
+	(subsystems): Add some labels and teams to the data.
+
+2026-08-18  Claudio Bantaloukas  <claudio.bantaloukas@arm.com>
+
+	* MAINTAINERS.yml: Add inactive_email entries.
+
+2026-08-17  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* Makefile.def (dependencies): Remove the configure-target-libstdc++-v3
+	on configure-target-libgomp dependency.
+	* Makefile.in: Regenerate.
+
+2026-08-14  Pierre-Emmanuel Patry  <pierre-emmanuel.patry@embecosm.com>
+
+	* MAINTAINERS: Regenerate.
+	* MAINTAINERS.yml: Add myself to rust and libgrust maintainers.
+
+2026-08-10  Tobias Burnus  <tburnus@baylibre.com>
+
+	* MAINTAINERS.yml (Burnus): Add private email as
+	additional active email.
+
+2026-08-10  Surya Kumari Jangala  <jskumari@linux.ibm.com>
+
+	* MAINTAINERS.yml: Add myself.
+	* MAINTAINERS: Regenerate.
+
+2026-08-07  Michael Meissner  <meissner@linux.ibm.com>
+
+	* MAINTAINERS.yml: Update Michael Meissner's information.
+	* MAINTAINERS: Regenerate.
+
+2026-08-07  Michael Meissner  <meissner@linux.ibm.com>
+
+	* MAINTAINERS: Update Michael Meissner to be a PowerPC maintainer.
+	Update to use meissner@gcc.gnu.org email address instead of
+	gnu@the-meissners.org.  Drop Michael Meissner being a scheduler maintainer.
+	* MAINTAINERS.yml: Update.
+
+2026-08-04  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* Makefile.tpl ([+compare-target+]): Run object comparisons through an
+	invocation-specific parallel sub-make.  Collect sorted failure shards
+	and clean temporary state on exit.
+	* Makefile.in: Regenerate.
+	* configure: Regenerate.
+
+2026-08-04  Jim Lin  <jim@andestech.com>
+
+	* MAINTAINERS: Add myself.
+	* MAINTAINERS.yml: Regenerate.
+
+2026-07-25  Egas Ribeiro  <egas.g.ribeiro@gmail.com>
+
+	* MAINTAINERS: Add myself.
+	* MAINTAINERS.yml: Regenerate.
+
+2026-07-24  Claudio Bantaloukas  <claudio.bantaloukas@arm.com>
+
+	* .github/CONTRIBUTING.md: Update text.
+	* .github/PULL_REQUEST_TEMPLATE.md: Link
+	to CONTRIBUTING.md directly.
+
 2026-07-22  Andrea Pinski  <andrew.pinski@oss.qualcomm.com>
 
 	* MAINTAINERS.yml: Update my name.

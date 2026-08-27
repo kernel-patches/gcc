@@ -3099,6 +3099,48 @@ gimple_fold_builtin_fputs (gimple_stmt_iterator *gsi,
     }
 }
 
+/* Fold a call to fwrite (PTR, SIZE, N, STREAM) at *GSI.  UNLOCKED says whether
+   the callee is fwrite_unlocked rather than fwrite.  A call that transfers a
+   single byte and whose result is nobody's business writes the same byte as
+   fputc (*PTR, STREAM), which reaches the stream without going through the
+   generic buffered-write path.  Return true if the call was folded.  */
+
+static bool
+gimple_fold_builtin_fwrite (gimple_stmt_iterator *gsi, bool unlocked)
+{
+  gimple *stmt = gsi_stmt (*gsi);
+
+  /* fwrite reports the number of items transferred and fputc the character
+     written, so only fold when nothing looks at the result.  */
+  if (gimple_call_lhs (stmt))
+    return false;
+
+  /* fwrite transfers SIZE * N bytes, so writing a single byte needs both
+     counts to be one: no other pair of non-negative values multiplies to
+     one.  */
+  if (!integer_onep (gimple_call_arg (stmt, 1))
+      || !integer_onep (gimple_call_arg (stmt, 2)))
+    return false;
+
+  /* If we're using an unlocked function, assume the other unlocked
+     functions exist explicitly.  */
+  tree const fn_fputc = (unlocked
+			 ? builtin_decl_explicit (BUILT_IN_FPUTC_UNLOCKED)
+			 : builtin_decl_implicit (BUILT_IN_FPUTC));
+  if (!fn_fputc || (!gimple_vdef (stmt) && gimple_in_ssa_p (cfun)))
+    return false;
+
+  location_t loc = gimple_location (stmt);
+  gimple_seq stmts = NULL;
+  tree byte = gimple_load_first_char (loc, gimple_call_arg (stmt, 0), &stmts);
+  tree c = gimple_convert (&stmts, integer_type_node, byte);
+  tree stream = gimple_call_arg (stmt, 3);
+  gcall *repl = gimple_build_call (fn_fputc, 2, c, stream);
+  gimple_seq_add_stmt_without_update (&stmts, repl);
+  gsi_replace_with_seq_vops (gsi, stmts);
+  return true;
+}
+
 /* Fold a call to the __mem{cpy,pcpy,move,set}_chk builtin.
    DEST, SRC, LEN, and SIZE are the arguments to the call.
    IGNORE is true, if return value can be ignored.  FCODE is the BUILT_IN_*
@@ -5583,6 +5625,10 @@ gimple_fold_builtin (gimple_stmt_iterator *gsi)
     case BUILT_IN_FPUTS_UNLOCKED:
       return gimple_fold_builtin_fputs (gsi, gimple_call_arg (stmt, 0),
 					gimple_call_arg (stmt, 1), true);
+    case BUILT_IN_FWRITE:
+      return gimple_fold_builtin_fwrite (gsi, false);
+    case BUILT_IN_FWRITE_UNLOCKED:
+      return gimple_fold_builtin_fwrite (gsi, true);
     case BUILT_IN_MEMCPY_CHK:
     case BUILT_IN_MEMPCPY_CHK:
     case BUILT_IN_MEMMOVE_CHK:
@@ -5938,7 +5984,7 @@ partial_load_store_mask_state (gcall *call, tree vectype)
   if (len && poly_int_tree_p (len))
     {
       gcc_assert (TREE_CODE (bias) == INTEGER_CST);
-      wlen = wi::to_poly_widest (len) + wi::to_widest (bias);
+      wlen = wi::to_poly_widest (len) - wi::to_widest (bias);
 
       if (known_eq (wlen, 0))
 	return MASK_ALL_INACTIVE;
@@ -7677,17 +7723,18 @@ follow_outer_ssa_edges (tree val)
 	      && (def_bb == fosa_bb
 		  || dominated_by_p (CDI_DOMINATORS, fosa_bb, def_bb))))
 	return val;
-      /* We cannot temporarily rewrite stmts with undefined overflow
-	 behavior, so avoid expanding them.  */
-      if ((ANY_INTEGRAL_TYPE_P (TREE_TYPE (val))
-	   || POINTER_TYPE_P (TREE_TYPE (val)))
-	  && !TYPE_OVERFLOW_WRAPS (TREE_TYPE (val)))
-	return NULL_TREE;
       flow_sensitive_info_storage storage;
       storage.save_and_clear (val);
       /* If the definition does not dominate fosa_bb temporarily reset
 	 flow-sensitive info.  */
       fosa_unwind->safe_push (std::make_pair (val, storage));
+      /* We cannot temporarily rewrite stmts with undefined overflow
+	 behavior, so avoid expanding them. But still save off the
+	 flow-sensitive info as we might be using the ssa name as the leaf.  */
+      if ((ANY_INTEGRAL_TYPE_P (TREE_TYPE (val))
+	   || POINTER_TYPE_P (TREE_TYPE (val)))
+	  && !TYPE_OVERFLOW_WRAPS (TREE_TYPE (val)))
+	return NULL_TREE;
       return val;
     }
   return val;

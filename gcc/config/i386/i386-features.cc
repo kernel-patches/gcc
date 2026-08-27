@@ -1677,8 +1677,8 @@ timode_scalar_chain::compute_convert_gain ()
 	case REG:
 	  if (GENERAL_REGNO_P (REGNO (src)))
 	    {
-	      if (TARGET_AVX)
-		/* vmovq + vpinsrq */
+	      if (TARGET_SSE4_1)
+		/* movq + pinsrq */
 		igain = speed_p ? -ix86_cost->integer_to_sse
 				  - COSTS_N_INSNS (1)
 				: -COSTS_N_BYTES (11);
@@ -1690,8 +1690,8 @@ timode_scalar_chain::compute_convert_gain ()
 	    }
 	  else if (GENERAL_REG_P (dst))
 	    {
-	      if (TARGET_AVX)
-		/* vpextrq + vmovq */
+	      if (TARGET_SSE4_1)
+		/* pextrq + movq */
 		igain = speed_p ? -ix86_cost->sse_to_integer
 				  - COSTS_N_INSNS (1)
 				: -COSTS_N_BYTES (11);
@@ -4357,6 +4357,17 @@ ix86_emit_tls_call (rtx tls_set, x86_cse_kind kind, basic_block bb,
 		&& !fixed_regs[i]
 		&& bitmap_bit_p (in, i))
 	      bitmap_set_bit (live_caller_saved_regs, i);
+	  if (df_live && crtl->drap_reg)
+	    {
+	      /* DRAP has no reaching definition at this point, so df_live drops
+		 it above.  Its hard register can also go dead mid-function once
+		 copied elsewhere (e.g. right after the prologue), so query
+		 DF_LR_IN per-block rather than treating it as live whenever
+		 crtl->drap_reg is set.  */
+	      i = REGNO (crtl->drap_reg);
+	      if (bitmap_bit_p (DF_LR_IN (bb), i))
+		bitmap_set_bit (live_caller_saved_regs, i);
+	    }
 	}
 
       if (bitmap_empty_p (live_caller_saved_regs))

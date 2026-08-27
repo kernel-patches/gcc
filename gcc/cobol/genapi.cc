@@ -229,12 +229,13 @@ create_cblc_string_variable(const char *var_name, const char *var_contents)
   TYPE_NAME(array_of_characters) = get_identifier("cblc_string");
   tree constr = build_string(strlen(var_contents)+1, var_contents);
   TREE_TYPE(constr) = array_of_characters;
-  TREE_STATIC(constr)    = 1;
-  TREE_CONSTANT(constr)  = 1;
+  TREE_STATIC(constr)           = 1;
+
+  // This is a file-scope internal variable
   tree entry_point = gg_declare_variable(array_of_characters,
                                          var_name,
                                          constr,
-                                         vs_external);
+                                         vs_global);
   gg_define_from_declaration(entry_point);
   }
 
@@ -459,6 +460,25 @@ get_level_88_domain(size_t parent_capacity, cbl_field_t *var, size_t &returned_s
   //       1Fx, where x is in [LZSQH], for LOW-VALUE ZERO SPACE QUOTE HIGH-VALUE
 
   // Numerics are converted to strings, and handled as above
+
+  /*  For example:
+
+       77 var-1 PIC 99V9.
+           88 var-1-z VALUE zero THRU 10.
+           88 var-1-big VALUE 20 THRU 40.
+           88 var-1-huge VALUE 40 THRU 999.
+           88 var-1-asc VALUE "U2" THRU "XYZZY".
+
+    Creates these four string segments:
+
+      "1FZ2A10"
+      "2A202A40"
+      "2A403A999"
+      "2AU25AXYZZY"
+
+    Each gets converted to UTF-32 as the initial value.
+
+    */
 
   size_t retval_capacity = 64;
   char *retval = static_cast<char *>(xmalloc(retval_capacity));
@@ -884,33 +904,97 @@ parser_initialize_programs( size_t nprogs,
     }
   }
 
-static
-tree
-array_of_long_long(const char *name, const std::vector<uint64_t>& vals)
+static tree
+array_of_uint64(const char *name,
+                   const std::vector<uint64_t> &vals)
   {
-  // We need to create a file-static static array of 64-bit integers:
-  tree array_of_ulonglong_type = build_array_type_nelts(ULONGLONG, vals.size()+1);
-  tree array_of_ulonglong = gg_define_variable( array_of_ulonglong_type,
-                                                name,
-                                                vs_file_static);
-  // We have the array.  Now we need to build the constructor for it
-  tree constr = make_node(CONSTRUCTOR);
-  TREE_TYPE(constr) = array_of_ulonglong_type;
-  TREE_STATIC(constr)    = 1;
-  TREE_CONSTANT(constr)  = 1;
+  /*
+   * Create:
+   *
+   *   static const unsigned long long name[] =
+   *     {
+   *     vals.size(),
+   *     vals[0],
+   *     vals[1],
+   *     ...
+   *     };
+   */
+  tree const_uint64_type =
+    build_qualified_type( UINT64,
+                          TYPE_QUAL_CONST );
+  tree array_of_uint64_type =
+    build_array_type_nelts( const_uint64_type,
+                            vals.size()+1 );
+  tree array_of_uint64 =
+    gg_define_variable( array_of_uint64_type,
+                        name,
+                        vs_file_static );
+  vec<constructor_elt, va_gc> *elts = NULL;
+  /*
+   * The first element contains the number of elements that follow.
+   */
+  CONSTRUCTOR_APPEND_ELT(
+    elts,
+    bitsize_int( 0 ),
+    build_int_cstu( UINT64, vals.size() ) );
 
-  // The first element of the array contains the number of elements to follow
-  CONSTRUCTOR_APPEND_ELT( CONSTRUCTOR_ELTS(constr),
-                          build_int_cst_type(SIZE_T, 0),
-                          build_int_cst_type(ULONGLONG, vals.size()) );
-  for(size_t i=0; i<vals.size(); i++)
+  for( size_t i=0; i<vals.size(); i++ )
     {
-    CONSTRUCTOR_APPEND_ELT( CONSTRUCTOR_ELTS(constr),
-                            build_int_cst_type(SIZE_T, i+1),
-                            build_int_cst_type(ULONGLONG, vals[i]) );
+    CONSTRUCTOR_APPEND_ELT(
+      elts,
+      bitsize_int( i+1 ),
+      build_int_cstu( UINT64, vals[i] ) );
     }
-  DECL_INITIAL(array_of_ulonglong) = constr;
-  return array_of_ulonglong;
+  tree constr =
+    build_constructor( array_of_uint64_type,
+                       elts );
+  /*
+   * build_constructor() determines TREE_CONSTANT from its elements.
+   * All of these elements are INTEGER_CST nodes.
+   */
+  gcc_assert( TREE_CONSTANT( constr ) );
+  /*
+   * The constructor represents a value suitable for static storage.
+   */
+  TREE_STATIC( constr ) = 1;
+  /*
+   * Record the const qualification on the declaration itself.
+   */
+  TREE_READONLY( array_of_uint64 ) = 1;
+  DECL_INITIAL( array_of_uint64 ) = constr;
+  return array_of_uint64;
+  }
+
+tree
+gg_array_of_size_t(const std::vector<size_t> &values)
+  {
+  gcc_assert( !values.empty() );
+  tree const_size_t_type = build_qualified_type( SIZE_T, TYPE_QUAL_CONST );
+  tree array_type = build_array_type_nelts( const_size_t_type, values.size() );
+
+  vec<constructor_elt, va_gc> *elts = NULL;
+  for( size_t i = 0; i < values.size(); i++ )
+    {
+    CONSTRUCTOR_APPEND_ELT(
+      elts,
+      bitsize_int( i ),
+      build_int_cstu( SIZE_T, values[i] ) );
+    }
+  tree constr = build_constructor( array_type, elts );
+  /*
+   * This marks the constant constructor as suitable for static
+   * allocation.  It does not give the VAR_DECL static storage
+   * duration.
+   */
+  TREE_STATIC( constr ) = 1;
+  tree array_decl = gg_define_variable( array_type );
+  /*
+   * Represent the const qualification on the object as well as on
+   * its array element type.
+   */
+  TREE_READONLY( array_decl ) = 1;
+  DECL_INITIAL( array_decl ) = constr;
+  return gg_pointer_to_array(array_decl);
   }
 
 /*
@@ -948,7 +1032,7 @@ parser_compile_ecs( const std::vector<uint64_t>& ecs )
   char ach[64];
   static int counter = 1;
   sprintf(ach, "_ecs_table_%d", counter++);
-  tree retval =  array_of_long_long(ach, ecs);
+  tree retval =  array_of_uint64(ach, ecs);
   SHOW_IF_PARSE(nullptr)
     {
     SHOW_PARSE_HEADER
@@ -995,7 +1079,7 @@ parser_compile_dcls( const std::vector<uint64_t>& dcls )
   char ach[64];
   static int counter = 1;
   sprintf(ach, "_dcls_table_%d", counter++);
-  tree retval =  array_of_long_long(ach, dcls);
+  tree retval =  array_of_uint64(ach, dcls);
   SHOW_IF_PARSE(nullptr)
     {
     SHOW_PARSE_HEADER
@@ -1523,14 +1607,14 @@ initialize_variable_internal( cbl_refer_t refer,
     else
       {
       // Convert strings of spaces to "<SPACES>"
-      tree spaces = gg_define_int(0);
+      tree spaces = gg_define_variable(INT, 0L);
       if(   parsed_var->type == FldGroup
          || parsed_var->type == FldAlphanumeric
          || parsed_var->type == FldAlphaEdited
          || parsed_var->type == FldLiteralA )
         {
         gg_assign(spaces, integer_one_node);
-        tree counter = gg_define_int(parsed_var->data.capacity());
+        tree counter = gg_define_variable(INT, parsed_var->data.capacity());
         WHILE(counter, gt_op, integer_zero_node)
           {
           gg_decrement(counter);
@@ -2734,7 +2818,7 @@ parser_enter_file(const char *filename)
   // Establish our variable declarations for global variables in libgcobol:
 
 #define SET_VAR_DECL(A, B, C) \
-  A = gg_declare_variable(B, C, NULL_TREE, vs_external_reference)
+  A = gg_declare_variable(B, C, NULL_TREE, vs_extern)
 
     SET_VAR_DECL(var_decl_exception_code         , INT    , "__gg__exception_code");
     SET_VAR_DECL(var_decl_exception_file_status  , INT    , "__gg__exception_file_status");
@@ -2878,8 +2962,8 @@ enter_program_common(const char *funcname, const char *funcname_)
 
   gg_assign(current_function->first_time_through, integer_zero_node);
 
-  current_function->perform_exit_address
-    = gg_define_void_star("_perform_exit_address");
+  current_function->perform_exit_address =
+                         gg_define_variable (VOID_P, "_perform_exit_address");
 
   // Make sure the following are null, because when we create the unnamed
   // default section, parser_enter_section will attempt to close them out. And
@@ -3817,7 +3901,7 @@ parser_accept(const struct cbl_refer_t &tgt,
     }
   if( function_to_call )
     {
-    tree erf = gg_define_int();
+    tree erf = gg_define_variable(INT);
     gg_assign(erf,
               gg_call_expr(  INT,
                             function_to_call,
@@ -4225,7 +4309,7 @@ parser_set_envar( const struct cbl_refer_t &name,
   }
 
 void
-parser_accept_date_yymmdd( struct cbl_field_t *target )
+parser_accept_date_yymmdd( const cbl_refer_t& refer )
   {
   Analyze();
   SHOW_PARSE
@@ -4234,11 +4318,14 @@ parser_accept_date_yymmdd( struct cbl_field_t *target )
     SHOW_PARSE_END
     }
 
+  auto target = refer.field;
   CHECK_FIELD(target);
 
   gg_call(VOID,
           "__gg__get_date_yymmdd",
           gg_get_address_of(target->var_decl_node),
+          refer_offset(refer),
+          refer_size_dest(refer),
           NULL_TREE);
   TRACE1
     {
@@ -4249,7 +4336,7 @@ parser_accept_date_yymmdd( struct cbl_field_t *target )
   }
 
 void
-parser_accept_date_yyyymmdd( struct cbl_field_t *target )
+parser_accept_date_yyyymmdd( const cbl_refer_t& refer )
   {
   Analyze();
   SHOW_PARSE
@@ -4257,9 +4344,12 @@ parser_accept_date_yyyymmdd( struct cbl_field_t *target )
     SHOW_PARSE_HEADER
     SHOW_PARSE_END
     }
+  auto target = refer.field;
   gg_call(VOID,
           "__gg__get_date_yyyymmdd",
           gg_get_address_of(target->var_decl_node),
+          refer_offset(refer),
+          refer_size_dest(refer),
           NULL_TREE);
   TRACE1
     {
@@ -4270,7 +4360,7 @@ parser_accept_date_yyyymmdd( struct cbl_field_t *target )
   }
 
 void
-parser_accept_date_yyddd( struct cbl_field_t *target )
+parser_accept_date_yyddd( const cbl_refer_t& refer )
   {
   Analyze();
   SHOW_PARSE
@@ -4279,11 +4369,14 @@ parser_accept_date_yyddd( struct cbl_field_t *target )
     SHOW_PARSE_END
     }
 
+  auto target = refer.field;
   CHECK_FIELD(target);
 
   gg_call(VOID,
           "__gg__get_date_yyddd",
           gg_get_address_of(target->var_decl_node),
+          refer_offset(refer),
+          refer_size_dest(refer),
           NULL_TREE);
   TRACE1
     {
@@ -4294,7 +4387,7 @@ parser_accept_date_yyddd( struct cbl_field_t *target )
   }
 
 void
-parser_accept_date_yyyyddd( struct cbl_field_t *target )
+parser_accept_date_yyyyddd( const cbl_refer_t& refer )
   {
   Analyze();
   SHOW_PARSE
@@ -4303,11 +4396,14 @@ parser_accept_date_yyyyddd( struct cbl_field_t *target )
     SHOW_PARSE_END
     }
 
+  auto target = refer.field;
   CHECK_FIELD(target);
 
   gg_call(VOID,
           "__gg__get_yyyyddd",
           gg_get_address_of(target->var_decl_node),
+          refer_offset(refer),
+          refer_size_dest(refer),
           NULL_TREE);
   TRACE1
     {
@@ -4318,7 +4414,7 @@ parser_accept_date_yyyyddd( struct cbl_field_t *target )
   }
 
 void
-parser_accept_date_dow( struct cbl_field_t *target )
+parser_accept_date_dow( const cbl_refer_t& refer )
   {
   Analyze();
   SHOW_PARSE
@@ -4327,11 +4423,14 @@ parser_accept_date_dow( struct cbl_field_t *target )
     SHOW_PARSE_END
     }
 
+  auto target = refer.field;
   CHECK_FIELD(target);
 
   gg_call(VOID,
           "__gg__get_date_dow",
           gg_get_address_of(target->var_decl_node),
+          refer_offset(refer),
+          refer_size_dest(refer),
           NULL_TREE);
   TRACE1
     {
@@ -4342,7 +4441,7 @@ parser_accept_date_dow( struct cbl_field_t *target )
   }
 
 void
-parser_accept_date_hhmmssff( struct cbl_field_t *target )
+parser_accept_date_hhmmssff( const cbl_refer_t& refer )
   {
   Analyze();
   SHOW_PARSE
@@ -4351,11 +4450,14 @@ parser_accept_date_hhmmssff( struct cbl_field_t *target )
     SHOW_PARSE_END
     }
 
+  auto target = refer.field;
   CHECK_FIELD(target);
 
   gg_call(VOID,
           "__gg__get_date_hhmmssff",
           gg_get_address_of(target->var_decl_node),
+          refer_offset(refer),
+          refer_size_dest(refer),
           NULL_TREE);
   TRACE1
     {
@@ -4823,7 +4925,7 @@ parser_display( const struct cbl_special_name_t *upon,
       }
     TRACE1_END
     }
-  tree file_descriptor = gg_define_int();
+  tree file_descriptor = gg_define_variable(INT);
   bool needs_closing = false;
   if( upon )
     {
@@ -5050,7 +5152,7 @@ void
 parser_exhibit( bool /*changed*/, bool /*named*/,
                 const std::vector<cbl_refer_t> &args )
   {
-  tree file_descriptor = gg_define_int();
+  tree file_descriptor = gg_define_variable(INT);
   gg_assign(file_descriptor, integer_one_node);   // stdout is file descriptor 1.
 
   for(size_t i=0; i<args.size(); i++)
@@ -5116,7 +5218,7 @@ parser_assign( size_t nC, cbl_num_result_t *C,
       }
     }
 
-  tree error_flag = gg_define_int(0);
+  tree error_flag = gg_define_variable(INT, 0L);
 
   for(size_t i=0; i<nC; i++ )
     {
@@ -5515,6 +5617,7 @@ is_valuable( cbl_field_type_t type ) {
 
 void parser_sleep(const cbl_refer_t &seconds)
   {
+  RETURN_IF_PARSE_ONLY;
   if( seconds.field )
     {
     gg_get_address_of(seconds.field->var_decl_node);
@@ -5787,6 +5890,10 @@ walk_initialization(cbl_field_t *field, bool initialized, bool deallocate)
           }
         }
       first_time = false;
+
+      // We need to propagate the based_e attribute:
+      cbl_field_of(&element)->attr |= based_e;
+
       if( this_one->level == 00 )
         {
         // Ignore LEVEL00 "INDEXED BY" variables
@@ -6014,7 +6121,7 @@ parser_xml_parse( cbl_label_t *instance,
   // With the callback in place, we are ready to call the library:
   tree pcallback = gg_get_function_address(VOID, ach);
 
-  tree erc = gg_define_int();
+  tree erc = gg_define_variable(INT);
   gg_assign(erc, gg_call_expr(INT,
                               "__gg__xml_parse",
                               gg_get_address_of(input.field->var_decl_node),
@@ -6359,7 +6466,7 @@ establish_using(size_t nusing,
     // There are 'nusing' elements in the PROCEDURE DIVISION USING list.
 
     tree parameter = NULL_TREE;
-    tree rt_i = gg_define_int();
+    tree rt_i = gg_define_variable(INT);
     for(size_t i=0; i<nusing; i++)
       {
       // And this generates run-time execution code. The
@@ -6735,7 +6842,7 @@ parser_division(cbl_division_t division,
       tree globals_are_initialized = gg_declare_variable( INT,
                                                           "__gg__globals_are_initialized",
                                                           NULL,
-                                                          vs_external_reference);
+                                                          vs_extern);
       IF( globals_are_initialized, eq_op, integer_zero_node )
         {
         // one-time initialization happens here
@@ -6761,7 +6868,7 @@ parser_division(cbl_division_t division,
 
     gg_append_statement(current_function->skip_init_label);
     // This is where we check to see if somebody tried to cancel us
-    tree cancelled = gg_define_int();
+    tree cancelled = gg_define_variable(INT);
     gg_assign(cancelled,
               gg_call_expr( INT,
                             "__gg__is_canceled",
@@ -8883,7 +8990,7 @@ parser_file_add(struct cbl_file_t *file)
   gg_variable_scope_t scope;
   if( file->attr & external_e )
     {
-    scope = vs_external;
+    scope = vs_weak;
     }
   else
     {
@@ -9020,7 +9127,7 @@ parser_file_add(struct cbl_file_t *file)
           "__gg__file_init",
           gg_get_address_of(new_var_decl),
           gg_string_literal(file->name),
-          build_int_cst_type(ULONGLONG, symbol_table_index),
+          build_int_cst_type(UINT64, symbol_table_index),
           array_of_keys,
           key_numbers,
           unique_flags,
@@ -9113,17 +9220,15 @@ parser_file_open( struct cbl_file_t *file, int mode_char )
     }
 
 
-//#pragma message "parser_file_open: consult cbl_file_t::filename_of and cbl_file_t::device"
-
   /*
-   * The filename of a cbl_file_t may be found in three places: 
+   * The filename of a cbl_file_t may be found in three places:
    * 1.  As before, in the cbl_field_t indexed by cbl_file_t::filename.
    * 2.  Now, in the cbl_special_name_t indexed by cbl_file_t::device.
-   * 3.  As ever, in neither, from the environment.  
+   * 3.  As ever, in neither, from the environment.
    *
    * If both filename and device are nonzero and not FldForward, the filename
-   * supersedes. The syntax was 
-   *     SELECT fd-name ASSIGN TO device-name USING filename  
+   * supersedes. The syntax was
+   *     SELECT fd-name ASSIGN TO device-name USING filename
    * That just creates in the parser an alias of device-name to fd-name.  It's
    * still the same file and does *not* change the device characteristics.
    *
@@ -9131,12 +9236,10 @@ parser_file_open( struct cbl_file_t *file, int mode_char )
    * taken from cbl_special_name_t::os_filename.  It is tiny, hard-coded name
    * in /dev.
    *
-   * Upon implementation please feel free to delete this message. 
    * --jkl
    */
 
-
-  tree pszFilename = gg_define_char_star();
+  tree pszFilename = gg_define_variable(CHAR_P);
   cbl_field_t *field_of_name = symbol_field_forward(file->filename);
   if( field_of_name->type == FldForward )
     {
@@ -9561,10 +9664,10 @@ parser_file_delete_file( cbl_label_t *name,
     SHOW_PARSE_END
     }
   set_up_delete_file_label(name);
-  tree there_was_an_error = gg_define_int(0);
+  tree there_was_an_error = gg_define_variable(INT, 0L);
   for(size_t i=0; i<filenames.size(); i++)
     {
-    tree pszFilename = gg_define_char_star();
+    tree pszFilename = gg_define_variable(CHAR_P);
     cbl_field_t *field_of_name = symbol_field_forward(filenames[i]->filename);
     if( field_of_name->type == FldForward )
       {
@@ -9905,7 +10008,7 @@ inspect_tally(bool backward,
   // all the integers and cbl_inspect_bound_t values, in a strict sequence so
   // that the library routine can peel them off.
 
-  tree int_size = gg_define_variable(INT, integer_zero_node);
+  tree int_size = gg_define_variable(INT, 0L);
   tree integers = gg_define_variable(SIZE_T_P, null_pointer_node);
 
   size_t n_integers = int_index;
@@ -10080,7 +10183,7 @@ inspect_replacing(int backward,
                         + operations[0].nbound()  // Room for all the cbl_inspect_bound_t values
                         + n_all_leading_first;  // Room for all of the  n_identifier_3  counts
 
-  tree int_size = gg_define_variable(INT, integer_zero_node);
+  tree int_size = gg_define_variable(INT, 0L);
   tree integers = gg_define_variable(SIZE_T_P, null_pointer_node);
 
   IF( build_int_cst_type(INT, n_integers), gt_op, int_size )
@@ -11574,19 +11677,79 @@ parser_bsearch_end( cbl_label_t* name )
   }
 
 tree
-gg_array_of_field_pointers( size_t N,
-                            cbl_field_t **fields )
+gg_array_of_field_pointers( const std::vector<const cbl_field_t *> &fields )
   {
-  tree retval = gg_define_variable(build_pointer_type(cblc_field_p_type_node));
-  gg_assign(retval, gg_cast(build_pointer_type(cblc_field_p_type_node),
-                            gg_malloc(build_int_cst_type(SIZE_T,
-                                                         N * int_size_in_bytes(VOID_P)))));
-  for(size_t i=0; i<N; i++)
+  size_t N = fields.size();
+  gcc_assert(N);
+
+  tree const_field_pointer_type =
+    build_qualified_type( cblc_field_p_type_node,
+                          TYPE_QUAL_CONST );
+
+  tree array_type =
+    build_array_type_nelts( const_field_pointer_type, N );
+
+  vec<constructor_elt, va_gc> *elts = NULL;
+  vec_alloc( elts, N );
+
+  for( size_t i=0; i<N; i++ )
     {
-    gg_assign(gg_array_value(retval, i), gg_get_address_of(fields[i]->var_decl_node));
+    tree field_pointer = fields[i] && fields[i]->var_decl_node
+                       ? gg_get_address_of( fields[i]->var_decl_node)
+                       : null_pointer_node;
+
+    field_pointer = gg_cast( cblc_field_p_type_node, field_pointer );
+
+    CONSTRUCTOR_APPEND_ELT( elts,
+                            bitsize_int( i ),
+                            field_pointer );
     }
-  return retval;
+
+  tree constr = build_constructor( array_type, elts );
+
+  tree retval = gg_define_variable( array_type );
+
+  TREE_READONLY( retval ) = 1;
+  DECL_INITIAL( retval ) = constr;
+
+  return gg_pointer_to_array(retval);
   }
+
+tree
+gg_array_of_uchar_p( const std::vector<tree> &uchar_p )
+  {
+  size_t N = uchar_p.size();
+  if( !N )
+    {
+    return null_pointer_node;
+    }
+
+  tree const_uchar_p_type =
+    build_qualified_type( UCHAR_P,
+                          TYPE_QUAL_CONST );
+
+  tree array_type =
+    build_array_type_nelts( const_uchar_p_type, N );
+
+  vec<constructor_elt, va_gc> *elts = NULL;
+  vec_alloc( elts, N );
+
+  for( size_t i=0; i<N; i++ )
+    {
+    CONSTRUCTOR_APPEND_ELT( elts,
+                            bitsize_int( i ),
+                            uchar_p[i] );
+    }
+
+  tree constr = build_constructor( array_type, elts );
+  tree retval = gg_define_variable( array_type );
+  TREE_READONLY( retval ) = 1;
+  DECL_INITIAL( retval ) = constr;
+
+  // Return a pointer to the first element:
+  return gg_pointer_to_array(retval);
+  }
+
 
 static void
 push_program_state()
@@ -11630,35 +11793,22 @@ parser_sort(cbl_refer_t tableref,
             __func__,
             tableref.field->name);
     }
-  size_t total_keys = std::accumulate( keys.begin(), keys.end(), 0,
-                                       [](size_t n, const cbl_key_t& key ) {
-                                         return n + key.fields.size();
-                                       } );
-  typedef const cbl_field_t * const_field_t;
-  const_field_t *flattened_fields =
-     static_cast<const_field_t *>(xmalloc(total_keys * sizeof(cbl_field_t *)));
-  gcc_assert(flattened_fields);
-  size_t *flattened_ascending =
-                   static_cast<size_t *>(xmalloc(total_keys * sizeof(size_t)));
-  gcc_assert(flattened_ascending);
 
-  size_t key_index = 0;
+  std::vector<const cbl_field_t *>flattened_fields_2;
+  std::vector<size_t>flattened_ascending_2;
   for( size_t i=0; i<keys.size(); i++ )
     {
     for( size_t j=0; j<keys[i].fields.size(); j++ )
       {
-      flattened_fields[key_index]    = keys[i].fields[j];
-      flattened_ascending[key_index] = keys[i].ascending ? 1 : 0;
-      key_index += 1;
+      flattened_fields_2.push_back(keys[i].fields[j]);
+      flattened_ascending_2.push_back(keys[i].ascending ? 1 : 0);
       }
     }
 
-  // Create the array of cbl_field_t pointers for the keys
-  tree all_keys = gg_array_of_field_pointers( total_keys,
-                                              const_cast<cbl_field_t**>(flattened_fields));
+  tree all_keys = gg_array_of_field_pointers(flattened_fields_2);
 
   // Create the array of integers that are the flags for ASCENDING:
-  tree ascending = gg_array_of_size_t( total_keys, flattened_ascending );
+  tree ascending = gg_array_of_size_t(flattened_ascending_2 );
 
   tree depending_on = gg_define_variable(LONG, "_sort_size");
   depending_on_value(depending_on, table);
@@ -11673,7 +11823,7 @@ parser_sort(cbl_refer_t tableref,
           gg_get_address_of(tableref.field->var_decl_node),
           refer_offset(tableref),
           gg_cast(SIZE_T, depending_on),
-          build_int_cst_type(SIZE_T, key_index),
+          build_int_cst_type(SIZE_T, flattened_fields_2.size()),
           all_keys,
           ascending,
           duplicates ? integer_one_node : integer_zero_node,
@@ -11682,12 +11832,6 @@ parser_sort(cbl_refer_t tableref,
     {
     pop_program_state();
     }
-
-  free(flattened_ascending);
-  free(flattened_fields);
-
-  gg_free(ascending);
-  gg_free(all_keys);
   }
 
 void
@@ -11771,35 +11915,22 @@ parser_file_sort(   cbl_file_t *workfile,
   // clone of the code for handling multiple keys, each of which can have
   // multiple fields.
 
-  size_t total_keys = std::accumulate( keys.begin(), keys.end(), 0,
-                                       []( size_t n, const cbl_key_t& key ) {
-                                         return n + key.fields.size();
-                                       } );
-  typedef const cbl_field_t * const_field_t;
-  auto flattened_fields
-   = static_cast<const_field_t *>(xmalloc(total_keys * sizeof(cbl_field_t *)));
-  gcc_assert(flattened_fields);
-  size_t *flattened_ascending =
-                   static_cast<size_t *>(xmalloc(total_keys * sizeof(size_t)));
-  gcc_assert(flattened_ascending);
-
-  size_t key_index = 0;
+  std::vector<const cbl_field_t *>flattened_fields_2;
+  std::vector<size_t>flattened_ascending_2;
   for( size_t i=0; i<keys.size(); i++ )
     {
     for( size_t j=0; j<keys[i].fields.size(); j++ )
       {
-      flattened_fields[key_index]    = keys[i].fields[j];
-      flattened_ascending[key_index] = keys[i].ascending ? 1 : 0;
-      key_index += 1;
+      flattened_fields_2.push_back(keys[i].fields[j]);
+      flattened_ascending_2.push_back(keys[i].ascending ? 1 : 0);
       }
     }
 
   // Create the array of cbl_field_t pointers for the keys
-  tree all_keys = gg_array_of_field_pointers( total_keys,
-                                              const_cast<cbl_field_t**>(flattened_fields));
+  tree all_keys = gg_array_of_field_pointers(flattened_fields_2);
 
   // Create the array of integers that are the flags for ASCENDING:
-  tree ascending = gg_array_of_size_t( total_keys, flattened_ascending );
+  tree ascending = gg_array_of_size_t(flattened_ascending_2 );
 
   // We need to open the workfile for the sorting routine:
   parser_file_open(workfile, 'r');
@@ -11819,7 +11950,7 @@ parser_file_sort(   cbl_file_t *workfile,
   gg_call(VOID,
           "__gg__sort_workfile",
           gg_get_address_of(workfile->var_decl_node),
-          build_int_cst_type(SIZE_T, key_index),
+          build_int_cst_type(SIZE_T, flattened_fields_2.size()),
           all_keys,
           ascending,
           duplicates ? integer_one_node : integer_zero_node,
@@ -11829,11 +11960,6 @@ parser_file_sort(   cbl_file_t *workfile,
     pop_program_state();
     }
   parser_file_close(workfile);
-
-  free(flattened_ascending);
-  free(flattened_fields);
-  gg_free(ascending);
-  gg_free(all_keys);
 
   // The workfile is sorted.  We move to Phase 3 -- transferring the workfile
   // to the output.
@@ -12086,8 +12212,8 @@ static tree
 gg_array_of_file_pointers(  size_t N,
                             cbl_file_t **files )
   {
-  tree retval = gg_define_variable(build_pointer_type(cblc_file_p_type_node));
-  gg_assign(retval, gg_cast(  build_pointer_type(cblc_file_p_type_node),
+  tree retval = gg_define_variable(cblc_file_pp_type_node);
+  gg_assign(retval, gg_cast(  cblc_file_pp_type_node,
                               gg_malloc(  build_int_cst_type(SIZE_T,
                                                              N * int_size_in_bytes(VOID_P)))));
   for(size_t i=0; i<N; i++)
@@ -12123,37 +12249,22 @@ parser_file_merge(  cbl_file_t *workfile,
                 build_int_cst_type(INT, file_sequential_e));
     }
 
-  size_t total_keys = std::accumulate( keys.begin(), keys.end(), 0,
-                                       []( size_t i, const cbl_key_t& key ) {
-                                         return i + key.fields.size();
-                                       } );
-  typedef const cbl_field_t * const_field_t;
-  const_field_t *flattened_fields
-                 = static_cast<const_field_t *>
-                   (xmalloc(total_keys * sizeof(cbl_field_t *)));
-  gcc_assert(flattened_fields);
-  size_t *flattened_ascending
-            = static_cast<size_t *>(xmalloc(total_keys * sizeof(size_t)));
-  gcc_assert(flattened_ascending);
-
-  size_t key_index = 0;
+  std::vector<const cbl_field_t *>flattened_fields_2;
+  std::vector<size_t>flattened_ascending_2;
   for( size_t i=0; i<keys.size(); i++ )
     {
     for( size_t j=0; j<keys[i].fields.size(); j++ )
       {
-      flattened_fields[key_index]    = keys[i].fields[j];
-      flattened_ascending[key_index] = keys[i].ascending ? 1 : 0;
-      key_index += 1;
+      flattened_fields_2.push_back(keys[i].fields[j]);
+      flattened_ascending_2.push_back(keys[i].ascending ? 1 : 0);
       }
     }
 
   // Create the array of cbl_field_t pointers for the keys
-  tree all_keys = gg_array_of_field_pointers(
-                                 total_keys,
-                                 const_cast<cbl_field_t**>(flattened_fields));
+  tree all_keys =  gg_array_of_field_pointers(flattened_fields_2);
 
   // Create the array of integers that are the flags for ASCENDING:
-  tree ascending = gg_array_of_size_t(total_keys, flattened_ascending);
+  tree ascending = gg_array_of_size_t(flattened_ascending_2 );
 
   tree all_files = gg_array_of_file_pointers(ninputs, inputs);
 
@@ -12230,11 +12341,6 @@ parser_file_merge(  cbl_file_t *workfile,
     {
     pop_program_state();
     }
-
-  free(flattened_ascending);
-  free(flattened_fields);
-  gg_free(ascending);
-  gg_free(all_keys);
 
   parser_file_close(workfile);
   for(size_t i=0; i<ninputs; i++)
@@ -12410,7 +12516,7 @@ parser_unstring(cbl_refer_t src,
   tree ref_delimiters = build_array_of_referlets(noutputs,   delimiters);
   tree ref_counts     = build_array_of_referlets(noutputs,   counts);
 
-  tree t_overflow = gg_define_int();
+  tree t_overflow = gg_define_variable(INT);
   gg_assign(t_overflow,
             gg_call_expr( INT,
                           "__gg__unstring",
@@ -12526,7 +12632,7 @@ parser_string(const cbl_refer_t& tgt,
   tree pintegers = build_array_of_size_t( index_int, integers);
   tree referlets = build_array_of_referlets(index_cblc, refers.data());
 
-  tree t_overflow = gg_define_int();
+  tree t_overflow = gg_define_variable(INT);
   gg_assign(t_overflow, gg_call_expr( INT,
                                       "__gg__string",
                                       pintegers,
@@ -12668,7 +12774,9 @@ create_and_call(size_t narg,
       // These have to be passed to be passed by value.
       crv = by_value_e;
       }
-    else if( crv == by_value_e && args[i].refer.field->type == FldAlphanumeric)
+    else if(   crv == by_value_e
+            && args[i].refer.field->type == FldAlphanumeric
+            && (args[i].refer.field->attr & FIGCONST_MASK) != zero_value_e )
       {
       // Maybe passing an alphanumeric BY VALUE should be a syntax error?
       crv = by_content_e;
@@ -12734,15 +12842,7 @@ create_and_call(size_t narg,
 
       case by_content_e:
         {
-        if(    (args[i].refer.field->attr & intermediate_e)
-            && is_valuable(args[i].refer.field->type) )
-          {
-          cbl_unimplemented("CALL USING BY CONTENT <temporary> would require "
-                            "REPOSITORY PROTOTYPES.");
-          }
-
         // BY CONTENT means that the called program gets a copy of the data.
-
         // We'll free this copy after the called program returns.
 
         switch(args[i].attr)
@@ -12758,7 +12858,7 @@ create_and_call(size_t narg,
           case none_of_e:
             {
             // Allocate the memory, and make the copy:
-            arguments[i] = gg_define_char_star();
+            arguments[i] = gg_define_variable(CHAR_P);
             allocated[i] = 1;
             gg_assign(arguments[i], gg_cast(CHAR_P, gg_malloc(length))) ;
             gg_memcpy(arguments[i], location, length);
@@ -12783,7 +12883,7 @@ create_and_call(size_t narg,
           {
           case address_of_e:
             {
-            arguments[i] = gg_define_size_t();
+            arguments[i] = gg_define_variable(SIZE_T);
             gg_assign(arguments[i], gg_cast(SIZE_T, location ));
             gg_assign(length, build_int_cst_type(SIZE_T, gg_sizeof(CHAR_P)));
             break;
@@ -12791,7 +12891,7 @@ create_and_call(size_t narg,
 
           case length_of_e:
             {
-            arguments[i] = gg_define_size_t();
+            arguments[i] = gg_define_variable(SIZE_T);
             gg_assign(arguments[i], gg_cast(SIZE_T, length));
             gg_assign(length, build_int_cst_type(SIZE_T, gg_sizeof(CHAR_P)));
             break;
@@ -12927,8 +13027,8 @@ create_and_call(size_t narg,
             ||  returned_value_type == DOUBLE
             ||  returned_value_type == FLOAT128)
       {
-      tree returned_location = gg_define_uchar_star();
-      tree returned_length   = gg_define_size_t();
+      tree returned_location = gg_define_variable(UCHAR_P);
+      tree returned_length   = gg_define_variable(SIZE_T);
       // we were given a returned::field, so find its location and length:
       gg_assign(returned_location,
                 qualified_data_location(returned));
@@ -13127,7 +13227,13 @@ parser_call(   cbl_refer_t name,
       }
     ELSE
       {
-      // We have a bad function pointer, which is the except condition:
+      // We have a bad function pointer, which is the exception condition:
+      // Set the exception message to "name"
+      gg_call(VOID,
+              "__gg__set_exception_call",
+              gg_get_address_of(name.field->var_decl_node),
+              refer_offset(name),
+              NULL_TREE);
       parser_exception_raise(ec_program_not_found_e);
       if( except )
         {
@@ -14078,9 +14184,9 @@ hijack_for_development(const char *funcname)
   gg_insert_into_assemblerf("%s HIJACKED CODE START", ASM_COMMENT_START);
 
 
-  tree xxx = gg_define_int("xxx");
-  tree yyy = gg_define_int("yyy");
-  tree zzz = gg_define_int("zzz");
+  tree xxx = gg_define_variable(INT, "xxx");
+  tree yyy = gg_define_variable(INT, "yyy");
+  tree zzz = gg_define_variable(INT, "zzz");
 
   fprintf(stderr, "N is %d\n", N);
   for(int i=0; i<N; i++)
@@ -14353,7 +14459,7 @@ psa_global(cbl_field_t *new_var)
       }
     }
 
-  new_var->var_decl_node = gg_declare_variable(cblc_field_type_node, ach, NULL, vs_external_reference);
+  new_var->var_decl_node = gg_declare_variable(cblc_field_type_node, ach, NULL, vs_extern);
 
   // global variables already have a .data area defined.  We can find that
   // variable from the new_var->name.  It's lower-case, with hyphens
@@ -14368,7 +14474,7 @@ psa_global(cbl_field_t *new_var)
       ach[i] = '_';
       }
     }
-  new_var->data_decl_node = gg_declare_variable(UCHAR, ach, NULL, vs_external_reference);
+  new_var->data_decl_node = gg_declare_variable(UCHAR, ach, NULL, vs_extern);
   }
 
 static tree
@@ -14386,7 +14492,7 @@ psa_new_var_decl(cbl_field_t *new_var, const char *external_record_base)
     strcat(ach, "_ra");  // For "Record Area"
     new_var_decl = gg_define_variable(  cblc_field_type_node,
                                         ach,
-                                        vs_external);
+                                        vs_weak);
     SET_DECL_MODE(new_var_decl, BLKmode);
     }
   else
@@ -14419,7 +14525,7 @@ psa_new_var_decl(cbl_field_t *new_var, const char *external_record_base)
     if( new_var->attr & external_e )
       {
       // For external variables, just stick with the original name
-      sprintf(base_name, "%s_cblc_field", new_var->name);
+      sprintf(base_name, "%s.cblc", new_var->name);
       }
     else
       {
@@ -14477,7 +14583,7 @@ psa_new_var_decl(cbl_field_t *new_var, const char *external_record_base)
       //fprintf(stderr, "external_e base name is %s\n", base_name);
       new_var_decl = gg_define_variable(  cblc_field_type_node,
                                           base_name,
-                                          vs_external);
+                                          vs_weak);
       SET_DECL_MODE(new_var_decl, BLKmode);
       }
     else if( new_var->attr & (intermediate_e)
@@ -15058,7 +15164,7 @@ parser_symbol_add(struct cbl_field_t *new_var )
       new_var->data_decl_node = gg_define_variable(
                           array_type,
                           achDataName,
-                          vs_external);
+                          vs_common);
       data_area = gg_pointer_to_array(new_var->data_decl_node);
       goto actual_allocate;
       }
@@ -15163,7 +15269,7 @@ parser_symbol_add(struct cbl_field_t *new_var )
               new_var->data_decl_node = gg_define_variable(
                                   array_type,
                                   achDataName,
-                                  vs_external);
+                                  vs_common);
               data_area = gg_pointer_to_array(new_var->data_decl_node);
               }
             else
@@ -15207,7 +15313,7 @@ parser_symbol_add(struct cbl_field_t *new_var )
     free(level_88_string);
     free(class_string);
 
-    if(    !(new_var->attr & ( linkage_e | based_e))
+    if(    !(new_var->attr & ( linkage_e | based_e ))
         && !(new_var->type == FldLiteralN) )
       {
       static const bool explicitly = false;

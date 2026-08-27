@@ -115,6 +115,10 @@ msplit-ldst
 Target Var(avropt_split_ldst) Init(0) Optimization
 Optimization. Split most of the load and store instructions into byte load and stores.
 
+mstrict-addr-space-subsets
+Target Var(avropt_strict_addr_space_subsets) Init(0)
+Implement strict named address space subset relations.
+
 mstrict-X
 Target Var(avropt_strict_X) Init(0) Optimization
 Optimization. When accessing RAM, use X as imposed by the hardware, i.e. just use pre-decrement, post-increment and indirect addressing with the X register.  Without this option, the compiler may assume that there is an addressing mode X+const similar to Y+const and Z+const and emit instructions to emulate such an addressing mode for X.
@@ -159,6 +163,10 @@ Warn if the ISR is misspelled, i.e. without __vector prefix. Enabled by default.
 mfract-convert-truncate
 Target Mask(FRACT_CONV_TRUNC)
 Allow to use truncation instead of rounding towards zero for fractional fixed-point types.
+
+mfuse-ifelse
+Target Var(avropt_fuse_ifelse) Init(0) Optimization
+Optimize compare-branch-compare-branch sequences to compare-branch-branch.
 
 mfuse-move
 Target Alias(mfuse-move=, 23, 0) Optimization

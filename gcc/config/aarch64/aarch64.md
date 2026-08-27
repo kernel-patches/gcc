@@ -223,6 +223,7 @@
 )
 
 (define_c_enum "unspec" [
+    UNSPEC_NONE ;; Sentinel value for invalid or missing unspecs
     UNSPEC_AUTIA1716
     UNSPEC_AUTIB1716
     UNSPEC_AUTIASP
@@ -391,6 +392,9 @@
     ;; Represents an SVE-style lane index, in which the indexing applies
     ;; within the containing 128-bit block.
     UNSPEC_SVE_LANE_SELECT
+    ;; Represents an SVE-style lane index, in which the indexing applies
+    ;; within the containing 512-bit block.
+    UNSPEC_SSVE_LANE_SELECT
     UNSPEC_SVE_CNT_PAT
     UNSPEC_SVE_PREFETCH
     UNSPEC_SVE_PREFETCH_GATHER
@@ -1134,21 +1138,21 @@
   }
 )
 
-(define_insn "@ccmp<CCFP_CCFPE:mode><GPF:mode>"
+(define_insn "@ccmp<CCFP_CCFPE:mode><GPF_F16:mode>"
   [(set (match_operand:CCFP_CCFPE 1 "cc_register" "")
 	(if_then_else:CCFP_CCFPE
 	  (match_operator 4 "aarch64_comparison_operator"
 	   [(match_operand 0 "cc_register" "")
 	    (const_int 0)])
 	  (compare:CCFP_CCFPE
-	    (match_operand:GPF 2 "register_operand" "w")
-	    (match_operand:GPF 3 "register_operand" "w"))
+	    (match_operand:GPF_F16 2 "register_operand" "w")
+	    (match_operand:GPF_F16 3 "register_operand" "w"))
 	  (unspec:CCFP_CCFPE
 	    [(match_operand 5 "immediate_operand")]
 	    UNSPEC_NZCV)))]
   "TARGET_FLOAT"
   "fccmp<e>\\t%<s>2, %<s>3, %k5, %m4"
-  [(set_attr "type" "fccmp<s>")]
+  [(set_attr "type" "fccmp<stype>")]
 )
 
 (define_insn "@ccmp<CC_ONLY:mode><GPI:mode>_rev"
@@ -1171,7 +1175,7 @@
   }
 )
 
-(define_insn "@ccmp<CCFP_CCFPE:mode><GPF:mode>_rev"
+(define_insn "@ccmp<CCFP_CCFPE:mode><GPF_F16:mode>_rev"
   [(set (match_operand:CCFP_CCFPE 1 "cc_register" "")
 	(if_then_else:CCFP_CCFPE
 	  (match_operator 4 "aarch64_comparison_operator"
@@ -1181,11 +1185,11 @@
 	    [(match_operand 5 "immediate_operand")]
 	    UNSPEC_NZCV)
 	  (compare:CCFP_CCFPE
-	    (match_operand:GPF 2 "register_operand" "w")
-	    (match_operand:GPF 3 "register_operand" "w"))))]
+	    (match_operand:GPF_F16 2 "register_operand" "w")
+	    (match_operand:GPF_F16 3 "register_operand" "w"))))]
   "TARGET_FLOAT"
   "fccmp<e>\\t%<s>2, %<s>3, %k5, %M4"
-  [(set_attr "type" "fccmp<s>")]
+  [(set_attr "type" "fccmp<stype>")]
 )
 
 ;; Expansion of signed mod by a power of 2 using CSNEG.
@@ -4554,7 +4558,8 @@
 	  (plus:GPI (match_operand:GPI 1 "register_operand" "r")
 		    (match_operand:GPI 2 "register_operand" "r"))
 	  (match_dup ovf_commutate)))
-   (clobber (match_scratch:GPI 3 "=r"))]
+   (clobber (match_scratch:GPI 3 "=r"))
+   (clobber (reg:CC CC_REGNUM))]
   "!TARGET_CSSC"
   "#"
   "&& 1"
@@ -4584,7 +4589,8 @@
 	  (minus:GPI (match_operand:GPI 1 "register_operand" "r")
 		     (match_operand:GPI 2 "register_operand" "r"))
 	  (match_dup 1)))
-   (clobber (match_scratch:GPI 3 "=r"))]
+   (clobber (match_scratch:GPI 3 "=r"))
+   (clobber (reg:CC CC_REGNUM))]
   "!TARGET_CSSC"
   "#"
   "&& 1"
@@ -4953,8 +4959,8 @@
 ;; CRC32 instructions.
 (define_insn "aarch64_<crc_variant>"
   [(set (match_operand:SI 0 "register_operand" "=r")
-        (unspec:SI [(match_operand:SI 1 "register_operand" "r")
-                    (match_operand:<crc_mode> 2 "register_operand" "r")]
+	(unspec:SI [(match_operand:SI 1 "aarch64_reg_or_zero" "rZ")
+		    (match_operand:<crc_mode> 2 "aarch64_reg_or_zero" "rZ")]
          CRC))]
   "TARGET_CRC32"
   {

@@ -1109,6 +1109,34 @@ struct cbl_refer_t {
   }
 };
 
+/*
+ * An element in the RPN stack for expression evaluation, either an operation
+ * or an operand.  A NUL operator indicates an operand. 
+ */
+struct rpn_t {
+  char op;
+  cbl_refer_t term;
+  rpn_t( char op ) : op(op) { // cppcheck-suppress noExplicitConstructor
+    static const char ops[] = "+-*/^!";
+    gcc_assert( std::any_of(ops, ops + sizeof(ops),
+                            [op]( char ch ) { return op == ch; }) );
+  }
+  rpn_t( const cbl_refer_t &term ) // cppcheck-suppress noExplicitConstructor
+    : op('\0'), term(term)
+  {}
+};
+
+struct expr_t {
+  char op;
+  cbl_refer_t lhs, rhs;
+  cbl_label_t *lbl;
+  expr_t( char op,
+          const cbl_refer_t& lhs, const cbl_refer_t& rhs,
+          cbl_label_t *lbl )
+    : op(op), lhs(lhs), rhs(rhs), lbl(lbl)
+  {}
+};
+
 struct elem_key_t {
   size_t program;
   const char * name;
@@ -1179,6 +1207,8 @@ symbol_field_index_set( cbl_field_t *field );
 bool
 symbol_field_type_update( cbl_field_t *field,
                           cbl_field_type_t type, bool is_usage );
+
+void symbol_field_capacity_set( cbl_field_t *field );
 
 struct sort_key_t;
 struct sort_key_t;
@@ -1405,6 +1435,9 @@ struct cbl_ffi_arg_t {
     }
     // Update Linkage Section data item.
     refer.field->set_linkage(crv, optional);
+  }
+  bool by_content() const {
+    return crv == by_content_e;
   }
 protected:
   bool by_value() const {
@@ -1700,33 +1733,6 @@ enum cbl_intrinsic_trim_t {
   trim_none_e,
   trim_leading_e = 1,
   trim_trailing_e = 2,
-};
-
-enum cbl_ctype_t {
-  c_unknown,
-  c_bool,
-  c_char,
-  c_wchar,
-  c_byte,
-  c_ubyte,
-  c_short,
-  c_ushort,
-  c_int,
-  c_uint,
-  c_long,
-  c_ulong,
-  c_longlong,
-  c_ulonglong,
-  c_size_t,
-  c_ssize_t,
-  c_int128,
-  c_float,
-  c_double,
-  c_longdouble,
-  c_char_p,
-  c_wchar_p,
-  c_void_p,
-  c_nts,      // this is a null-terminated-string char_p
 };
 
 struct function_descr_arg_t {

@@ -5600,17 +5600,26 @@ simplify_ashift:
 	    return simplify_gen_binary (VEC_SELECT, mode, XEXP (trueop0, 0),
 					gen_rtx_PARALLEL (VOIDmode, vec));
 	  }
-	/* (vec_concat:
-	     (subreg_lowpart:N OP)
-	     (vec_select:N OP P))  -->  OP when P selects the high half
-	    of the OP.  */
-	if (GET_CODE (trueop0) == SUBREG
-	    && subreg_lowpart_p (trueop0)
-	    && GET_CODE (trueop1) == VEC_SELECT
-	    && SUBREG_REG (trueop0) == XEXP (trueop1, 0)
-	    && !side_effects_p (XEXP (trueop1, 0))
-	    && vec_series_highpart_p (op1_mode, mode, XEXP (trueop1, 1)))
-	  return XEXP (trueop1, 0);
+	/* (vec_concat:N
+	     (subreg:N/2 OP 0)
+	     (subreg:N/2 OP N/2)) --> OP
+	   i.e. where concatenating the first and second halves of the
+	   same object OP.  */
+	{
+	  poly_uint64 offset = 0u;
+	  rtx base0 = get_ref_base_and_offset (trueop0, &offset);
+	  if (known_eq (offset, 0u)
+	      && known_eq (GET_MODE_SIZE (GET_MODE (base0)),
+			   GET_MODE_SIZE (mode)))
+	    {
+	      rtx base1 = get_ref_base_and_offset (trueop1, &offset);
+	      if (rtx_equal_p (base0, base1)
+		  && known_eq (offset, GET_MODE_SIZE (op0_mode))
+		  && !side_effects_p (trueop0)
+		  && !side_effects_p (trueop1))
+		return gen_lowpart (mode, base0);
+	    }
+	}
       }
       return 0;
 
@@ -7649,9 +7658,78 @@ simplify_context::simplify_ternary_operation (rtx_code code, machine_mode mode,
       if (CONST_INT_P (op0))
 	return op0 != const0_rtx ? op1 : op2;
 
-      /* Convert c ? a : a into "a".  */
+      /* Convert c ? a : a into "a".  Beware that two rtx_equal_p MEMs can
+	 still carry different memory attributes, in particular incompatible
+	 alias sets; returning one of them would narrow the aliasing of the
+	 result to that operand's, which is unsound (PR125683).  When the
+	 attributes differ, fold to a copy that keeps only what both operands
+	 guarantee, like merge_memattrs does when cross-jumping commons two
+	 memory references.  */
       if (rtx_equal_p (op1, op2) && ! side_effects_p (op0))
-	return op1;
+	{
+	  if (op1 == op2
+	      || !MEM_P (op1)
+	      || (mem_attrs_eq_p (get_mem_attrs (op1), get_mem_attrs (op2))
+		  && MEM_READONLY_P (op1) == MEM_READONLY_P (op2)
+		  && MEM_NOTRAP_P (op1) == MEM_NOTRAP_P (op2)
+		  && MEM_POINTER (op1) == MEM_POINTER (op2)))
+	    return op1;
+
+	  /* For BLKmode the size in MEM_ATTRS describes the access itself,
+	     so it cannot be dropped.  Volatility is not merged either: it
+	     constrains when the access happens rather than describing the
+	     memory, so unlike the flags below it cannot be weakened to what
+	     both operands allow.  Dropping it would lose a required access;
+	     merge_memattrs and noce_try_cmove_arith instead set it, which is
+	     sound but claims more than either operand did.  Those two have to
+	     put something on a reference they are already committed to, while
+	     this fold is free to do nothing, and if-conversion never reaches
+	     it with a volatile operand in any case: side_effects_p is true
+	     for one, so noce_operand_ok rejects it.  Decline the fold.  */
+	  if (GET_MODE (op1) != BLKmode
+	      && MEM_VOLATILE_P (op1) == MEM_VOLATILE_P (op2))
+	    {
+	      rtx mem = shallow_copy_rtx (op1);
+
+	      if (MEM_ALIAS_SET (op1) != MEM_ALIAS_SET (op2))
+		set_mem_alias_set (mem, 0);
+
+	      if (!mem_expr_equal_p (MEM_EXPR (op1), MEM_EXPR (op2)))
+		{
+		  set_mem_expr (mem, NULL_TREE);
+		  clear_mem_offset (mem);
+		}
+	      else if (MEM_OFFSET_KNOWN_P (op1) != MEM_OFFSET_KNOWN_P (op2)
+		       || (MEM_OFFSET_KNOWN_P (op1)
+			   && maybe_ne (MEM_OFFSET (op1), MEM_OFFSET (op2))))
+		clear_mem_offset (mem);
+
+	      /* Unlike merge_memattrs, which fixes up two references that
+		 both stay in the stream, this returns a single reference
+		 that stands in for either arm, so keep the size only when
+		 both agree rather than taking the larger one.  */
+	      if (!MEM_SIZE_KNOWN_P (op1) || !MEM_SIZE_KNOWN_P (op2)
+		  || maybe_ne (MEM_SIZE (op1), MEM_SIZE (op2)))
+		clear_mem_size (mem);
+
+	      set_mem_align (mem, MIN (MEM_ALIGN (op1), MEM_ALIGN (op2)));
+
+	      /* MEM_READONLY_P, MEM_NOTRAP_P and MEM_POINTER are rtx flag
+		 bits rather than MEM_ATTRS fields, so shallow_copy_rtx has
+		 already taken them from OP1 and they need clearing by hand.
+		 Each asserts something about the reference, so the copy may
+		 only keep it when both operands do, as merge_memattrs does
+		 for the first two.  */
+	      if (MEM_READONLY_P (op1) != MEM_READONLY_P (op2))
+		MEM_READONLY_P (mem) = 0;
+	      if (MEM_NOTRAP_P (op1) != MEM_NOTRAP_P (op2))
+		MEM_NOTRAP_P (mem) = 0;
+	      if (MEM_POINTER (op1) != MEM_POINTER (op2))
+		MEM_POINTER (mem) = 0;
+
+	      return mem;
+	    }
+	}
 
       /* Convert a != b ? a : b into "a".  */
       if (GET_CODE (op0) == NE

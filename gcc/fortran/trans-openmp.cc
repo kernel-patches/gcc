@@ -5640,6 +5640,35 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
       omp_clauses = gfc_trans_add_clause (c, omp_clauses);
     }
 
+  if (clauses->message || clauses->severity != OMP_SEVERITY_UNSET)
+    {
+      tree message = NULL_TREE;
+      tree len = NULL_TREE;
+
+      if (clauses->message)
+	{
+	  gfc_init_se (&se, NULL);
+	  gfc_conv_expr (&se, clauses->message);
+	  gfc_add_block_to_block (block, &se.pre);
+	  message = se.expr;
+	  len = se.string_length;
+	  if (!DECL_P (se.expr))
+	    message = gfc_evaluate_now (message, block);
+	  gfc_add_block_to_block (block, &se.post);
+
+	  if (!POINTER_TYPE_P (TREE_TYPE (message)))
+	    /* To ensure an ARRAY_TYPE is not passed as such.  */
+	    message = gfc_build_addr_expr (NULL, message);
+	}
+
+      c = build_omp_clause (gfc_get_location (&where), OMP_CLAUSE_MESSAGE);
+      OMP_CLAUSE_MESSAGE_EXPR (c) = message;
+      OMP_CLAUSE_MESSAGE_LEN (c) = len;
+      if (clauses->severity == OMP_SEVERITY_WARNING)
+	OMP_CLAUSE_MESSAGE_SEVERITY_WARN (c) = 1;
+      omp_clauses = gfc_trans_add_clause (c, omp_clauses);
+    }
+
   if (clauses->novariants)
     {
       tree novariants_var;
@@ -5672,29 +5701,15 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
 
   if (clauses->num_threads_list)
     {
-      tree num_threads;
-
-      if (clauses->num_threads_dims)
-	sorry_at (gfc_get_location (&clauses->num_threads_list->expr->where),
-		  "%<num_threads%> with %<dims%> modifier");
-      else if (clauses->num_threads_strict)
-	sorry_at (gfc_get_location (&clauses->num_threads_list->expr->where),
-		  "%<num_threads%> with %<strict%> modifier");
-      else if (clauses->num_threads_list->next)
-	{
-	  gfc_expr *expr = clauses->num_threads_list->next->expr;
-	  sorry_at (gfc_get_location (&expr->where),
-		    "%<num_threads%> with more than one argument");
-	}
-
-      gfc_init_se (&se, NULL);
-      gfc_conv_expr (&se, clauses->num_threads_list->expr);
-      gfc_add_block_to_block (block, &se.pre);
-      num_threads = gfc_evaluate_now (se.expr, block);
-      gfc_add_block_to_block (block, &se.post);
-
+      tree num_threads = NULL_TREE;
+      for (gfc_expr_list *el = clauses->num_threads_list; el; el = el->next)
+	num_threads = tree_cons (NULL_TREE,
+				 gfc_convert_expr_to_tree (block, el->expr),
+				 num_threads);
       c = build_omp_clause (gfc_get_location (&where), OMP_CLAUSE_NUM_THREADS);
-      OMP_CLAUSE_NUM_THREADS_EXPR (c) = num_threads;
+      OMP_CLAUSE_NUM_THREADS_EXPR (c) = nreverse (num_threads);
+      OMP_CLAUSE_NUM_THREADS_STRICT (c) = clauses->num_threads_strict;
+      OMP_CLAUSE_NUM_THREADS_DIMS (c) = clauses->num_threads_dims;
       omp_clauses = gfc_trans_add_clause (c, omp_clauses);
     }
 
@@ -5995,32 +6010,15 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
 
   if (clauses->num_teams_list)
     {
-      tree num_teams_lower = NULL_TREE, num_teams_upper;
-
-      if (clauses->num_teams_dims)
-	sorry_at (gfc_get_location (&clauses->num_teams_list->expr->where),
-		    "%<num_teams%> with %<dims%> modifier");
-
-      gfc_expr_list *el = clauses->num_teams_list;
-      if (el->next)
-	{
-	  gfc_init_se (&se, NULL);
-	  gfc_conv_expr (&se, el->expr);
-	  gfc_add_block_to_block (block, &se.pre);
-	  num_teams_lower = gfc_evaluate_now (se.expr, block);
-	  gfc_add_block_to_block (block, &se.post);
-	  el = el->next;
-	}
-
-      gfc_init_se (&se, NULL);
-      gfc_conv_expr (&se, el->expr);
-      gfc_add_block_to_block (block, &se.pre);
-      num_teams_upper = gfc_evaluate_now (se.expr, block);
-      gfc_add_block_to_block (block, &se.post);
-
+      tree num_teams = NULL_TREE;
+      for (gfc_expr_list *el = clauses->num_teams_list; el; el = el->next)
+	num_teams = tree_cons (NULL_TREE,
+			       gfc_convert_expr_to_tree (block, el->expr),
+			       num_teams);
       c = build_omp_clause (gfc_get_location (&where), OMP_CLAUSE_NUM_TEAMS);
-      OMP_CLAUSE_NUM_TEAMS_LOWER_EXPR (c) = num_teams_lower;
-      OMP_CLAUSE_NUM_TEAMS_UPPER_EXPR (c) = num_teams_upper;
+      OMP_CLAUSE_NUM_TEAMS_LOWER_EXPR (c) = NULL_TREE;
+      OMP_CLAUSE_NUM_TEAMS_UPPER_EXPR (c) = nreverse (num_teams);
+      OMP_CLAUSE_NUM_TEAMS_DIMS (c) = clauses->num_teams_dims;
       omp_clauses = gfc_trans_add_clause (c, omp_clauses);
     }
 
@@ -6045,22 +6043,15 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
 
   if (clauses->thread_limit_list)
     {
-      tree thread_limit;
-
-      if (clauses->thread_limit_dims)
-	sorry_at (gfc_get_location (&clauses->thread_limit_list->expr->where),
-		    "%<thread_limit%> with %<dims%> modifier");
-      else if (clauses->thread_limit_strict)
-	sorry_at (gfc_get_location (&clauses->thread_limit_list->expr->where),
-		    "%<thread_limit%> with %<strict%> modifier");
-      gfc_init_se (&se, NULL);
-      gfc_conv_expr (&se, clauses->thread_limit_list->expr);
-      gfc_add_block_to_block (block, &se.pre);
-      thread_limit = gfc_evaluate_now (se.expr, block);
-      gfc_add_block_to_block (block, &se.post);
-
+      tree thread_limit = NULL_TREE;
+      for (gfc_expr_list *el = clauses->thread_limit_list; el; el = el->next)
+	thread_limit = tree_cons (NULL_TREE,
+				  gfc_convert_expr_to_tree (block, el->expr),
+				  thread_limit);
       c = build_omp_clause (gfc_get_location (&where), OMP_CLAUSE_THREAD_LIMIT);
-      OMP_CLAUSE_THREAD_LIMIT_EXPR (c) = thread_limit;
+      OMP_CLAUSE_THREAD_LIMIT_EXPR (c) = nreverse (thread_limit);
+      OMP_CLAUSE_THREAD_LIMIT_STRICT (c) = clauses->thread_limit_strict;
+      OMP_CLAUSE_THREAD_LIMIT_DIMS (c) = clauses->thread_limit_dims;
       omp_clauses = gfc_trans_add_clause (c, omp_clauses);
     }
 
@@ -6421,6 +6412,10 @@ gfc_trans_omp_clauses (stmtblock_t *block, gfc_omp_clauses *clauses,
   /* OpenACC 'nohost' clauses cannot appear here.  */
   gcc_checking_assert (!clauses->nohost);
 
+  /* OpenACC 'device_num' and 'device_type' clauses cannot appear here.  */
+  gcc_checking_assert (!clauses->device_num_expr
+		       && !clauses->oacc_device_type_present);
+
   return nreverse (omp_clauses);
 }
 
@@ -6491,7 +6486,7 @@ gfc_trans_oacc_construct (gfc_code *code)
   return gfc_finish_block (&block);
 }
 
-/* update, enter_data, exit_data, cache. */
+/* update, enter_data, exit_data, cache, init, set, shutdown.  */
 static tree
 gfc_trans_oacc_executable_directive (gfc_code *code)
 {
@@ -6513,6 +6508,10 @@ gfc_trans_oacc_executable_directive (gfc_code *code)
       case EXEC_OACC_CACHE:
 	construct_code = OACC_CACHE;
 	break;
+      case EXEC_OACC_INIT:
+      case EXEC_OACC_SHUTDOWN:
+      case EXEC_OACC_SET:
+	goto builtin_oacc_exec_directive;
       default:
 	gcc_unreachable ();
     }
@@ -6523,6 +6522,67 @@ gfc_trans_oacc_executable_directive (gfc_code *code)
   stmt = build1_loc (input_location, construct_code, void_type_node,
 		     oacc_clauses);
   gfc_add_expr_to_block (&block, stmt);
+  return gfc_finish_block (&block);
+
+builtin_oacc_exec_directive:
+
+  enum built_in_function builtin_code;
+
+  switch (code->op)
+  {
+    case EXEC_OACC_INIT:
+      builtin_code = BUILT_IN_GOACC_INIT;
+      break;
+    case EXEC_OACC_SHUTDOWN:
+      builtin_code = BUILT_IN_GOACC_SHUTDOWN;
+      break;
+    case EXEC_OACC_SET:
+      builtin_code = BUILT_IN_GOACC_SET_DEVICE;
+      break;
+    default:
+      gcc_unreachable ();
+  }
+
+  location_t loc = input_location;
+  gfc_omp_clauses *clauses = code->ext.omp_clauses;
+
+  gfc_start_block (&block);
+
+  tree n_device;
+  if (clauses->device_num_expr)
+    n_device = gfc_convert_expr_to_tree (&block, clauses->device_num_expr);
+  else
+    /* no 'device_num' clause specified by
+       the user, we don't modify the value of ICV
+       'acc-current-device-num-var' or we do not
+       take any action in init and shutdown directive
+       using -1 value.  */
+    n_device = build_int_cst (integer_type_node, -1);
+
+  /* GOMP_DEVICE_NONE is used to make the operation
+     in all the devices.
+
+     GOMP_DEVICE_DEFAULT is used in set directive
+     to do nothing if the clause do not appear.  */
+  int device_type = code->op == EXEC_OACC_SET ?
+		    GOMP_DEVICE_DEFAULT	      :
+		    GOMP_DEVICE_NONE;
+  if (clauses->oacc_device_type_present)
+    device_type = clauses->oacc_device_type;
+
+  tree d_type = build_int_cst (integer_type_node, device_type);
+
+  stmt = builtin_decl_explicit (builtin_code);
+
+  stmt = build_call_expr_loc (loc, stmt, 2, n_device, d_type);
+
+  if (clauses->if_expr)
+    stmt = build3_loc (input_location, COND_EXPR, void_type_node,
+		       gfc_convert_expr_to_tree (&block, clauses->if_expr),
+		       stmt, NULL_TREE);
+
+  gfc_add_expr_to_block (&block, stmt);
+
   return gfc_finish_block (&block);
 }
 
@@ -8527,6 +8587,10 @@ gfc_split_omp_clauses (gfc_code *code,
 	    = code->ext.omp_clauses->nowait;
 	  clausesa[GFC_OMP_SPLIT_TARGET].device_type
 	    = code->ext.omp_clauses->device_type;
+	  clausesa[GFC_OMP_SPLIT_TARGET].message
+	    = code->ext.omp_clauses->message;
+	  clausesa[GFC_OMP_SPLIT_TARGET].severity
+	    = code->ext.omp_clauses->severity;
 	}
       if (mask & GFC_OMP_MASK_TEAMS)
 	{
@@ -8547,6 +8611,11 @@ gfc_split_omp_clauses (gfc_code *code,
 	    = code->ext.omp_clauses->lists[OMP_LIST_SHARED];
 	  clausesa[GFC_OMP_SPLIT_TEAMS].default_sharing
 	    = code->ext.omp_clauses->default_sharing;
+	  /* Message is used on target, teams, and parallel.  */
+	  clausesa[GFC_OMP_SPLIT_TEAMS].message
+	    = code->ext.omp_clauses->message;
+	  clausesa[GFC_OMP_SPLIT_TEAMS].severity
+	    = code->ext.omp_clauses->severity;
 	}
       if (mask & GFC_OMP_MASK_DISTRIBUTE)
 	{
@@ -8589,6 +8658,10 @@ gfc_split_omp_clauses (gfc_code *code,
 	  /* And this is copied to all.  */
 	  clausesa[GFC_OMP_SPLIT_PARALLEL].if_expr
 	    = code->ext.omp_clauses->if_expr;
+	  clausesa[GFC_OMP_SPLIT_PARALLEL].message
+	    = code->ext.omp_clauses->message;
+	  clausesa[GFC_OMP_SPLIT_PARALLEL].severity
+	    = code->ext.omp_clauses->severity;
 	}
       if (mask & GFC_OMP_MASK_MASKED)
 	clausesa[GFC_OMP_SPLIT_MASKED].filter = code->ext.omp_clauses->filter;
@@ -9889,6 +9962,9 @@ gfc_trans_oacc_directive (gfc_code *code)
     case EXEC_OACC_CACHE:
     case EXEC_OACC_ENTER_DATA:
     case EXEC_OACC_EXIT_DATA:
+    case EXEC_OACC_INIT:
+    case EXEC_OACC_SHUTDOWN:
+    case EXEC_OACC_SET:
       return gfc_trans_oacc_executable_directive (code);
     case EXEC_OACC_WAIT:
       return gfc_trans_oacc_wait_directive (code);

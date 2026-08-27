@@ -1,3 +1,85 @@
+2026-08-25  Georg-Johann Lay  <avr@gjlay.de>
+
+	PR target/127071
+	* config/avr/t-copy-libgcc: Remove file.
+	* config/avr/t-avrlibc: Remove code to pull in t-copy-libgcc.
+
+2026-08-24  Kito Cheng  <kito.cheng@sifive.com>
+
+	* config/riscv/feature_bits.c: Include
+	common/config/riscv/riscv-hwprobe.h, and drop the hwprobe key
+	numbers, extension bit positions, struct riscv_hwprobe and
+	syscall_5_args that moved there.
+	(__init_riscv_features_bits_linux): Set the extension bits from
+	riscv-hwprobe.def.
+	(__init_riscv_feature_bits): Add a declaration.
+
+2026-08-16  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/lib1funcs.S: Fix typo in comment.
+
+2026-08-12  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/t-avr (LIB1ASMFUNCS): Add _usshift_1, _usshift_2,
+	_usshift_4, _ssshift_1, _ssshift_2, _ssshift_4.
+	(FUNCS_notiny): Add _usshift_8, _ssshift_8.
+	(LIB2FUNCS_EXCLUDE): Add all the default libgcc saturated shifts.
+	* config/avr/lib1funcs-fixed.S: Support saturated ashl for
+	all fixed-point modes.
+
+2026-08-11  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/t-avr (conv_YX): New variable.
+	(LIB2FUNCS_EXCLUDE): Add more modules that handle modes which
+	we don't support, or which are handled by avr-specific modules.
+
+2026-08-05  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/t-avr (LIB1ASMFUNCS): Add _divQ16_tail.
+	* config/avr/lib1funcs-fixed.S (__divQ16_tail): New DEFUN.
+	(__divhq3, __udivuhq3, __divha3, __udivuha3): Overhaul.
+	(__ssdivhq3, __usdivuhq3, __ssdivha3, __usdivuha3): New ENTRYs.
+
+2026-08-05  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/t-avr (FUNCS_notiny) <_divsa3, _udivusa3>: Move
+	to LIB1ASMFUNCS.
+	* config/avr/lib1funcs-fixed.S (__divsa3, __udivusa3): Overhaul.
+	Saturate result.
+	(__ssdivsa3, __usdivusa3, __udivusa3.2): New ENTRYs.
+
+2026-07-31  Muhammad Kamran  <muhammad.kamran@arm.com>
+
+	* config/aarch64/aarch64-asm.h (FEATURE_1_AND_MARK): Do not emit
+	.previous after AArch64 build attributes.
+
+2026-07-29  Piotr Kubaj  <pkubaj@FreeBSD.org>
+
+	PR target/125803
+	* config/rs6000/freebsd-unwind.h (TOC_SAVE_SLOT): New macro,
+	defined according to _CALL_ELF.
+	(frob_update_context): Use TOC_SAVE_SLOT instead of the
+	hard-coded ELFv1 offset 40 when checking for and locating the
+	saved TOC, so that r2 is restored correctly under ELFv2.  Guard
+	the ELFv1-only PLT stub and function pointer call sequences
+	with _CALL_ELF != 2, mirroring linux-unwind.h.
+
+2026-07-28  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/t-avr (FUNCS_notiny): Add _udivuQ64_common, _udivuda3,
+	_udivuta3, _udivudq3, _divda3, _divta3, _divdq3, _divQ64_tail.
+	* config/avr/lib1funcs-fixed.S (__udivuta3, __usdivuta3)
+	(__udivudq3, __usdivudq3, __udivuda3, __usdivuda3)
+	(__udivuQ64_common, __divda3, __ssdivda3, __divta3, __ssdivta3)
+	(__divdq3, __ssdivdq3, __divQ64_tail): New functions.
+
+2026-07-25  Georg-Johann Lay  <avr@gjlay.de>
+
+	* config/avr/t-avr (FUNCS_notiny): Add _negdi2_r10.
+	* config/avr/lib1funcs.S (__negdi2_r10): New function.
+	(__divdi3_moddi3): Use it.
+	* config/avr/lib1funcs-fixed.S (__mulQ64_work): Use it.
+
 2026-07-22  Georg-Johann Lay  <avr@gjlay.de>
 
 	* config/avr/lib1funcs.S (__mulqihi3): Use .branch_plus.

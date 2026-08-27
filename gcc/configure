@@ -26608,10 +26608,10 @@ else
 fi
 
 
+gcc_cv_irelative_reloc=
 case "${target}" in
   riscv*-*-linux*)
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking linker ifunc IRELATIVE support" >&5
-$as_echo_n "checking linker ifunc IRELATIVE support... " >&6; }
+    gcc_cv_irelative_reloc=R_RISCV_IRELATIVE
     cat > conftest.s <<EOF
 	.text
 	.type	foo_resolver, @function
@@ -26630,20 +26630,48 @@ bar:
 	ret
 	.size	bar, .-bar
 EOF
-    if test x"$gcc_cv_as" != x \
-       && test x"$gcc_cv_ld" != x \
-       && test x"$gcc_cv_readelf" != x \
-       && $gcc_cv_as -o conftest.o conftest.s > /dev/null 2>&1 \
-       && $gcc_cv_ld -o conftest conftest.o > /dev/null 2>&1 \
-       && $gcc_cv_readelf --relocs --wide conftest \
-	  | grep R_RISCV_IRELATIVE > /dev/null 2>&1; then
-      enable_gnu_indirect_function=yes
-    fi
-    rm -f conftest conftest.o conftest.s
-    { $as_echo "$as_me:${as_lineno-$LINENO}: result: $enable_gnu_indirect_function" >&5
-$as_echo "$enable_gnu_indirect_function" >&6; }
+    ;;
+  alpha*-*-linux*)
+    # Alpha gas reserves .set for setting assembler modes, so the alias is
+    # spelled with '=' instead, matching the target's ASM_OUTPUT_DEF.
+    gcc_cv_irelative_reloc=R_ALPHA_IRELATIVE
+    cat > conftest.s <<EOF
+	.text
+	.type	foo_resolver, @function
+foo_resolver:
+	ret
+	.size	foo_resolver, .-foo_resolver
+
+	.globl	foo
+	.type	foo, %gnu_indirect_function
+	foo = foo_resolver
+
+	.globl	bar
+	.type	bar, @function
+bar:
+	jsr	\$26, foo
+	ret
+	.size	bar, .-bar
+EOF
     ;;
 esac
+
+if test x"$gcc_cv_irelative_reloc" != x; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking linker ifunc IRELATIVE support" >&5
+$as_echo_n "checking linker ifunc IRELATIVE support... " >&6; }
+  if test x"$gcc_cv_as" != x \
+     && test x"$gcc_cv_ld" != x \
+     && test x"$gcc_cv_readelf" != x \
+     && $gcc_cv_as -o conftest.o conftest.s > /dev/null 2>&1 \
+     && $gcc_cv_ld -o conftest conftest.o > /dev/null 2>&1 \
+     && $gcc_cv_readelf --relocs --wide conftest \
+	| grep $gcc_cv_irelative_reloc > /dev/null 2>&1; then
+    enable_gnu_indirect_function=yes
+  fi
+  rm -f conftest conftest.o conftest.s
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $enable_gnu_indirect_function" >&5
+$as_echo "$enable_gnu_indirect_function" >&6; }
+fi
 
 gif=`if test x$enable_gnu_indirect_function = xyes; then echo 1; else echo 0; fi`
 
@@ -27244,6 +27272,14 @@ else
   test $ac_status = 0; }; }
     then
 	case "$target" in
+  hppa*-*-hpux*)
+    # The HP dynamic linker relocates text and data separately, so
+    # differences between text and data don't work.  As a result,
+    # gas defines CFI_DIFF_EXPR_OK to 0.  We want to use difference
+    # expressions for symbols in the data segment, so we need to
+    # make sure CFI directives aren't emitted.
+    gcc_cv_as_cfi_directive=no
+    ;;
   *-*-solaris*)
     # If the linker used on Solaris (like Sun ld) isn't capable of merging
     # read-only and read-write sections, we need to make sure that the
@@ -29112,6 +29148,38 @@ $as_echo "$gcc_cv_as_avr_mgccisr" >&6; }
 if test $gcc_cv_as_avr_mgccisr = yes; then
 
 $as_echo "#define HAVE_AS_AVR_MGCCISR_OPTION 1" >>confdefs.h
+
+fi
+
+
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking assembler for .gnu_attribute" >&5
+$as_echo_n "checking assembler for .gnu_attribute... " >&6; }
+if ${gcc_cv_as_avr_gnu_attribute+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  gcc_cv_as_avr_gnu_attribute=no
+  if test x"$gcc_cv_as" != x; then
+    $as_echo '.gnu_attribute 4,1' > conftest.s
+    if { ac_try='$gcc_cv_as $gcc_cv_as_flags  -o conftest.o conftest.s >&5'
+  { { eval echo "\"\$as_me\":${as_lineno-$LINENO}: \"$ac_try\""; } >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+  test $ac_status = 0; }; }
+    then
+	gcc_cv_as_avr_gnu_attribute=yes
+    else
+      echo "configure: failed program was" >&5
+      cat conftest.s >&5
+    fi
+    rm -f conftest.o conftest.s
+  fi
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $gcc_cv_as_avr_gnu_attribute" >&5
+$as_echo "$gcc_cv_as_avr_gnu_attribute" >&6; }
+if test $gcc_cv_as_avr_gnu_attribute = yes; then
+
+$as_echo "#define HAVE_AS_AVR_GNU_ATTRIBUTE 1" >>confdefs.h
 
 fi
 
@@ -35223,7 +35291,7 @@ $as_echo_n "checking AArch64 build supports SPE profiling for autoprofiledbootst
 	if test ! -n "$($PERF record -j any,u -o /dev/null /bin/true 2>&1 | grep "PMU Hardware or event type doesn't support branch stack sampling.")"; then
 	  AFDO_PROFILER=perf
 	  aarch64_spe_support="using BRBE instead"
-	elif test -n "$($PERF list | grep arm_spe)"; then
+	elif test -n "$($PERF list pmu | grep arm_spe)"; then
 	  AFDO_PROFILER=perf_spe
 	  aarch64_spe_support=yes
 	fi

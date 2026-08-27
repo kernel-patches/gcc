@@ -40,7 +40,10 @@ RISCV_TUNE("sifive-5-series", generic, rocket_tune_info)
 RISCV_TUNE("sifive-7-series", sifive_7, sifive_7_tune_info)
 RISCV_TUNE("sifive-p400-series", sifive_p400, sifive_p400_tune_info)
 RISCV_TUNE("sifive-p600-series", sifive_p600, sifive_p600_tune_info)
+RISCV_TUNE("sifive-p550", sifive_p600, sifive_p550_tune_info)
+RISCV_TUNE("sifive-p870-d", sifive_p600, sifive_p870_tune_info)
 RISCV_TUNE("tt-ascalon-x", tt_ascalon_d8, tt_ascalon_d8_tune_info)
+RISCV_TUNE("tt-ascalon-xg", tt_ascalon_xg, tt_ascalon_d8_tune_info)
 RISCV_TUNE("thead-c906", generic, thead_c906_tune_info)
 RISCV_TUNE("xt-c908", xt_c908, xt_c908_tune_info)
 RISCV_TUNE("xt-c908v", generic, generic_ooo_tune_info)
@@ -112,11 +115,19 @@ RISCV_CORE("sifive-p450",     "rv64imafdc_za64rs_zic64b_zicbom_zicbop_zicboz_"
 			      "ziccamoa_ziccif_zicclsm_ziccrse_zicsr_zifencei_"
 			      "zihintntl_zihintpause_zihpm_zfhmin_zba_zbb_zbs",
 			      "sifive-p400-series")
+RISCV_CORE("sifive-p550",     "rv64imafdc_zifencei_zfhmin_zba_zbb",
+			      "sifive-p550")
 RISCV_CORE("sifive-p670",     "rv64imafdcv_za64rs_zic64b_zicbom_zicbop_zicboz_"
 			      "ziccamoa_ziccif_zicclsm_ziccrse_zicsr_zifencei_"
 			      "zihintntl_zihintpause_zihpm_zfhmin_zba_zbb_zbs_"
 			      "zvl128b_zvbb_zvknc_zvkng_zvksc_zvksg",
 			      "sifive-p600-series")
+RISCV_CORE("sifive-p870-d",   "rv64imafdcbv_zic64b_zicbom_zicbop_zicboz_"
+			      "ziccamoa_ziccif_zicclsm_ziccrse_zicntr_zicond_"
+			      "zifencei_zihintntl_zihintpause_zihpm_zimop_"
+			      "za64rs_zama16b_zawrs_zfa_zfh_zcb_zcmop_zkr_zkt_"
+			      "zvbb_zvfbfwma_zvfh_zvfhmin_zvknc_zvksg",
+			      "sifive-p870-d")
 
 RISCV_CORE("thead-c906",      "rv64imafdc_xtheadba_xtheadbb_xtheadbs_xtheadcmo_"
 			      "xtheadcondmov_xtheadfmemidx_xtheadmac_"
@@ -179,6 +190,11 @@ RISCV_CORE("tt-ascalon-x",    "rva23s64_zfbfmin_zfh_zkr_zvbc_zvfbfmin_zvfbfwma_"
 			      "smstateen_ssaia_ssstrict_svadu",
 			      "tt-ascalon-x")
 RISCV_CORE_ALIAS("tt-ascalon-x", "tt-ascalon-d8")
+
+RISCV_CORE("tt-ascalon-xg",   "rva23s64_zfbfmin_zfh_zkr_zvbc_zvfbfmin_zvfbfwma_"
+			      "zvfh_zvl256b_smaia_smmpm_smnpm_smrnmi_smstateen_"
+			      "ssaia_ssstrict_svadu",
+			      "tt-ascalon-xg")
 
 RISCV_CORE("xiangshan-nanhu",      "rv64imafdc_zba_zbb_zbc_zbs_"
 			      "zbkb_zbkc_zbkx_zknd_zkne_zknh_zksed_zksh_"

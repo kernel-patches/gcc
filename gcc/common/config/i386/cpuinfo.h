@@ -1110,20 +1110,12 @@ get_available_features (struct __processor_model *cpu_model,
 	}
     }
 
-  /* Get Advanced Features at level 0x21 (eax = 0x21).  */
-  if (max_cpuid_level >= 0x21)
-    {
-      __cpuid (0x21, eax, ebx, ecx, edx);
-      if (eax & bit_AVX512BMM)
-	{
-	  set_feature (FEATURE_AVX512BMM);
-	}
-    }
-
   /* Get Advanced Features at level 0x24 (eax = 0x24, ecx = 0).  */
   if (avx10_set && max_cpuid_level >= 0x24)
     {
-      __cpuid_count (0x24, 0, eax, ebx, ecx, edx);
+      unsigned int max_subleaf_level;
+
+      __cpuid_count (0x24, 0, max_subleaf_level, ebx, ecx, edx);
       version = ebx & 0xff;
       switch (version)
 	{
@@ -1136,6 +1128,12 @@ get_available_features (struct __processor_model *cpu_model,
 	default:
 	  set_feature (FEATURE_AVX10_1);
 	  break;
+	}
+      if (max_subleaf_level >= 1)
+	{
+	  __cpuid_count (0x24, 1, eax, ebx, ecx, edx);
+	  if (ecx & bit_AVX10V2AUX)
+	    set_feature (FEATURE_AVX10V2AUX);
 	}
     }
 
@@ -1194,9 +1192,9 @@ get_available_features (struct __processor_model *cpu_model,
     {
       __cpuid (0x80000021, eax, ebx, ecx, edx);
       if (eax & bit_AMD_PREFETCHI)
-	{
-	  set_feature (FEATURE_PREFETCHI);
-	}
+	set_feature (FEATURE_PREFETCHI);
+      if (eax & bit_AVX512BMM)
+	set_feature (FEATURE_AVX512BMM);
     }
 
 #undef set_feature

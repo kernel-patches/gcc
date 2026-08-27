@@ -425,7 +425,7 @@ movement_possibility_1 (gimple *stmt)
 	   || code == RROTATE_EXPR)
 	  && (TREE_CODE (gimple_assign_rhs2 (stmt)) != INTEGER_CST
 	      /* We cannot use ranges at 'stmt' here.  */
-	      || wi::ltu_p (wi::to_wide (gimple_assign_rhs2 (stmt)),
+	      || wi::geu_p (wi::to_wide (gimple_assign_rhs2 (stmt)),
 			    element_precision (type))))
 	ret = MOVE_PRESERVE_EXECUTION;
     }
@@ -3257,7 +3257,7 @@ ref_indep_loop_p (class loop *loop, im_mem_ref *ref, dep_kind kind)
       /* tri-state, { unknown, independent, dependent }  */
       dep_state state = query_loop_dependence (loop, ref, kind);
       if (state != dep_unknown)
-	return state == dep_independent ? true : false;
+	return state == dep_independent;
 
       class loop *inner = loop->inner;
       while (inner)

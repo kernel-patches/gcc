@@ -677,8 +677,8 @@
 ;; Keep this in sync with enum riscv_microarchitecture.
 (define_attr "tune"
   "generic,sifive_7,sifive_p400,sifive_p600,xiangshan,generic_ooo,mips_p8700,
-   tt_ascalon_d8,andes_25_series,andes_23_series,andes_45_series,spacemit_x60,
-   arcv_rmx100,arcv_rhx100,xt_c908"
+   tt_ascalon_d8,tt_ascalon_xg,andes_25_series,andes_23_series,andes_45_series,
+   spacemit_x60,arcv_rmx100,arcv_rhx100,xt_c908"
   (const (symbol_ref "((enum attr_tune) riscv_microarchitecture)")))
 
 ;; Describe a user's asm statement.
@@ -4471,12 +4471,23 @@
   "mnret"
   [(set_attr "type" "ret")])
 
-(define_insn "stack_tie<mode>"
+(define_insn "@stack_tie<mode>"
   [(set (mem:BLK (scratch))
 	(unspec:BLK [(match_operand:X 0 "register_operand" "r")
 		     (match_operand:X 1 "register_operand" "r")]
 		    UNSPEC_TIE))]
   "!rtx_equal_p (operands[0], operands[1])"
+  ""
+  [(set_attr "type" "ghost")
+   (set_attr "length" "0")]
+)
+
+;; Keep stack loads before an SP adjustment without a second register.
+(define_insn "@stack_tie_sp<mode>"
+  [(set (mem:BLK (scratch))
+	(unspec:BLK [(match_operand:X 0 "register_operand" "r")]
+		    UNSPEC_TIE))]
+  "rtx_equal_p (operands[0], stack_pointer_rtx)"
   ""
   [(set_attr "type" "ghost")
    (set_attr "length" "0")]
@@ -5364,7 +5375,9 @@
 	 (match_operand:DI 5 "const_int_operand")))
    (clobber (match_operand:DI 6 "register_operand"))]
   "(TARGET_64BIT
+    && INTVAL (operands[3]) == 0
     && INTVAL (operands[2]) + INTVAL (operands[4]) == 32
+    && sext_hwi (INTVAL (operands[5]), 32) == INTVAL (operands[5])
     && SMALL_OPERAND (INTVAL (operands[5]) >> INTVAL (operands[4])))"
   [(set (match_dup 6) (and:DI (match_dup 1) (match_dup 5)))
    (set (match_dup 0) (sign_extend:DI (ashift:SI (match_dup 7) (match_dup 4))))]

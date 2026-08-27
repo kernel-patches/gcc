@@ -1016,6 +1016,9 @@ can_convert_array (tree atype, tree from, int flags, tsubst_flags_t complain)
       && TREE_CODE (tree_strip_any_location_wrapper (from)) == STRING_CST)
     return array_string_literal_compatible_p (atype, from);
 
+  if (tree vi = (get_vec_init_expr (from)))
+    return can_convert_array (atype, VEC_INIT_EXPR_INIT (vi), flags, complain);
+
   /* No other valid way to aggregate initialize an array.  */
   return false;
 }
@@ -1546,12 +1549,16 @@ standard_conversion (tree to, tree from, tree expr, bool c_cast_p,
 
       if (!same_type_p (fbase, tbase))
 	{
-	  from = build_memfn_type (fstat,
-				   tbase,
-				   cp_type_quals (tbase),
-				   type_memfn_rqual (tofn));
-	  from = build_ptrmemfunc_type (build_pointer_type (from));
-	  conv = build_conv (ck_pmem, from, conv);
+	  tree first = to;
+	  if (!same_type_p (tstat, fstat))
+	    {
+	      first = build_memfn_type (fstat,
+					tbase,
+					cp_type_quals (tbase),
+					type_memfn_rqual (tofn));
+	      first = build_ptrmemfunc_type (build_pointer_type (first));
+	    }
+	  conv = build_conv (ck_pmem, first, conv);
 	  conv->base_p = true;
 	}
       if (fnptr_conv_p (tstat, fstat))
@@ -1730,28 +1737,25 @@ involves_qualification_conversion_p (tree to, tree from)
    per [except.handle]/3.  */
 
 bool
-handler_match_for_exception_type (tree handler, tree except_type)
+handler_match_for_exception_type (tree handler_type, tree except_type)
 {
-  tree handler_type = HANDLER_TYPE (handler);
+  if (handler_type && TREE_CODE (handler_type) == HANDLER)
+    handler_type = TREE_TYPE (handler_type);
   if (handler_type == NULL_TREE)
     return true; /* ... */
   if (same_type_ignoring_top_level_qualifiers_p (handler_type, except_type))
     return true;
   if (CLASS_TYPE_P (except_type) && CLASS_TYPE_P (handler_type))
-    {
-      base_kind b_kind;
-      tree binfo = lookup_base (except_type, handler_type, ba_check, &b_kind,
-				tf_none);
-      if (binfo && binfo != error_mark_node)
-	return true;
-    }
-  if (TYPE_PTR_P (handler_type) || TYPE_PTRDATAMEM_P (handler_type))
+    return publicly_uniquely_derived_p (handler_type, except_type);
+  if (TYPE_PTR_P (handler_type) || TYPE_PTRMEM_P (handler_type))
     {
       if (TREE_CODE (except_type) == NULLPTR_TYPE)
 	return true;
       if ((TYPE_PTR_P (handler_type) && TYPE_PTR_P (except_type))
 	  || (TYPE_PTRDATAMEM_P (handler_type)
-	      && TYPE_PTRDATAMEM_P (except_type)))
+	      && TYPE_PTRDATAMEM_P (except_type))
+	  || (TYPE_PTRMEMFUNC_P (handler_type)
+ 	      && TYPE_PTRMEMFUNC_P (except_type)))
 	{
 	  conversion *conv
 	    = standard_conversion (handler_type, except_type, NULL_TREE,
@@ -1762,6 +1766,13 @@ handler_match_for_exception_type (tree handler, tree except_type)
 		switch (t->kind)
 		  {
 		  case ck_ptr:
+		    /* ...not involving conversions to pointers to private or
+		       protected or ambiguous classes, */
+		    if (CLASS_TYPE_P (TREE_TYPE (handler_type)))
+		      return (publicly_uniquely_derived_p
+			      (TREE_TYPE (handler_type),
+			       TREE_TYPE (except_type)));
+		    gcc_fallthrough ();
 		  case ck_fnptr:
 		  case ck_qual:
 		  case ck_identity:
