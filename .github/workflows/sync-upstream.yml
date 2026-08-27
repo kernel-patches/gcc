@@ -2,11 +2,16 @@ name: Sync upstream GCC
 
 on:
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '17 3 * * *'
+      timezone: 'America/Vancouver'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: sync-upstream-gcc
+  cancel-in-progress: false
 
 env:
   BOT_NAME: BPF CI Bot
@@ -26,16 +31,5 @@ jobs:
           git config user.email "$BOT_EMAIL"
           git remote add upstream https://github.com/gcc-mirror/gcc.git
 
-      - name: Sync master
-        run: |
-          git fetch --filter=blob:none upstream master
-          git checkout -b master origin/master
-          git merge --ff-only upstream/master
-          git push origin master
-
-      - name: Rebase ci-base
-        run: |
-          git fetch origin ci-base
-          git checkout ci-base
-          git rebase master
-          git push --force-with-lease origin ci-base
+      - name: Sync upstream
+        run: .github/scripts/merge-upstream.sh
