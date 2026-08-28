@@ -63,6 +63,16 @@ void gfc_get_descriptor_offsets_for_info (const_tree, tree *, tree *, tree *,
 /* Build a null array descriptor constructor.  */
 tree gfc_build_null_descriptor (tree type);
 
+void gfc_nullify_descriptor (stmtblock_t *block, tree);
+void gfc_init_result_descriptor (stmtblock_t *block, tree descr);
+void gfc_init_absent_descriptor (stmtblock_t *block, tree descr);
+void gfc_init_descriptor_variable (stmtblock_t *block, gfc_symbol *sym,
+				   tree descr);
+tree gfc_create_unallocated_library_result_descriptor (stmtblock_t *, tree,
+						       tree);
+tree gfc_create_null_actual_descriptor (stmtblock_t *, gfc_typespec *,
+					symbol_attribute, int);
+
 tree gfc_conv_descriptor_size (tree, int);
 tree gfc_conv_descriptor_cosize (tree, int, int);
 

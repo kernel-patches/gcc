@@ -715,6 +715,135 @@ gfc_build_null_descriptor (tree type)
 #undef GFC_DTYPE_ATTRIBUTE
 
 
+/* Add code to BLOCK implementing the pointer assigment from NULL() to the
+   pointer represented by the array descriptor DESCR.  */
+
+void
+gfc_nullify_descriptor (stmtblock_t *block, tree descr)
+{
+  gfc_conv_descriptor_data_set (block, descr, null_pointer_node);
+}
+
+
+/* Add code to BLOCK default-initializing array function result descriptor
+   DESCR.  This is used for the initialization of polymorphic allocatable
+   function results.  */
+
+void
+gfc_init_result_descriptor (stmtblock_t *block, tree descr)
+{
+  gfc_conv_descriptor_data_set (block, descr, null_pointer_node);
+}
+
+
+/* Add code to BLOCK initializing array descriptor DESCR so that it represents
+   an absent actual argument associated with an optional dummy.  */
+
+void
+gfc_init_absent_descriptor (stmtblock_t *block, tree descr)
+{
+  gfc_conv_descriptor_data_set (block, descr, null_pointer_node);
+}
+
+
+/* Add code to BLOCK initializing the array descriptor DESCR corresponding to
+   the array variable SYM.  This is only used for variables needing a default
+   initialization of their descriptor.  Typically allocatable (array) variables,
+   that have an initial status of unallocated, are among them; they need their
+   data pointer set to nullptr.  */
+
+void
+gfc_init_descriptor_variable (stmtblock_t *block, gfc_symbol *sym, tree descr)
+{
+  /* NULLIFY the data pointer for non-saved allocatables, or for non-saved
+     pointers when -fcheck=pointer is specified.  */
+  if (!sym->attr.save
+      && (sym->attr.allocatable
+	  || (sym->attr.pointer && (gfc_option.rtcheck & GFC_RTCHECK_POINTER))))
+    {
+      gfc_conv_descriptor_data_set (block, descr, null_pointer_node);
+      if (flag_coarray == GFC_FCOARRAY_LIB && sym->attr.codimension)
+	gfc_conv_descriptor_token_set (block, descr, null_pointer_node);
+    }
+
+  gcc_assert (sym->as && sym->as->rank>=0);
+  tree etype = gfc_get_element_type (TREE_TYPE (descr));
+  gfc_conv_descriptor_dtype_set (block, descr,
+				 gfc_get_dtype_rank_type (sym->as->rank,
+							  etype));
+}
+
+
+/* Create a fresh array descriptor copied from SOURCE_DESCR, with a cleared data
+   pointer and a possibly different dtype value.  Set the dtype field to DTYPE
+   if different from NULL_TREE; otherwise set it with a default value built
+   using SOURCE_DESCR's type.  Add the copying code and any other initialization
+   to BLOCK and return the descriptor declaration.
+
+   The descriptor created by this function is used to pass to intrinsic
+   functions from the library, when the result is assigned to a reallocatable
+   variable.  The left hand side variable descriptor is not passed directly to
+   the library, and the unallocated descriptor this function creates is passed
+   instead.  Allocation happens in the library; deallocation of the left hand
+   side variable data, if any, and correct bounds mapping happen outside the
+   library, after the function returns.  */
+
+tree
+gfc_create_unallocated_library_result_descriptor (stmtblock_t *block,
+						  tree source_descr, tree dtype)
+{
+  /* Unallocated, the descriptor does not have a dtype.  */
+  if (dtype == NULL_TREE)
+    dtype = gfc_get_dtype (TREE_TYPE (source_descr));
+
+  gfc_conv_descriptor_dtype_set (block, source_descr, dtype);
+
+  tree res_desc = gfc_evaluate_now (source_descr, block);
+  gfc_conv_descriptor_data_set (block, res_desc, null_pointer_node);
+
+  return res_desc;
+}
+
+
+/* Create a new descriptor to represent a null actual argument of type TS and
+   rank RANK passed to a dummy argument having attributes ATTR.  Add
+   initialization code to BLOCK and return the descriptor declaration.  */
+
+tree
+gfc_create_null_actual_descriptor (stmtblock_t *block, gfc_typespec *ts,
+				   symbol_attribute attr, int rank)
+{
+  tree etype = gfc_typenode_for_spec (ts);
+
+  enum gfc_array_kind akind;
+
+  if (attr.pointer)
+    akind = GFC_ARRAY_POINTER_CONT;
+  else if (attr.allocatable)
+    akind = GFC_ARRAY_ALLOCATABLE;
+  else
+    akind = GFC_ARRAY_ASSUMED_SHAPE_CONT;
+
+  tree lower[GFC_MAX_DIMENSIONS];
+  tree upper[GFC_MAX_DIMENSIONS];
+  memset (&lower, 0, rank * sizeof (lower[0]));
+  memset (&upper, 0, rank * sizeof (upper[0]));
+
+  tree type = gfc_get_array_type_bounds (etype, rank, 0, lower, upper, 1,
+					 akind, !(attr.pointer || attr.target));
+  tree desc = gfc_create_var (type, "desc");
+  DECL_ARTIFICIAL (desc) = 1;
+
+  gfc_conv_descriptor_dtype_set (block, desc,
+				 gfc_get_dtype_rank_type (rank, etype));
+  gfc_conv_descriptor_data_set (block, desc, null_pointer_node);
+  gfc_conv_descriptor_span_set (block, desc,
+				gfc_conv_descriptor_elem_len_get (desc));
+
+  return desc;
+}
+
+
 /* For an array descriptor, get the total number of elements.  This is just
    the product of the extents along from_dim to to_dim.  */
 

@@ -1071,10 +1071,9 @@ gfc_conv_derived_to_class (gfc_se *parmse, gfc_expr *e, gfc_symbol *fsym,
 	      tmp = gfc_finish_block (&block);
 
 	      gfc_init_block (&block);
-	      gfc_conv_descriptor_data_set (&block, ctree, null_pointer_node);
+	      gfc_init_absent_descriptor (&block, ctree);
 	      if (derived_array && *derived_array != NULL_TREE)
-		gfc_conv_descriptor_data_set (&block, *derived_array,
-					      null_pointer_node);
+		gfc_init_absent_descriptor (&block, *derived_array);
 
 	      tmp = build3_v (COND_EXPR, cond_optional, tmp,
 			      gfc_finish_block (&block));
@@ -7115,9 +7114,9 @@ conv_null_actual (gfc_se * parmse, gfc_expr * e, gfc_symbol * fsym)
 	     correct rank.  */
 	  if (fsym->as && fsym->as->type == AS_ASSUMED_RANK)
 	    {
-	      tree tmp = parmse->expr;
-	      tmp = gfc_conv_scalar_to_descriptor (parmse, tmp, fsym->attr);
-	      gfc_conv_descriptor_rank_set (&parmse->pre, tmp, e->rank);
+	      tree tmp;
+	      tmp = gfc_create_null_actual_descriptor (&parmse->pre, &e->ts,
+						       fsym->attr, e->rank);
 	      parmse->expr = gfc_build_addr_expr (NULL_TREE, tmp);
 	    }
 	  else
@@ -7167,28 +7166,17 @@ conv_null_actual (gfc_se * parmse, gfc_expr * e, gfc_symbol * fsym)
 	   For an assumed-rank dummy we provide a descriptor that passes
 	   the correct rank.  */
 	{
-	  tree tmp = parmse->expr;
-
-	  tmp = gfc_conv_scalar_to_descriptor (parmse, tmp, gfc_expr_attr (e));
-	  gfc_conv_descriptor_rank_set (&parmse->pre, tmp, e->rank);
-	  gfc_conv_descriptor_data_set (&parmse->pre, tmp, null_pointer_node);
+	  tree tmp = gfc_create_null_actual_descriptor (&parmse->pre, &e->ts,
+							fsym->attr, e->rank);
 	  parmse->expr = gfc_build_addr_expr (NULL_TREE, tmp);
 	}
       else
 	/* MOLD is not present.  Use attributes from dummy argument, which is
 	   not allowed to be assumed-rank.  */
 	{
-	  int dummy_rank;
-	  tree tmp = parmse->expr;
-
-	  if ((fsym->attr.allocatable || fsym->attr.pointer)
-	      && fsym->attr.intent == INTENT_UNKNOWN)
-	    fsym->attr.intent = INTENT_IN;
-	  tmp = gfc_conv_scalar_to_descriptor (parmse, tmp, fsym->attr);
-	  dummy_rank = fsym->as ? fsym->as->rank : 0;
-	  if (dummy_rank > 0)
-	    gfc_conv_descriptor_rank_set (&parmse->pre, tmp, dummy_rank);
-	  gfc_conv_descriptor_data_set (&parmse->pre, tmp, null_pointer_node);
+	  int dummy_rank = fsym->as ? fsym->as->rank : 0;
+	  tree tmp = gfc_create_null_actual_descriptor (&parmse->pre, &fsym->ts,
+							fsym->attr, dummy_rank);
 	  parmse->expr = gfc_build_addr_expr (NULL_TREE, tmp);
 	}
     }
@@ -11755,7 +11743,7 @@ gfc_trans_pointer_assignment (gfc_expr * expr1, gfc_expr * expr2)
       if (expr2->expr_type == EXPR_NULL)
 	{
 	  /* Just set the data pointer to null.  */
-	  gfc_conv_descriptor_data_set (&lse.pre, lse.expr, null_pointer_node);
+	  gfc_nullify_descriptor (&lse.pre, lse.expr);
 	}
       else if (rank_remap)
 	{
@@ -12582,15 +12570,8 @@ fcncall_realloc_result (gfc_se *se, int rank, tree dtype)
   if (POINTER_TYPE_P (TREE_TYPE (desc)))
     desc = build_fold_indirect_ref_loc (input_location, desc);
 
-  /* Unallocated, the descriptor does not have a dtype.  */
-  if (dtype != NULL_TREE)
-    gfc_conv_descriptor_dtype_set (&se->pre, desc, dtype);
-  else
-    gfc_conv_descriptor_dtype_set (&se->pre, desc,
-				   gfc_get_dtype (TREE_TYPE (desc)));
-
-  res_desc = gfc_evaluate_now (desc, &se->pre);
-  gfc_conv_descriptor_data_set (&se->pre, res_desc, null_pointer_node);
+  res_desc = gfc_create_unallocated_library_result_descriptor (&se->pre, desc,
+							       dtype);
   se->expr = gfc_build_addr_expr (NULL_TREE, res_desc);
 
   /* Free the lhs after the function call and copy the result data to

@@ -144,6 +144,11 @@ Wcomp-x
 Cobol Warning Var(comp_x, 1) Init(1)
 Warn if COMPUTATIONAL is used with PICTURE X.
 
+; MfDisplayScreen
+Wdisplay-screen
+Cobol Warning Var(display_screen, 1) Init(1)
+Warn if DISPLAY WITH screen options is used.
+
 ; MfTrailing
 Winspect-trailing
 Cobol Warning Var(inspect_trailing, 1) Init(1)
@@ -178,6 +183,11 @@ Warn if MOVE POINTER is used.
 Wredefines-first
 Cobol Warning Var(redefines_first, 1) Init(1)
 Warn if REDEFINES does not appear immediately after NAME.
+
+; MfRedefinesTable
+Wredefines-table
+Cobol Warning Var(redefines_table, 1) Init(1)
+Warn if REDEFINES source is a table.
 
 ; MfReturningNum
 Wreturning-number

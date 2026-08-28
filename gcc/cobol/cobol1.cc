@@ -623,6 +623,10 @@ cobol_langhook_handle_option (size_t scode,
           cobol_warning(MfCallLiteral, call_literal, warning_as_error);
           return true;
 
+        case OPT_Wdisplay_screen:
+          cobol_warning(MfDisplayScreen, display_screen, warning_as_error);
+          return true;
+
         case OPT_Wcdf_dollar:
           cobol_warning(MfCdfDollar, cdf_dollar, warning_as_error);
           return true;
@@ -669,6 +673,10 @@ cobol_langhook_handle_option (size_t scode,
 
         case OPT_Wredefines_first:
           cobol_warning(MfRedefinesFirst, redefines_first, warning_as_error);
+          return true;
+
+        case OPT_Wredefines_table:
+          cobol_warning(MfRedefinesTable, redefines_table, warning_as_error);
           return true;
 
         case OPT_Wredefines_grow:

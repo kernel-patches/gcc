@@ -4402,7 +4402,7 @@ make_pack_expansion (tree arg, tsubst_flags_t complain)
       purpose = cxx_make_type (TYPE_PACK_EXPANSION);
       PACK_EXPANSION_PATTERN (purpose) = TREE_PURPOSE (arg);
       PACK_EXPANSION_PARAMETER_PACKS (purpose) = parameter_packs;
-      PACK_EXPANSION_LOCAL_P (purpose) = at_function_scope_p ();
+      PACK_EXPANSION_LOCAL_P (purpose) = local_bindings_p ();
 
       /* Just use structural equality for these TYPE_PACK_EXPANSIONS;
 	 they will rarely be compared to anything.  */
@@ -4452,7 +4452,10 @@ make_pack_expansion (tree arg, tsubst_flags_t complain)
     }
   PACK_EXPANSION_PARAMETER_PACKS (result) = parameter_packs;
 
-  PACK_EXPANSION_LOCAL_P (result) = at_function_scope_p ();
+  /* Contract conditions are parsed outside a function body but function
+     parameter pack expansions in them must use the instantiated parameters
+     rather than dummy declarations.  */
+  PACK_EXPANSION_LOCAL_P (result) = local_bindings_p ();
   if (ppd.found_extra_args_tree_p)
     /* If the pattern of this pack expansion contains a subtree that has
        the extra args mechanism for avoiding partial instantiation, then
@@ -28568,18 +28571,19 @@ regenerate_decl_from_template (tree decl, tree tmpl, tree args)
 	      OLD_PARM_DECL_P (t) = 1;
 	}
 
-      if (tree attr = get_fn_contract_specifiers (decl))
-	{
-	  /* If we're regenerating a specialization, the contracts will have
-	     been copied from the most general template. Replace those with
-	     the ones from the actual specialization.  */
-	  tree tmpl = DECL_TI_TEMPLATE (decl);
-	  if (DECL_TEMPLATE_SPECIALIZATION (tmpl))
-	    attr = get_fn_contract_specifiers (code_pattern);
-
-	  tsubst_contract_specifiers (attr, decl, args,
-				      tf_warning_or_error, code_pattern);
-	}
+      /* The contracts on DECL may predate a later redeclaration of the
+	 template, or have been copied from a more general template.  We should
+	 use the contracts from the current pattern.  */
+      tree decl_contracts = get_fn_contract_specifiers (decl);
+      tree pattern_contracts = get_fn_contract_specifiers (code_pattern);
+      /* There are four cases:
+	 neither has contracts, so there is nothing to do;
+	 only the pattern has contracts, so add them to DECL;
+	 only DECL has contracts, so remove them;
+	 or both have contracts, so rebuild DECL's from the pattern.  */
+      if (decl_contracts || pattern_contracts)
+	tsubst_contract_specifiers (pattern_contracts, decl, args,
+				    tf_warning_or_error, code_pattern);
 
       /* Merge additional specifiers from the CODE_PATTERN.  */
       if (DECL_DECLARED_INLINE_P (code_pattern)

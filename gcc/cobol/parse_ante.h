@@ -1211,6 +1211,43 @@ redefined_token( const cbl_name_t name ) {
   return cdf_tokens.redefined_as(name);
 }
 
+static bool
+with_gnu_stuff( const std::set<std::string>& kw,
+                const std::vector<const char *>& names ) {
+  return std::all_of( names.begin(), names.end(),
+                      [&kw] ( const auto& name ) {
+                        cbl_name_t lname;
+                        std::transform(name, name + strlen(name) + 1, lname, ftolower);
+                        return 1 == kw.count(lname);
+                      } );
+}
+
+static bool
+with_gnu_names( const std::vector<const char *>& names ) {
+  static const std::set<std::string> kw {
+    "beep", "bell", "blank", "blink",
+    "control",
+    "eol", "eos", "erase",
+    "grid",
+    "highlight",
+    "leftline", "line", "lowlight",
+    "number",
+    "overline",
+    "reverse-video",
+    "screen", "size",
+    "underline",
+  };
+  return with_gnu_stuff(kw, names);
+}
+static bool
+with_gnu_color( const std::vector<const char *>& names ) {
+  static const std::set<std::string> kw {
+    "background-color", "background-colour",
+    "foreground-color", "foreground-colour",
+  };
+  return with_gnu_stuff(kw, names);
+}
+
 struct file_list_t {
   list<cbl_file_t*> files;
   file_list_t() {}
@@ -3157,9 +3194,9 @@ valid_redefine( const cbl_loc_t& loc,
 
   // cannot redefine a table
   if( orig->occurs.ntimes() ) {
-    error_msg(loc, "cannot redefine table %s %s",
-            orig->level_str(), orig->name);
-    return false;
+    if( ! dialect_ok(loc, MfRedefinesTable, "cannot redefine table") ) {
+      return false;
+    }
   }
 
   // redefined field cannot be ODO
