@@ -3509,7 +3509,6 @@ alpha_expand_unaligned_load (rtx tgt, rtx mem, HOST_WIDE_INT size,
 
   meml = gen_reg_rtx (DImode);
   memh = gen_reg_rtx (DImode);
-  addr = gen_reg_rtx (DImode);
   extl = gen_reg_rtx (DImode);
   exth = gen_reg_rtx (DImode);
 
@@ -3538,7 +3537,7 @@ alpha_expand_unaligned_load (rtx tgt, rtx mem, HOST_WIDE_INT size,
 
   if (sign && size == 2)
     {
-      emit_move_insn (addr, plus_constant (Pmode, mema, ofs+2));
+      addr = copy_addr_to_reg (plus_constant (Pmode, mema, ofs + 2));
 
       emit_insn (gen_extql (extl, meml, addr));
       emit_insn (gen_extqh (exth, memh, addr));
@@ -3552,7 +3551,7 @@ alpha_expand_unaligned_load (rtx tgt, rtx mem, HOST_WIDE_INT size,
     }
   else
     {
-      emit_move_insn (addr, plus_constant (Pmode, mema, ofs));
+      addr = copy_addr_to_reg (plus_constant (Pmode, mema, ofs));
       emit_insn (gen_extxl (extl, meml, GEN_INT (size*8), addr));
       switch ((int) size)
 	{
@@ -3771,10 +3770,9 @@ alpha_expand_unaligned_store_safe_partial (rtx dst, rtx src,
   /* Must handle high before low for degenerate case of aligned.  */
   if (size != 1)
     {
-      rtx addrh = gen_reg_rtx (DImode);
+      rtx addrh = copy_addr_to_reg (plus_constant (Pmode, dsta,
+						   ofs + size - 1));
       rtx aligned_addrh = gen_reg_rtx (DImode);
-      emit_insn (gen_rtx_SET (addrh,
-			      plus_constant (DImode, dsta, ofs + size - 1)));
       emit_insn (gen_rtx_SET (aligned_addrh,
 			      gen_rtx_AND (DImode, addrh, GEN_INT (-8))));
 
@@ -3882,9 +3880,8 @@ alpha_expand_unaligned_store_safe_partial (rtx dst, rtx src,
     }
 
   /* Now handle low.  */
-  rtx addrl = gen_reg_rtx (DImode);
+  rtx addrl = copy_addr_to_reg (plus_constant (Pmode, dsta, ofs));
   rtx aligned_addrl = gen_reg_rtx (DImode);
-  emit_insn (gen_rtx_SET (addrl, plus_constant (DImode, dsta, ofs)));
   emit_insn (gen_rtx_SET (aligned_addrl,
 			  gen_rtx_AND (DImode, addrl, GEN_INT (-8))));
 
@@ -8075,7 +8072,12 @@ alpha_initial_elimination_offset (unsigned int from,
   switch (from)
     {
     case FRAME_POINTER_REGNUM:
-      break;
+      /* With a downward-growing frame the frame pointer sits at the high
+	 end of the local variables, which is where the argument pointer
+	 is too.  */
+      if (!FRAME_GROWS_DOWNWARD)
+	break;
+      /* FALLTHRU */
 
     case ARG_POINTER_REGNUM:
       ret += (ALPHA_ROUND (get_frame_size ()
@@ -8160,8 +8162,16 @@ alpha_vms_initial_elimination_offset (unsigned int from, unsigned int to)
     switch (from)
       {
       case FRAME_POINTER_REGNUM:
-	offset = ALPHA_ROUND (sa_size + pv_save_size);
-	break;
+	/* With a downward-growing frame the frame pointer sits at the high
+	   end of the local variables, which is where the argument pointer
+	   is too.  */
+	if (!FRAME_GROWS_DOWNWARD)
+	  {
+	    offset = ALPHA_ROUND (sa_size + pv_save_size);
+	    break;
+	  }
+	/* FALLTHRU */
+
       case ARG_POINTER_REGNUM:
 	offset = (ALPHA_ROUND (sa_size + pv_save_size
 			       + get_frame_size ()
