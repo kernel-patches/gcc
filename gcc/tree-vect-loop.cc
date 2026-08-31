@@ -6854,9 +6854,10 @@ vectorizable_lane_reducing (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
 
   /* Compute number of effective vector statements for costing from the
      number of input lanes allow for excess lanes in the last input vector.  */
-  unsigned int ncopies_for_cost;
+  unsigned int ncopies_for_cost, excess_elts;
   bool res = vect_get_num_copies_for_invariant (loop_vinfo, node_in,
-						&ncopies_for_cost);
+						&ncopies_for_cost,
+						&excess_elts);
   gcc_assert (res && ncopies_for_cost >= 1);
 
   if (vect_is_emulated_mixed_dot_prod (slp_node))
@@ -7992,9 +7993,9 @@ vect_transform_reduction (loop_vec_info loop_vinfo,
      assumption is not true: we use reduc_index to record the index of the
      reduction variable.  */
   int reduc_index = SLP_TREE_REDUC_IDX (slp_node);
-  slp_tree node_in = SLP_TREE_CHILDREN (slp_node)[reduc_index == 0 ? 1 : 0];
-  tree vectype_in = SLP_TREE_VECTYPE (node_in);
-  unsigned vec_in_num = SLP_TREE_VEC_DEFS (node_in).length ();
+  tree vectype_in = SLP_TREE_VECTYPE (slp_node);
+  if (lane_reducing_op_p (op.code))
+    vectype_in = SLP_TREE_VECTYPE (SLP_TREE_CHILDREN (slp_node)[0]);
 
   code_helper code = canonicalize_code (op.code, op.type);
   internal_fn cond_fn
@@ -8085,6 +8086,7 @@ vect_transform_reduction (loop_vec_info loop_vinfo,
 
   /* For single def-use cycles get one copy of the vectorized reduction
      definition.  */
+  unsigned vec_in_num = vec_oprnds[reduc_index == 0 ? 1 : 0].length ();
   if (single_defuse_cycle)
     {
       vect_get_vec_defs (loop_vinfo, slp_node,
