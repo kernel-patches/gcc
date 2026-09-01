@@ -1,7 +1,7 @@
 /* { dg-do run { target { lp64 || ilp32 } } } */
 /* { dg-options "-fsanitize=float-cast-overflow -Wno-overflow" } */
 /* { dg-additional-options "-ffloat-store" { target { ia32 } } } */
-/* { dg-additional-options "-mieee" { target { { alpha*-*-* } || { sh*-*-* } } } } */
+/* { dg-add-options ieee } */
 
 #include <limits.h>
 #include "float-cast.h"
