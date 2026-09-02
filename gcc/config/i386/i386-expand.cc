@@ -14707,6 +14707,139 @@ ix86_expand_special_args_builtin (const struct builtin_description *d,
   return klass == store ? 0 : target;
 }
 
+/* Subroutine of ix86_expand_builtin to take care of amx insns
+   with variable number of operands.  */
+
+static rtx
+ix86_expand_ace_builtin (const struct builtin_description *d, tree exp,
+			 rtx target)
+{
+  tree arg;
+  rtx pat, op;
+  unsigned int i, nargs, arg_adjust = 0, constant = 100;
+  bool tmm_src = false;
+  rtx xops[4];
+  enum insn_code icode = d->icode;
+  const struct insn_data_d *insn_p = &insn_data[icode];
+
+  switch ((enum ix86_builtin_func_type) d->flag)
+    {
+    case VOID_FTYPE_UQI:
+      nargs = 1;
+      break;
+    case V16SF_FTYPE_UQI_SI:
+    case V32BF_FTYPE_UQI_SI:
+    case V32HF_FTYPE_UQI_SI:
+    case V16SI_FTYPE_UQI_SI:
+      nargs = 2;
+      tmm_src = true;
+      break;
+    case VOID_FTYPE_UQI_V16SI_SI:
+    case VOID_FTYPE_UQI_V32BF_V32BF:
+    case VOID_FTYPE_UQI_V64QI_V64QI:
+      nargs = 3;
+      break;
+    case VOID_FTYPE_UQI_V64QI_V64QI_SI:
+      nargs = 4;
+      constant = 3;
+      break;
+
+    default:
+      gcc_unreachable ();
+    }
+
+  gcc_assert (nargs <= ARRAY_SIZE (xops));
+
+  if (tmm_src)
+    {
+      machine_mode tmode = insn_p->operand[0].mode;
+      arg_adjust = 1;
+      if (optimize
+	  || target == 0
+	  || !register_operand (target, tmode)
+	  || GET_MODE (target) != tmode)
+	target = gen_reg_rtx (tmode);
+    }
+
+  for (i = 0; i < nargs; i++)
+    {
+      machine_mode mode = insn_p->operand[i + arg_adjust].mode;
+
+      arg = CALL_EXPR_ARG (exp, i);
+      op = ix86_expand_unsigned_small_int_cst_argument (arg);
+
+      if (i == 0 || i == constant)
+	{
+	  if (i == 0 && !IN_RANGE (INTVAL (op), 0, 7))
+	    {
+	      /* This must be the tmm reg number constant.  */
+	      error ("the tmm register number argument must be between 0 to 7");
+	      return const0_rtx;
+	    }
+	  else if (!insn_p->operand[i + arg_adjust].predicate(op, SImode))
+	    {
+	      /* This must be the constant.  */
+	      error ("the argument must be constant");
+	      return const0_rtx;
+	    }
+
+	}
+      else
+	{
+	  /* This must be register.  */
+	  if (VECTOR_MODE_P (mode))
+	    op = safe_vector_operand (op, mode);
+
+	  op = fixup_modeless_constant (op, mode);
+
+	  if (GET_MODE (op) == mode || GET_MODE (op) == VOIDmode)
+	    op = copy_to_mode_reg (mode, op);
+	  else
+	    {
+	      op = copy_to_reg (op);
+	      op = lowpart_subreg (mode, op, GET_MODE (op));
+	    }
+	}
+
+      xops[i] = op;
+    }
+
+  if (tmm_src)
+    {
+      switch (nargs)
+	{
+	case 2:
+	  pat = GEN_FCN (icode) (target, xops[0], xops[1]);
+	  break;
+	default:
+	  gcc_unreachable ();
+	}
+  }
+  else
+    {
+      switch (nargs)
+	{
+	case 1:
+	  pat = GEN_FCN (icode) (xops[0]);
+	  break;
+	case 3:
+	  pat = GEN_FCN (icode) (xops[0], xops[1], xops[2]);
+	  break;
+	case 4:
+	  pat = GEN_FCN (icode) (xops[0], xops[1], xops[2], xops[3]);
+	  break;
+	default:
+	  gcc_unreachable ();
+	}
+    }
+
+  if (!pat)
+    return 0;
+
+  emit_insn (pat);
+  return tmm_src ? target : 0;
+}
+
 /* Return the integer constant in ARG.  Constrain it to be in the range
    of the subparts of VEC_TYPE; issue an error if not.  */
 
@@ -14859,6 +14992,7 @@ ix86_check_builtin_isa_match (unsigned int fcode,
      OPTION_MASK_ISA_AES or (OPTION_MASK_ISA_AVX512VL | OPTION_MASK_ISA2_VAES)
      OPTION_MASK_ISA2_AVX10_2 or OPTION_MASK_ISA2_AVXVNNIINT8
      OPTION_MASK_ISA2_AVX10_2 or OPTION_MASK_ISA2_AVXVNNIINT16
+     OPTION_MASK_ISA2_AMX_TILE or OPTION_MASK_ISA2_ACEV1
      where for each such pair it is sufficient if either of the ISAs is
      enabled, plus if it is ored with other options also those others.
      OPTION_MASK_ISA_MMX in bisa is satisfied also if TARGET_MMX_WITH_SSE.  */
@@ -14888,6 +15022,7 @@ ix86_check_builtin_isa_match (unsigned int fcode,
 		 OPTION_MASK_ISA2_AVX10_2);
   SHARE_BUILTIN (0, OPTION_MASK_ISA2_AVXVNNIINT16, 0,
 		 OPTION_MASK_ISA2_AVX10_2);
+  SHARE_BUILTIN (0, OPTION_MASK_ISA2_AMX_TILE, 0, OPTION_MASK_ISA2_ACEV1);
   isa = tmp_isa;
   isa2 = tmp_isa2;
 
@@ -15606,6 +15741,60 @@ ix86_expand_builtin (tree exp, rtx target, rtx subtarget,
 	    op0 = target;
 	  }
 	emit_insn (GEN_FCN (icode) (op0, op1));
+	return target;
+      }
+
+    case IX86_BUILTIN_BSR0INIT:
+      {
+	target = gen_rtx_REG (V32SImode, BSR0_REG);
+	emit_insn (gen_bsrinit (target));
+	return 0;
+      }
+
+    case IX86_BUILTIN_BSR0MOVF:
+      {
+	arg0 = CALL_EXPR_ARG (exp, 0);
+	arg1 = CALL_EXPR_ARG (exp, 1);
+	op0 = expand_normal (arg0);
+	op1 = expand_normal (arg1);
+
+	target = gen_rtx_REG (V32SImode, BSR0_REG);
+	if (CONST_VECTOR_P (op0) || MEM_P (op0))
+	  op0 = force_reg (V16SImode, op0);
+	if (CONST_VECTOR_P (op1))
+	  op1 = force_reg (V16SImode, op1);
+	emit_insn (gen_bsrmovf (target, op0, op1));
+	return 0;
+      }
+
+    case IX86_BUILTIN_BSR0MOVHINSERT:
+    case IX86_BUILTIN_BSR0MOVLINSERT:
+      {
+	arg0 = CALL_EXPR_ARG (exp, 0);
+	op0 = expand_normal (arg0);
+
+	if (fcode == IX86_BUILTIN_BSR0MOVHINSERT)
+	  icode = CODE_FOR_bsrmovh_load;
+	else
+	  icode = CODE_FOR_bsrmovl_load;
+	target = gen_rtx_REG (V32SImode, BSR0_REG);
+	if (CONST_VECTOR_P (op0))
+	  op0 = force_reg (V16SImode, op0);
+	emit_insn (GEN_FCN (icode) (target, op0));
+	return 0;
+      }
+
+    case IX86_BUILTIN_BSR0MOVHEXTRACT:
+    case IX86_BUILTIN_BSR0MOVLEXTRACT:
+      {
+	op0 = gen_rtx_REG (V32SImode, BSR0_REG);
+	if (fcode == IX86_BUILTIN_BSR0MOVHEXTRACT)
+	  icode = CODE_FOR_bsrmovh_store;
+	else
+	  icode = CODE_FOR_bsrmovl_store;
+	if (target == 0 || !register_operand (target, V16SImode))
+	  target = gen_reg_rtx (V16SImode);
+	emit_insn (GEN_FCN (icode) (target, op0));
 	return target;
       }
 
@@ -17277,6 +17466,13 @@ rdseed_step:
       i = fcode - IX86_BUILTIN__BDESC_CET_FIRST;
       return ix86_expand_special_args_builtin (bdesc_cet + i, exp,
 					       target);
+    }
+
+  if (fcode >= IX86_BUILTIN__BDESC_ACE_FIRST
+      && fcode <= IX86_BUILTIN__BDESC_ACE_LAST)
+    {
+      i = fcode - IX86_BUILTIN__BDESC_ACE_FIRST;
+      return ix86_expand_ace_builtin (bdesc_ace + i, exp, target);
     }
 
   gcc_unreachable ();

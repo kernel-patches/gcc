@@ -179,6 +179,10 @@ enum reg_class const regclass_map[FIRST_PSEUDO_REGISTER] =
   GENERAL_REGS, GENERAL_REGS, GENERAL_REGS, GENERAL_REGS,
   GENERAL_REGS, GENERAL_REGS, GENERAL_REGS, GENERAL_REGS,
   GENERAL_REGS, GENERAL_REGS, GENERAL_REGS, GENERAL_REGS,
+  /* TMM fake register placeholder */
+  NO_REGS,
+  /* Block Scale register */
+  NO_REGS,
 };
 
 /* The "default" register map used in 32bit mode.  */
@@ -209,7 +213,16 @@ unsigned int const debugger_register_map[FIRST_PSEUDO_REGISTER] =
   INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
   INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
   /* Mask registers */
-  93, 94, 95, 96, 97, 98, 99, 100
+  93, 94, 95, 96, 97, 98, 99, 100,
+  /* APX r16-r31 */
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  /* TMM fake register placeholder */
+  INVALID_REGNUM,
+  /* Block Scale register */
+  INVALID_REGNUM,
 };
 
 /* The "default" register map used in 64bit mode.  */
@@ -239,7 +252,11 @@ unsigned int const debugger64_register_map[FIRST_PSEUDO_REGISTER] =
   118, 119, 120, 121, 122, 123, 124, 125,
   /* rex2 extend integer registers */
   130, 131, 132, 133, 134, 135, 136, 137,
-  138, 139, 140, 141, 142, 143, 144, 145
+  138, 139, 140, 141, 142, 143, 144, 145,
+  /* tmm fake register placeholder */
+  IGNORED_DWARF_REGNUM,
+  /* block scale register */
+  IGNORED_DWARF_REGNUM,
 };
 
 /* Define the register numbers to be used in Dwarf debugging information.
@@ -322,7 +339,16 @@ unsigned int const svr4_debugger_register_map[FIRST_PSEUDO_REGISTER] =
   INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
   INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
   /* Mask registers */
-  93, 94, 95, 96, 97, 98, 99, 100
+  93, 94, 95, 96, 97, 98, 99, 100,
+  /* APX r16-r31 */
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM, INVALID_REGNUM,
+  /* TMM fake register placeholder */
+  INVALID_REGNUM,
+  /* Block Scale register */
+  INVALID_REGNUM,
 };
 
 /* Define parameter passing and return registers.  */
@@ -563,6 +589,18 @@ ix86_conditional_register_usage (void)
     {
       for (i = FIRST_REX2_INT_REG; i <= LAST_REX2_INT_REG; i++)
 	CLEAR_HARD_REG_BIT (accessible_reg_set, i);
+    }
+
+  /* If AMX-TILE or ACEV1 is disabled, disable tmm registers.  */
+  if (! (TARGET_AMX_TILE || TARGET_ACEV1))
+    {
+      CLEAR_HARD_REG_BIT (accessible_reg_set, TMM_REGNUM);
+    }
+
+  /* If ACEV1 is disabled, disable bsr0.  */
+  if (! TARGET_ACEV1)
+    {
+      CLEAR_HARD_REG_BIT (accessible_reg_set, BSR0_REG);
     }
 }
 
@@ -14034,6 +14072,7 @@ print_reg (rtx x, int code, FILE *file)
 	putc (msize > 4 && TARGET_64BIT ? 'r' : 'e', file);
       /* FALLTHRU */
     case 2:
+    case 128:
     normal:
       reg = hi_reg_name[regno];
       break;
@@ -28054,8 +28093,14 @@ ix86_optab_supported_p (int op, machine_mode mode1, machine_mode,
     case expm1_optab:
     case ldexp_optab:
     case scalb_optab:
-    case round_optab:
     case lround_optab:
+      return opt_type == OPTIMIZE_FOR_SPEED;
+
+    case round_optab:
+      /* Inlined sequence for round may takes 2 more insns
+	 than current -Os path. */
+      if (mode1 == HFmode)
+	return true;
       return opt_type == OPTIMIZE_FOR_SPEED;
 
     case rint_optab:

@@ -281,6 +281,14 @@
   UNSPEC_VCVTHF62HF8
   UNSPEC_VUNPACKB
   UNSPEC_VPMOVSSDB
+
+  ;; For ACEv1 support
+  UNSPEC_BSRMOVH_STORE
+  UNSPEC_BSRMOVL_STORE
+  UNSPEC_TCVTROWD2PS
+  UNSPEC_TCVTROWPS2FP16H
+  UNSPEC_TCVTROWPS2FP16L
+  UNSPEC_TILEMOVROWEXTRACT
 ])
 
 (define_c_enum "unspecv" [
@@ -303,6 +311,25 @@
   UNSPECV_AESENCWIDE256KLU8
   UNSPECV_ENCODEKEY128U32
   UNSPECV_ENCODEKEY256U32
+
+  ;; For ACEv1
+  UNSPECV_TILEZERO
+  UNSPECV_BSRINIT
+  UNSPECV_BSRMOVF
+  UNSPECV_BSRMOVH_LOAD
+  UNSPECV_BSRMOVL_LOAD
+  UNSPECV_TILEMOVROWINSERT
+  UNSPECV_TILEMOVCOLINSERT
+  UNSPECV_TOP2BF16PS
+  UNSPECV_TOP4BSSD
+  UNSPECV_TOP4BSUD
+  UNSPECV_TOP4BUSD
+  UNSPECV_TOP4BUUD
+  UNSPECV_TOP4MXBF8PS
+  UNSPECV_TOP4MXBHF8PS
+  UNSPECV_TOP4MXHBF8PS
+  UNSPECV_TOP4MXHF8PS
+  UNSPECV_TOP4MXBSSPS
 ])
 
 ;; All vector modes including V?TImode, used in move patterns.
@@ -561,6 +588,7 @@
 
 (define_mode_iterator VHFBF
   [V32HF V16HF V8HF V32BF V16BF V8BF])
+(define_mode_iterator VHFBF_512 [V32HF V32BF])
 (define_mode_iterator VHFBF_256 [V16HF V16BF])
 (define_mode_iterator VHFBF_128 [V8HF V8BF])
 
@@ -34980,3 +35008,190 @@
 	    (operands[0], operands[1], operands[2]));
   DONE;
 })
+
+(define_insn "tilezero"
+  [(set (reg:V32SI TMM_REGNUM)
+        (unspec_volatile:V32SI
+	  [(match_operand:QI 0 "const_0_to_7_operand")]
+	  UNSPECV_TILEZERO))]
+  "TARGET_ACEV1"
+  "tilezero\t{%%tmm%c0|tmm%c0}"
+  [(set_attr "prefix" "vex")])
+
+(define_insn "bsrinit"
+  [(set (match_operand:V32SI 0 "bsr0_operand")
+        (unspec_volatile:V32SI [(const_int 0)] UNSPECV_BSRINIT))]
+  "TARGET_ACEV1"
+  "bsrinit\t{%0|%0}"
+  [(set_attr "prefix" "vex")])
+
+(define_insn "bsrmovf"
+  [(set (match_operand:V32SI 0 "bsr0_operand")
+        (unspec_volatile:V32SI
+	  [(match_operand:V16SI 1 "register_operand" "v")
+	   (match_operand:V16SI 2 "vector_operand" "vm")]
+	  UNSPECV_BSRMOVF))]
+  "TARGET_ACEV1"
+  "bsrmovf\t{%2, %1, %0|%0, %1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "bsrmovh_load"
+  [(set (match_operand:V32SI 0 "bsr0_operand")
+        (unspec_volatile:V32SI
+	  [(match_operand:V16SI 1 "vector_operand" "vm")]
+	  UNSPECV_BSRMOVH_LOAD))]
+  "TARGET_ACEV1"
+  "bsrmovh\t{%1, %0|%0, %1}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "bsrmovl_load"
+  [(set (match_operand:V32SI 0 "bsr0_operand")
+        (unspec_volatile:V32SI
+	  [(match_operand:V16SI 1 "vector_operand" "vm")]
+	  UNSPECV_BSRMOVL_LOAD))]
+  "TARGET_ACEV1"
+  "bsrmovl\t{%1, %0|%0, %1}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "bsrmovh_store"
+  [(set (match_operand:V16SI 0 "vector_operand" "=vm")
+        (unspec:V16SI
+          [(match_operand:V32SI 1 "bsr0_operand")]
+	  UNSPEC_BSRMOVH_STORE))]
+  "TARGET_ACEV1"
+  "bsrmovh\t{%1, %0|%0, %1}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "bsrmovl_store"
+  [(set (match_operand:V16SI 0 "vector_operand" "=vm")
+        (unspec:V16SI
+          [(match_operand:V32SI 1 "bsr0_operand")]
+	  UNSPEC_BSRMOVL_STORE))]
+  "TARGET_ACEV1"
+  "bsrmovl\t{%1, %0|%0, %1}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "tcvtrowd2ps"
+  [(set (match_operand:V16SF 0 "register_operand" "=v")
+        (unspec:V16SF
+	  [(reg:V32SI TMM_REGNUM)
+	   (match_operand:QI 1 "const_0_to_7_operand")
+	   (match_operand:SI 2 "nonmemory_operand" "rN")]
+	  UNSPEC_TCVTROWD2PS))]
+  "TARGET_ACEV1"
+  "tcvtrowd2ps\t{%2, %%tmm%c1, %0|%0, tmm%c1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_int_iterator UNSPEC_TCVTROWPS2FP16TYPE
+  [UNSPEC_TCVTROWPS2FP16H UNSPEC_TCVTROWPS2FP16L])
+
+(define_int_attr highlowsuffix
+  [(UNSPEC_TCVTROWPS2FP16H "h") (UNSPEC_TCVTROWPS2FP16L "l")])
+
+(define_insn "tcvtrowps2<bf16_ph><highlowsuffix>"
+  [(set (match_operand:VHFBF_512 0 "register_operand" "=v")
+        (unspec:VHFBF_512
+	  [(reg:V32SF TMM_REGNUM)
+	   (match_operand:QI 1 "const_0_to_7_operand")
+	   (match_operand:SI 2 "nonmemory_operand" "rN")]
+	  UNSPEC_TCVTROWPS2FP16TYPE))]
+  "TARGET_ACEV1"
+  "tcvtrowps2<bf16_ph><highlowsuffix>\t{%2, %%tmm%c1, %0|%0, tmm%c1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_int_iterator UNSPECV_TILEMOVINSERT
+  [UNSPECV_TILEMOVROWINSERT UNSPECV_TILEMOVCOLINSERT])
+
+(define_int_attr rowcol
+  [(UNSPECV_TILEMOVROWINSERT "row")
+   (UNSPECV_TILEMOVCOLINSERT "col")])
+
+(define_insn "tilemovrow_extract"
+  [(set (match_operand:V16SI 0 "register_operand" "=v")
+        (unspec:V16SI
+	  [(reg:V32SI TMM_REGNUM)
+	   (match_operand:QI 1 "const_0_to_7_operand")
+	   (match_operand:SI 2 "nonmemory_operand" "rN")]
+	  UNSPEC_TILEMOVROWEXTRACT))]
+  "TARGET_ACEV1"
+  "tilemovrow\t{%2, %%tmm%c1, %0|%0, tmm%c1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "tilemov<rowcol>_insert"
+  [(set (reg:V32SI TMM_REGNUM)
+        (unspec_volatile:V32SI
+	  [(match_operand:QI 0 "const_0_to_7_operand")
+	   (match_operand:V16SI 1 "register_operand" "v")
+	   (match_operand:SI 2 "nonmemory_operand" "rN")]
+	  UNSPECV_TILEMOVINSERT))]
+  "TARGET_ACEV1"
+  "tilemov<rowcol>\t{%2, %1, %%tmm%c0|tmm%c0, %1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "top2bf16ps"
+  [(set (reg:V32SF TMM_REGNUM)
+        (unspec_volatile:V32SF
+	  [(match_operand:QI 0 "const_0_to_7_operand")
+	   (match_operand:V32BF 1 "register_operand" "v")
+	   (match_operand:V32BF 2 "register_operand" "v")]
+	  UNSPECV_TOP2BF16PS))]
+  "TARGET_ACEV1"
+  "top2bf16ps\t{%2, %1, %%tmm%c0|tmm%c0, %1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_int_iterator TOP4BDTYPE
+  [UNSPECV_TOP4BSSD
+   UNSPECV_TOP4BSUD
+   UNSPECV_TOP4BUSD
+   UNSPECV_TOP4BUUD])
+
+(define_int_attr top4bdtype
+  [(UNSPECV_TOP4BSSD "bssd") (UNSPECV_TOP4BSUD "bsud")
+   (UNSPECV_TOP4BUSD "busd") (UNSPECV_TOP4BUUD "buud")])
+
+(define_insn "top4<top4bdtype>"
+  [(set (reg:V32SI TMM_REGNUM)
+        (unspec_volatile:V32SI
+	  [(match_operand:QI 0 "const_0_to_7_operand")
+	   (match_operand:V64QI 1 "register_operand" "v")
+	   (match_operand:V64QI 2 "register_operand" "v")]
+	  TOP4BDTYPE))]
+  "TARGET_ACEV1"
+  "top4<top4bdtype>\t{%2, %1, %%tmm%c0|tmm%c0, %1, %2}"
+  [(set_attr "prefix" "evex")])
+
+(define_int_iterator TOP4MXFP8TYPE
+  [UNSPECV_TOP4MXBF8PS UNSPECV_TOP4MXBHF8PS
+   UNSPECV_TOP4MXHBF8PS UNSPECV_TOP4MXHF8PS])
+
+(define_int_attr top4mxfp8type
+  [(UNSPECV_TOP4MXBF8PS "mxbf8")
+   (UNSPECV_TOP4MXBHF8PS "mxbhf8")
+   (UNSPECV_TOP4MXHBF8PS "mxhbf8")
+   (UNSPECV_TOP4MXHF8PS "mxhf8")])
+
+(define_insn "top4<top4mxfp8type>ps"
+  [(set (reg:V32SF TMM_REGNUM)
+        (unspec_volatile:V32SF
+	  [(match_operand:QI 0 "const_0_to_7_operand")
+	   (match_operand:V64QI 1 "register_operand" "v")
+	   (match_operand:V64QI 2 "register_operand" "v")
+	   (match_operand:SI 3 "const_0_to_255_operand")
+	   (reg:V32SI BSR0_REG)]
+	  TOP4MXFP8TYPE))]
+  "TARGET_ACEV1"
+  "top4<top4mxfp8type>ps\t{%3, %2, %1, %%tmm%c0|tmm%c0, %1, %2, %3}"
+  [(set_attr "prefix" "evex")])
+
+(define_insn "top4mxbssps"
+  [(set (reg:V32SF TMM_REGNUM)
+        (unspec_volatile:V32SF
+	  [(match_operand:QI 0 "const_0_to_7_operand")
+	   (match_operand:V64QI 1 "register_operand" "v")
+	   (match_operand:V64QI 2 "register_operand" "v")
+	   (match_operand:SI 3 "const_0_to_255_operand")
+	   (reg:V32SI BSR0_REG)]
+	  UNSPECV_TOP4MXBSSPS))]
+  "TARGET_ACEV1"
+  "top4mxbssps\t{%3, %2, %1, %%tmm%c0|tmm%c0, %1, %2, %3}"
+  [(set_attr "prefix" "evex")])
