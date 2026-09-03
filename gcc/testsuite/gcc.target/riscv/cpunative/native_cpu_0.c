@@ -6,7 +6,7 @@
 /* { dg-require-effective-target rv64 } */
 /* { dg-set-compiler-env-var GCC_CPUINFO "$srcdir/gcc.target/riscv/cpunative/info_0" } */
 /* { dg-set-compiler-env-var GCC_CPUINFO_CPU "0" } */
-/* { dg-additional-options "-march=native -mabi=lp64d -fverbose-asm" } */
+/* { dg-additional-options "-march=native -mtune=native -mabi=lp64d -fverbose-asm" } */
 
 int
 main (void)
@@ -15,3 +15,4 @@ main (void)
 }
 
 /* { dg-final { scan-assembler {\.attribute arch, "rv64i2p1[^"]*_h1p0_} } } */
+/* { dg-final { scan-assembler {options passed:[^\n]* -mtune=spacemit-x100} } } */
