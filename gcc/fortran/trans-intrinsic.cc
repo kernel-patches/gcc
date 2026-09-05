@@ -2099,20 +2099,13 @@ conv_intrinsic_team_number (gfc_se *se, gfc_expr *expr)
   args = XALLOCAVEC (tree, num_args);
   gfc_conv_intrinsic_function_args (se, expr, args, num_args);
 
-  if (flag_coarray ==
-      GFC_FCOARRAY_SINGLE && expr->value.function.actual->expr)
-    tmp = gfc_evaluate_now (args[0], &se->pre);
-  else if (flag_coarray == GFC_FCOARRAY_SINGLE)
-    {
-      // the value -1 represents that no team has been created yet
-      tmp = build_int_cst (integer_type_node, -1);
-    }
-  else if (flag_coarray == GFC_FCOARRAY_LIB && expr->value.function.actual->expr)
-    tmp = build_call_expr_loc (input_location, gfor_fndecl_caf_team_number, 1,
-			       args[0]);
+  if (flag_coarray == GFC_FCOARRAY_SINGLE)
+    /* Only the initial team exists, and its team number is -1.  */
+    tmp = build_int_cst (integer_type_node, -1);
   else if (flag_coarray == GFC_FCOARRAY_LIB)
     tmp = build_call_expr_loc (input_location, gfor_fndecl_caf_team_number, 1,
-			       null_pointer_node);
+			       expr->value.function.actual->expr
+			       ? args[0] : null_pointer_node);
   else
     gcc_unreachable ();
 
@@ -2151,8 +2144,7 @@ trans_image_index (gfc_se * se, gfc_expr *expr)
   if (expr->value.function.actual->next->next->expr)
     {
       gfc_init_se (&argse, NULL);
-      gfc_conv_expr_descriptor (&argse,
-				expr->value.function.actual->next->next->expr);
+      gfc_conv_expr_val (&argse, expr->value.function.actual->next->next->expr);
       if (expr->value.function.actual->next->next->expr->ts.type == BT_DERIVED)
 	team = argse.expr;
       else
@@ -2270,7 +2262,7 @@ trans_num_images (gfc_se * se, gfc_expr *expr)
       else
 	team_number = gfc_build_addr_expr (
 	  NULL_TREE,
-	  gfc_trans_force_lval (&se->pre,
+	  gfc_trans_force_lval (&argse.pre,
 				fold_convert (integer_type_node, argse.expr)));
       gfc_add_block_to_block (&se->pre, &argse.pre);
       gfc_add_block_to_block (&se->post, &argse.post);

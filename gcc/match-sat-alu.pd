@@ -69,6 +69,13 @@ along with GCC; see the file COPYING3.  If not see
     }
     (if (wi::eq_p (max, sum))))))
  (match (unsigned_integer_sat_add @0 @1)
+  /* SAT_U_ADD = X + MIN (~X, Y).  ~X is MAX - X, so the MIN caps Y at the
+     largest addend that does not overflow.  The MIN has to be single use:
+     while it stays live the saturating add is computed beside it instead of
+     replacing it, which costs an instruction.  */
+  (plus:c (min:c@2 (bit_not @0) @1) @0)
+  (if (single_use (@2))))
+ (match (unsigned_integer_sat_add @0 @1)
   /* SUM = ADD_OVERFLOW (X, Y)
      SAT_U_ADD = REALPART (SUM) | -IMAGPART (SUM)   */
   (bit_ior:c (realpart (IFN_ADD_OVERFLOW@2 @0 @1)) (negate (imagpart @2)))
@@ -131,6 +138,15 @@ along with GCC; see the file COPYING3.  If not see
   /* SAT_U_SUB = (X - Y) * (X >= Y)  */
   (mult:c (minus @0 @1) (convert (ge @0 @1)))
   (if (types_match (type, @0, @1))))
+ /* The wrapped difference exceeds the minuend exactly when the subtraction
+    borrows, so a source that names the difference and then tests it against
+    the minuend is a saturating subtract.  */
+ (match (unsigned_integer_sat_sub @0 @1)
+  /* SAT_U_SUB = (X - Y) > X ? 0 : X - Y, and the commuted comparison.  */
+  (cond^ (gt:c (minus@2 @0 @1) @0) integer_zerop @2))
+ (match (unsigned_integer_sat_sub @0 @1)
+  /* SAT_U_SUB = (X - Y) <= X ? X - Y : 0, and the commuted comparison.  */
+  (cond^ (le:c (minus@2 @0 @1) @0) @2 integer_zerop))
  (match (unsigned_integer_sat_sub @0 @1)
   /* DIFF = SUB_OVERFLOW (X, Y)
      SAT_U_SUB = REALPART (DIFF) | (IMAGPART (DIFF) + (-1))  */
