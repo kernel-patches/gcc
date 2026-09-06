@@ -153,4 +153,9 @@ void *__gg__memdup(const void *p, size_t size);
 
 enum {width_of_utf32 = 4};
 
+extern "C" __int128 __gg__int128_to_int128_rounded( cbl_round_t rounded,
+                                                    __int128    value,
+                                                    __int128    factor,
+                                                    int        *compute_error);
+
 #endif

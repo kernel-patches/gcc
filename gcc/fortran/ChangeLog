@@ -1,3 +1,15 @@
+2026-09-05  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126950
+	* trans.h (struct lang_decl): Add span.
+	(GFC_DECL_SPAN, GFC_DECL_GET_SPAN): New macros.
+	* trans-decl.cc (gfc_build_dummy_array_decl): Create the variable
+	holding the span of a span addressed dummy.
+	* trans-array.cc (gfc_trans_dummy_array_bias): Load it from the
+	descriptor on entry.
+	(gfc_get_array_span): Use it.
+	* trans.cc (get_array_span): Likewise.
+
 2026-09-04  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
 
 	PR fortran/126777

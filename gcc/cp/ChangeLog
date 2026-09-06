@@ -1,3 +1,10 @@
+2026-09-05  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/127207
+	* module.cc (trees_out::decl_value): Relax checking assert
+	to accept IDENTIFIER_NODE as TI_TEMPLATE.
+	(get_originating_module_decl): Likewise.
+
 2026-09-03  Jakub Jelinek  <jakub@redhat.com>
 
 	PR c++/127109

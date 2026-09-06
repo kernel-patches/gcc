@@ -1,3 +1,37 @@
+2026-09-05  Jin Ma  <jinma@linux.alibaba.com>
+
+	PR target/126196
+	* config/riscv/vector-crypto.md (vv_ins_con): New int attribute.
+	(vv_ins1_con): Likewise.
+	(vi_ins1_con): Likewise.
+	(@pred_v<vv_ins1_name><mode>): Use vv_ins1_con.
+	(@pred_crypto_vv<vv_ins_name><ins_type><mode>): Use vv_ins_con.
+	(@pred_vi<vi_ins1_name><mode>_nomaskedoff_scalar): Use vi_ins1_con.
+	(@pred_vsm3me<mode>): Mark the destination as early-clobber.
+
+2026-09-05  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* match-sat-alu.pd (unsigned_integer_sat_add): Add the
+	X + MIN (~X, Y) form.
+
+2026-09-05  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* match-sat-alu.pd (unsigned_integer_sat_sub): Add the four
+	forms that compare the difference with the minuend.
+
+2026-09-05  Philipp Tomsich  <philipp.tomsich@vrull.eu>
+
+	PR tree-optimization/127201
+	* tree-data-ref.cc (dr_may_alias_p): Consult DR_PTR_INFO of both
+	data references before falling back to base-object analysis.
+
+2026-09-05  Takayuki 'January June' Suwa  <jjsuwa_sys3175@yahoo.co.jp>
+
+	* config/xtensa/xtensa.cc (xtensa_zero_call_used_regs):
+	Change to assign 0 to the A9 register and then use it to clear
+	other non-GP registers, instead of triggering a gcc_assert()
+	failure when the address register is not zeroed out at all.
+
 2026-09-04  Jakub Jelinek  <jakub@redhat.com>
 
 	PR target/126671

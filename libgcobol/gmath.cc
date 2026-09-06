@@ -1381,7 +1381,7 @@ __gg__multiplyf1_phase2(cbl_arith_format_t ,
       a_value = (GCOB_FP128) multiply_intermediate_int128.i128;
       if( multiply_intermediate_int128.rdigits )
         {
-        a_value /= 
+        a_value /=
           (GCOB_FP128)__gg__power_of_ten(multiply_intermediate_int128.rdigits);
         }
       b_value = __gg__float128_from_qualified_field(C[0].field,
@@ -2016,7 +2016,7 @@ __gg__dividef45(cbl_arith_format_t ,
                                       A[0].field,
                                       A[0].offset,
                                       A[0].size);
-    int128 divisor;                   
+    int128 divisor;
     __gg__int128_from_qualified_field(divisor,
                                       B[0].field,
                                       B[0].offset,
@@ -2231,7 +2231,7 @@ static std::vector<int256> compute_fixed_stack;
 static int
 compute_fixed_add()
   {
-  // This is RPN at work, so stack[N-2] += stack[N-1] 
+  // This is RPN at work, so stack[N-2] += stack[N-1]
   int retval = 0;
 
   size_t level = compute_fixed_stack.size();
@@ -2323,7 +2323,7 @@ compute_fixed_negate()
 static int
 compute_float_add()
   {
-  // This is RPN at work, so stack[N-2] += stack[N-1] 
+  // This is RPN at work, so stack[N-2] += stack[N-1]
   int retval = 0;
 
   size_t level = compute_float_stack.size();
@@ -2398,7 +2398,7 @@ compute_float_pow()
   assert( level >= 2 );
   GCOB_FP128 left  = compute_float_stack[level-2];
   GCOB_FP128 right = compute_float_stack[level-1];
-  
+
   left = exponentiation_helper(left, right, &retval);
 
   compute_float_stack[level-2] = left;
@@ -2517,7 +2517,7 @@ __gg__compute_float(const char          opstring[],
       case 'P':
         {
         // We push a value onto the stack:
-        GCOB_FP128 value = 
+        GCOB_FP128 value =
                       __gg__float128_from_qualified_field(fields[i],
                                                           offsets[i],
                                                           fields[i]->capacity);
@@ -2564,5 +2564,193 @@ __gg__compute_float(const char          opstring[],
                                     value,
                                     truncation_e,
                                     &retval);
+  return retval;
+  }
+
+__int128
+__gg__int128_to_int128_rounded( cbl_round_t rounded,
+                          __int128    value,
+                          __int128    factor,
+                          int        *compute_error)
+  {
+  // Value is signed.  'factor' is a power of ten, and is at least ten.
+  __int128 retval = value / factor;
+
+  // The caller set 'factor' to be the number of digits that had to be removed
+  // from the low-order end of value so that it fits into the target.
+
+  switch(rounded)
+    {
+    case truncation_e:
+      // retval is already the truncateed result.
+      break;
+
+    case nearest_even_e:
+      {
+      // This is "banker's rounding".
+      // This is "banker's rounding"
+      // 3.4 -> 3.0
+      // 3.5 -> 4.0
+      // 3.6 -> 4.0
+
+      // 4.4 -> 4.0
+      // 4.5 -> 4.0
+      // 4.6 -> 5.0
+      __int128 fpart  = value % factor;
+      __int128 middle = factor/2;
+      if( fpart == middle || fpart == -middle)
+        {
+        if( value >= 0 )
+          {
+          retval += 1;
+          retval &= ~1;
+          }
+        else
+          {
+          retval = -retval;
+          retval += 1;
+          retval &= ~1;
+          retval = -retval;
+          }
+        }
+      else
+        {
+        // Since the fraction is not 0.5, this is an ordinary
+        // nearest_away_from_zero_e; see below
+        if( value >= 0 )
+          {
+          if( fpart > middle )
+            {
+            retval += 1;
+            }
+          }
+        else
+          {
+          if( fpart < -middle )
+            {
+            retval -= 1;
+            }
+          }
+        }
+      break;
+      }
+
+    case nearest_away_from_zero_e:
+      {
+      // This is ordinary rounding, like you learned in grade school
+      // 0.0 through 0.4 becomes 0
+      // 0.5 through 0.9 becomes 1
+      __int128 fpart  = value % factor;
+      __int128 middle = factor/2;
+      if( value < 0 )
+        {
+        if( fpart <= -middle )
+          {
+          retval -= 1;
+          }
+        }
+      else
+        {
+        if( fpart >= middle )
+          {
+          retval += 1;
+          }
+        }
+      break;
+      }
+
+    case away_from_zero_e:
+      {
+      // zero stays zero, otherwise head for the next number away from zero
+      __int128 fpart  = value % factor;
+      if( fpart != 0 )
+        {
+        if( value < 0 )
+          {
+          retval -= 1;
+          }
+        else
+          {
+          retval += 1;
+          }
+        }
+      break;
+      }
+
+    case nearest_toward_zero_e:
+      {
+      // 1.0 through 1.5 becomes 1
+      // 1.6 through 1.9 becomes 2
+
+      // -1.0 through -1.5 becomes 1
+      // -1.6 through -1.9 becomes 2
+
+      __int128 fpart  = value % factor;
+      __int128 middle = factor/2;
+      if( value < 0 )
+        {
+        if( fpart < -middle )
+          {
+          retval -= 1;
+          }
+        }
+      else
+        {
+        if( fpart > middle )
+          {
+          retval += 1;
+          }
+        }
+      break;
+      }
+
+    case toward_greater_e:
+      {
+      if( value > 0 )
+        {
+        __int128 fpart  = value % factor;
+        if( fpart != 0 )
+          {
+          retval += 1;
+          }
+        }
+      else
+        {
+        // retval is already correct.
+        }
+      break;
+      }
+
+    case toward_lesser_e:
+      {
+      if( value < 0 )
+        {
+        __int128 fpart = value % factor;
+        if(fpart != 0)
+          {
+          retval -= 1;
+          }
+        }
+      else
+        {
+        // retval is already correct.
+        }
+      break;
+      }
+
+    case prohibited_e:
+      {
+      __int128 fpart = value % factor;
+      if( fpart != 0 )
+        {
+        *compute_error |= compute_error_truncate;
+        }
+      break;
+      }
+
+    default:
+      abort();
+      break;
+    }
   return retval;
   }

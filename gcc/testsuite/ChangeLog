@@ -1,3 +1,57 @@
+2026-09-05  Jin Ma  <jinma@linux.alibaba.com>
+
+	PR target/126196
+	* gcc.target/riscv/pr126196-1.c: New test.
+	* gcc.target/riscv/pr126196-2.c: New test.
+	* gcc.target/riscv/pr126196-3.c: New test.
+	* gcc.target/riscv/pr126196-4.c: New test.
+
+2026-09-05  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126950
+	* gfortran.dg/c_loc_test_22.f90: Update dump patterns for the
+	span being loaded on entry.
+	* gfortran.dg/gomp/target-span-1.f90: New test.
+
+2026-09-05  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* gcc.target/aarch64/sat_u_add_min_not-1.c: New test.
+	* gcc.target/aarch64/sat_u_add_min_not-2.c: Likewise.
+
+2026-09-05  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* gcc.target/aarch64/sat_u_sub_borrow-1.c: New test.
+	* gcc.target/aarch64/saturating_arithmetic_1.c: Remove the xfail
+	on usub.
+	* gcc.target/aarch64/sve/saturating_arithmetic_1.c: Remove the
+	xfail on usubq.
+	* gcc.target/aarch64/sve/saturating_arithmetic_3.c: Likewise.
+	* gcc.target/aarch64/sve/saturating_arithmetic_4.c: Likewise.
+
+2026-09-05  Philipp Tomsich  <philipp.tomsich@vrull.eu>
+
+	PR tree-optimization/127201
+	* gcc.dg/vect/vect-alias-check-ptr-info-1.c: New test.
+	* gcc.dg/vect/vect-alias-check-ptr-info-2.c: New test.
+
+2026-09-05  Max Filippov  <jcmvbkbc@gmail.com>
+
+	* c-c++-common/zero-scratch-regs-10.c: Mark as implemented for
+	xtensa*-*-*.
+	* c-c++-common/zero-scratch-regs-11.c: Likewise.
+	* c-c++-common/zero-scratch-regs-8.c: Likewise.
+	* c-c++-common/zero-scratch-regs-9.c: Likewise.
+
+2026-09-05  Takayuki 'January June' Suwa  <jjsuwa_sys3175@yahoo.co.jp>
+
+	* gcc.target/xtensa/zero-scratch-regs-1.c: New test.
+
+2026-09-05  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/127207
+	* g++.dg/modules/friend-15_a.H: New test.
+	* g++.dg/modules/friend-15_b.C: New test.
+
 2026-09-04  Iain Sandoe  <iain@sandoe.co.uk>
 
 	* gcc.target/i386/harden-sls-4.c: Amend for mach-o

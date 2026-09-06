@@ -1639,168 +1639,6 @@ binary_to_native_binary(void      *dest,
   }
 
 static __int128
-int128_to_int128_rounded( cbl_round_t rounded,
-                          __int128    value,
-                          __int128    factor,
-                          __int128    remainder,
-                          int        *compute_error)
-  {
-  // value is signed, and is scaled to the target
-  GCOB_FP128 fpart = ((GCOB_FP128)remainder) / ((GCOB_FP128)factor);
-  __int128 retval = value;
-
-  if(rounded == nearest_even_e
-     && fpart != GCOB_FP128_LITERAL (-0.5)
-     && fpart != GCOB_FP128_LITERAL (0.5))
-    {
-    // "bankers rounding" has been requested.
-    //
-    // Since the fraction is not 0.5, this is an ordinary rounding
-    // problem
-    rounded =  nearest_away_from_zero_e;
-    }
-
-  switch(rounded)
-    {
-    case truncation_e:
-      break;
-
-    case nearest_away_from_zero_e:
-      {
-      // This is ordinary rounding, like you learned in grade school
-      // 0.0 through 0.4 becomes 0
-      // 0.5 through 0.9 becomes 1
-      if( value < 0 )
-        {
-        if( fpart <= GCOB_FP128_LITERAL(-0.5) )
-          {
-          retval -= 1;
-          }
-        }
-      else
-        {
-        if( fpart >= GCOB_FP128_LITERAL(0.5) )
-          {
-          retval += 1;
-          }
-        }
-      break;
-      }
-
-    case away_from_zero_e:
-      {
-      // zero stays zero, otherwise head for the next number away from zero
-      if( value < 0 )
-        {
-        if( fpart != 0 )
-          {
-          retval -= 1;
-          }
-        }
-      else
-        {
-        if( fpart != 0 )
-          {
-          retval += 1;
-          }
-        }
-      break;
-      }
-
-    case nearest_toward_zero_e:
-      {
-      // 0.0 through 0.5 becomes 0
-      // 0.6 through 0.9 becomes 1
-      if( value < 0 )
-        {
-        if( fpart < GCOB_FP128_LITERAL(-0.5) )
-          {
-          retval -= 1;
-          }
-        }
-      else
-        {
-        if( fpart > GCOB_FP128_LITERAL(0.5) )
-          {
-          retval += 1;
-          }
-        }
-      break;
-      }
-
-    case toward_greater_e:
-      {
-      if( value > 0 )
-        {
-        if( fpart != 0 )
-          {
-          retval += 1;
-          }
-        }
-      break;
-      }
-
-    case toward_lesser_e:
-      {
-      if( value < 0 )
-        {
-        if(fpart != 0)
-          {
-          retval -= 1;
-          }
-        }
-      break;
-      }
-
-    case nearest_even_e:
-      {
-      // This is "banker's rounding"
-      // 3.4 -> 3.0
-      // 3.5 -> 4.0
-      // 3.6 -> 4.0
-
-      // 4.4 -> 4.0
-      // 4.5 -> 4.0
-      // 4.6 -> 5.0
-
-     // We know that the fractional part is 0.5 or -0.5, and we know that
-     // we want 3 to become 4 and for 4 to stay 4.
-
-    if( value < 0 )
-      {
-      if( retval & 1 )
-        {
-        retval -= 1;
-        }
-      }
-    else
-      {
-      if( retval & 1 )
-        {
-        retval += 1;
-        }
-      }
-      break;
-      }
-
-    case prohibited_e:
-      {
-      if( fpart != 0 )
-        {
-        *compute_error |= compute_error_truncate;
-        }
-
-      break;
-      }
-
-    default:
-      abort();
-      break;
-    }
-  return retval;
-  }
-
-static __int128
 f128_to_i128_rounded( cbl_round_t rounded,
                     GCOB_FP128   value,
                     int        *compute_error)
@@ -2066,7 +1904,6 @@ int128_to_field(cblc_field_t   *var,
         // to hold the value we've been given:
         target_rdigits = source_rdigits;
         var->rdigits = target_rdigits;
-        var->digits = MAX_FIXED_POINT_DIGITS;
         }
       else if( var->attr & scaled_e )
         {
@@ -2114,7 +1951,7 @@ int128_to_field(cblc_field_t   *var,
         {
         // The source (value), has fewer rdigits than the target (var)
 
-        // Multiply value by ten until the source_rdigits matches the
+        // Multiply value by a power of ten so that source_rdigits matches the
         // target_rdigits.  No rounding will be necessary
         value *= __gg__power_of_ten(target_rdigits - source_rdigits);
         source_rdigits = target_rdigits;
@@ -2127,15 +1964,11 @@ int128_to_field(cblc_field_t   *var,
         // Extract those extra digits; we'll need them for rounding:
         __int128 factor = __gg__power_of_ten(source_rdigits - target_rdigits);
 
-        __int128 remainder = value % factor;
-        value /= factor;
         source_rdigits = target_rdigits;
-
-        value = int128_to_int128_rounded( rounded,
-                                          value,
-                                          factor,
-                                          remainder,
-                                          compute_error);
+        value = __gg__int128_to_int128_rounded( rounded,
+                                                value,
+                                                factor,
+                                                compute_error);
         }
 
       // The documentation for ROUNDED MODE PHOHIBITED says that if the value
