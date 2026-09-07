@@ -565,7 +565,8 @@ void gfc_conv_subref_array_arg (gfc_se *, gfc_expr *, int, sym_intent, bool,
 				const char *proc_name = NULL,
 				gfc_symbol *sym = NULL,
 				bool check_contiguous = false,
-				bool deep_copy = false);
+				bool deep_copy = false,
+				bool span_only = false);
 
 void gfc_conv_is_contiguous_expr (gfc_se *, gfc_expr *);
 
@@ -1069,6 +1070,9 @@ struct GTY(()) lang_decl {
   unsigned int scalar_pointer : 1;
   unsigned int scalar_target : 1;
   unsigned int optional_arg : 1;
+  /* The element spacing of this dummy is held by the strides of its
+     descriptor rather than by its span.  */
+  unsigned int span_normalized : 1;
 };
 
 
@@ -1079,6 +1083,8 @@ struct GTY(()) lang_decl {
 #define GFC_DECL_SAVED_DESCRIPTOR(node) \
   (DECL_LANG_SPECIFIC(node)->saved_descriptor)
 #define GFC_DECL_SPAN(node) (DECL_LANG_SPECIFIC(node)->span)
+#define GFC_DECL_SPAN_NORMALIZED(node) \
+  (DECL_LANG_SPECIFIC(node)->span_normalized)
 /* Return the cached span of a span addressed dummy, or NULL_TREE.  */
 #define GFC_DECL_GET_SPAN(node) \
   (DECL_P (node) && DECL_LANG_SPECIFIC (node) \

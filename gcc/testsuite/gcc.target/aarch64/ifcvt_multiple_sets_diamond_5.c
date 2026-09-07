@@ -23,8 +23,7 @@ f (const unsigned char *p, unsigned long tag)
 }
 
 /* { dg-final { scan-rtl-dump-times "if-conversion succeeded through noce_convert_multiple_sets" 1 "ce1" } } */
-/* { dg-final { scan-assembler-times "\tcsinc\t" 1 } } */
-/* { dg-final { scan-assembler-times "\tcsel\t" 1 } } */
+/* { dg-final { scan-assembler-times "\tcsinc\t" 2 } } */
 /* { dg-final { scan-assembler-times "\tldrb\t" 1 } } */
 /* { dg-final { scan-assembler-not {\tb(eq|ne)\t} } } */
 /* { dg-final { scan-assembler-not {\tcbn?z\t} } } */

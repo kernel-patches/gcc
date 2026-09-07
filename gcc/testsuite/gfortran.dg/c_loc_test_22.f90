@@ -17,11 +17,12 @@ end
 ! { dg-final { scan-tree-dump-not " _gfortran_internal_pack" "original" } }
 ! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) &\\(.xxx.\[0-9\]+\\)\\\[0\\\];" 1 "original" } }
 ! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) &\\(.xxx.\[0-9\]+\\)\\\[D.\[0-9\]+ \\* 4\\\];" 1 "original" } }
-! A TARGET assumed-shape dummy is addressed with the runtime span that is
-! loaded from the descriptor on entry, so the element offset is span-scaled
-! instead of a constant 16.
-! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) &\\(.yyy.\[0-9\]+\\)\\\[0\\\];" 1 "original" } }
-! { dg-final { scan-tree-dump-times "span.\[0-9\]+ = yyy->span;" 1 "original" } }
-! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) yyy.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(D.\[0-9\]+ \\* span.\[0-9\]+\\) \\* 4\\);" 1 "original" } }
+! The elements of a TARGET assumed-shape dummy can be spaced by more than the
+! element length.  For an element length that divides the spacing, the spacing
+! is folded into the strides on entry, so the elements are addressed by the
+! constant element length rather than by a span loaded from the descriptor.
+! { dg-final { scan-tree-dump-not "span.\[0-9\]+ = yyy->span;" "original" } }
+! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) yyy.\[0-9\]+;" 1 "original" } }
+! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) yyy.\[0-9\]+ \\+ \\(sizetype\\) \\(D.\[0-9\]+ \\* 16\\);" 1 "original" } }
 
 ! { dg-final { scan-tree-dump-times "D.\[0-9\]+ = parm.\[0-9\]+.data;\[^;]+ptr\[1-4\] = D.\[0-9\]+;" 4 "original" } }

@@ -1,10 +1,11 @@
 ! { dg-do run }
 ! PR fortran/53800
+! PR126964
 
 ! A TARGET dummy associated with elements that are spaced by more than the
 ! element size: pointers to it stay valid after the call, it is written
-! through, it is not contiguous, it is copied when passed on to a dummy
-! without the TARGET attribute and it is transferred element by element.
+! through, it is not contiguous, it is passed on to an assumed-shape dummy
+! by its strides and copied for a dummy that has no descriptor.
 
 module m
   implicit none
@@ -22,15 +23,15 @@ contains
     write (line, '(4I3)') a
     if (line(1:12) /= '  1  4  9 16') stop 3
     if (sum(a) /= 30) stop 4
-    call packed(a)
+    call assumed_shape(a)
     call assumed_size(a)
     saved => a
     a(2) = -a(2)
   end subroutine
-  subroutine packed(b)         ! copy-in/copy-out
+  subroutine assumed_shape(b)  ! strides passed on, no copy
     integer :: b(:)
     if (any(b /= [1, 4, 9, 16])) stop 5
-    if (.not. is_contiguous(b)) stop 6
+    if (is_contiguous(b)) stop 6
   end subroutine
   subroutine assumed_size(c)   ! no descriptor
     integer :: c(*)

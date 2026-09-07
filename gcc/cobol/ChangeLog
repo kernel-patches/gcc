@@ -1,3 +1,13 @@
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* genapi.cc (inspect_replacing): Use SBC version.
+	(parser_inspect_conv): Likewise.
+
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* genapi.cc (parser_symbol_add): Add ease-of-debugging feature.
+	* symbols.cc (numeric_group_attrs): Inherit only from FldGroup.
+
 2026-09-02  Robert Dubner  <rdubner@symas.com>
 
 	* genapi.cc (perform_inline_until): Create testA.label.

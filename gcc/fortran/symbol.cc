@@ -5702,14 +5702,15 @@ gfc_is_associate_pointer (gfc_symbol* sym)
 }
 
 
-/* Check if a dummy argument must be addressed using the span of its
-   descriptor.  The actual argument of an assumed shape or assumed rank
-   TARGET dummy is never copied, so its elements can be spaced by more
-   than the element size.  CLASS and assumed type entities already carry
-   their element size and are excluded.  */
+/* Check if the actual argument of a dummy must be passed directly, rather
+   than through a copy-in/copy-out temporary.  A pointer associated with an
+   assumed shape or assumed rank TARGET dummy has to stay valid after the
+   call, so its actual argument is never copied and its elements can be
+   spaced by more than the element size.  CLASS and assumed type entities
+   already carry their element size and are excluded.  */
 
 bool
-gfc_is_span_addressed_dummy (gfc_symbol *sym)
+gfc_dummy_requires_direct_arg (gfc_symbol *sym)
 {
   return sym->attr.dummy
 	 && sym->attr.target

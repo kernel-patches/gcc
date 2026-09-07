@@ -1,3 +1,11 @@
+2026-09-06  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* intrinsics/associated.c (stride_in_bytes): New function.
+	(associated): Require the element length or the span to agree
+	rather than the span alone, and compare the stride in bytes
+	rather than the stride.
+
 2026-09-04  Iain Sandoe  <iain@sandoe.co.uk>
 
 	* configure: Regenerate.

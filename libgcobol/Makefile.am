@@ -51,24 +51,25 @@ libsubincludedir = $(libsubdir)
 ## 2.2.12 Automatic Dependency Tracking
 ## Automake generates code for automatic dependency tracking by default
 
-libgcobol_la_SOURCES =				\
-	charmaps.cc				\
-	constants.cc				\
-	gfileio.cc				\
-	gmath.cc				\
-	inspect.cc				\
-	intrinsic.cc				\
-	io.cc					\
-	libgcobol.cc				\
-	posix/shim/errno.cc			\
-	posix/shim/fstat.cc			\
-	posix/shim/localtime.cc			\
-	posix/shim/lseek.cc			\
-	posix/shim/open.cc			\
-	posix/shim/stat.cc			\
-	stringbin.cc				\
-	valconv.cc				\
-	xmlparse.cc
+libgcobol_la_SOURCES =      \
+    charmaps.cc             \
+    constants.cc            \
+    gfileio.cc              \
+    gmath.cc                \
+    inspect.cc              \
+    intrinsic.cc            \
+    io.cc                   \
+    libgcobol.cc            \
+    posix/shim/errno.cc     \
+    posix/shim/fstat.cc     \
+    posix/shim/localtime.cc \
+    posix/shim/lseek.cc     \
+    posix/shim/open.cc      \
+    posix/shim/stat.cc      \
+    stringbin.cc            \
+    unstring.cc             \
+    valconv.cc              \
+    xmlparse.cc
 
 libgcobol_compat_gnu_la_SOURCES =		\
 	compat/gnu/udf/cobrt-file-status.cbl	\

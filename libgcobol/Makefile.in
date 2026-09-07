@@ -188,7 +188,7 @@ am__dirstamp = $(am__leading_dot)dirstamp
 @BUILD_LIBGCOBOL_TRUE@	posix/shim/localtime.lo \
 @BUILD_LIBGCOBOL_TRUE@	posix/shim/lseek.lo posix/shim/open.lo \
 @BUILD_LIBGCOBOL_TRUE@	posix/shim/stat.lo stringbin.lo \
-@BUILD_LIBGCOBOL_TRUE@	valconv.lo xmlparse.lo
+@BUILD_LIBGCOBOL_TRUE@	unstring.lo valconv.lo xmlparse.lo
 libgcobol_la_OBJECTS = $(am_libgcobol_la_OBJECTS)
 @BUILD_LIBGCOBOL_TRUE@am_libgcobol_la_rpath = -rpath $(toolexeclibdir)
 libgcobol_compat_gnu_la_LIBADD =
@@ -476,23 +476,24 @@ gcc_version := $(shell @get_gcc_base_ver@ $(top_srcdir)/../gcc/BASE-VER)
 @BUILD_LIBGCOBOL_TRUE@libsubdir := $(libdir)/gcc/$(target_noncanonical)/$(version)$(MULTISUBDIR)/cobol
 @BUILD_LIBGCOBOL_TRUE@libsubincludedir = $(libsubdir)
 @BUILD_LIBGCOBOL_TRUE@libgcobol_la_SOURCES = \
-@BUILD_LIBGCOBOL_TRUE@	charmaps.cc				\
-@BUILD_LIBGCOBOL_TRUE@	constants.cc				\
-@BUILD_LIBGCOBOL_TRUE@	gfileio.cc				\
-@BUILD_LIBGCOBOL_TRUE@	gmath.cc				\
-@BUILD_LIBGCOBOL_TRUE@	inspect.cc				\
-@BUILD_LIBGCOBOL_TRUE@	intrinsic.cc				\
-@BUILD_LIBGCOBOL_TRUE@	io.cc					\
-@BUILD_LIBGCOBOL_TRUE@	libgcobol.cc				\
-@BUILD_LIBGCOBOL_TRUE@	posix/shim/errno.cc			\
-@BUILD_LIBGCOBOL_TRUE@	posix/shim/fstat.cc			\
-@BUILD_LIBGCOBOL_TRUE@	posix/shim/localtime.cc			\
-@BUILD_LIBGCOBOL_TRUE@	posix/shim/lseek.cc			\
-@BUILD_LIBGCOBOL_TRUE@	posix/shim/open.cc			\
-@BUILD_LIBGCOBOL_TRUE@	posix/shim/stat.cc			\
-@BUILD_LIBGCOBOL_TRUE@	stringbin.cc				\
-@BUILD_LIBGCOBOL_TRUE@	valconv.cc				\
-@BUILD_LIBGCOBOL_TRUE@	xmlparse.cc
+@BUILD_LIBGCOBOL_TRUE@    charmaps.cc             \
+@BUILD_LIBGCOBOL_TRUE@    constants.cc            \
+@BUILD_LIBGCOBOL_TRUE@    gfileio.cc              \
+@BUILD_LIBGCOBOL_TRUE@    gmath.cc                \
+@BUILD_LIBGCOBOL_TRUE@    inspect.cc              \
+@BUILD_LIBGCOBOL_TRUE@    intrinsic.cc            \
+@BUILD_LIBGCOBOL_TRUE@    io.cc                   \
+@BUILD_LIBGCOBOL_TRUE@    libgcobol.cc            \
+@BUILD_LIBGCOBOL_TRUE@    posix/shim/errno.cc     \
+@BUILD_LIBGCOBOL_TRUE@    posix/shim/fstat.cc     \
+@BUILD_LIBGCOBOL_TRUE@    posix/shim/localtime.cc \
+@BUILD_LIBGCOBOL_TRUE@    posix/shim/lseek.cc     \
+@BUILD_LIBGCOBOL_TRUE@    posix/shim/open.cc      \
+@BUILD_LIBGCOBOL_TRUE@    posix/shim/stat.cc      \
+@BUILD_LIBGCOBOL_TRUE@    stringbin.cc            \
+@BUILD_LIBGCOBOL_TRUE@    unstring.cc             \
+@BUILD_LIBGCOBOL_TRUE@    valconv.cc              \
+@BUILD_LIBGCOBOL_TRUE@    xmlparse.cc
 
 @BUILD_LIBGCOBOL_TRUE@libgcobol_compat_gnu_la_SOURCES = \
 @BUILD_LIBGCOBOL_TRUE@	compat/gnu/udf/cobrt-file-status.cbl	\
@@ -830,6 +831,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/io.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libgcobol.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stringbin.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/unstring.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/valconv.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xmlparse.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@posix/shim/$(DEPDIR)/errno.Plo@am__quote@

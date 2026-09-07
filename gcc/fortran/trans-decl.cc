@@ -1407,13 +1407,18 @@ gfc_build_dummy_array_decl (gfc_symbol * sym, tree dummy)
   GFC_DECL_SAVED_DESCRIPTOR (decl) = dummy;
 
   /* The elements of the actual argument can be spaced by more than the
-     element size, so the span of the descriptor is used to address them.
-     Create the variable that holds it here, since the body is translated
-     before gfc_trans_dummy_array_bias loads it from the descriptor.  */
-  if (gfc_is_span_addressed_dummy (sym) && packed == PACKED_NO)
+     element size, in which case they are addressed by the span of the
+     descriptor.  Create the variable holding it here, since the body is
+     translated before gfc_trans_dummy_array_bias loads it.  */
+  if (packed == PACKED_NO)
     {
-      GFC_DECL_PTR_ARRAY_P (decl) = 1;
-      GFC_DECL_SPAN (decl) = gfc_create_var (gfc_array_index_type, "span");
+      if (gfc_span_folds_into_stride (sym))
+	GFC_DECL_SPAN_NORMALIZED (decl) = 1;
+      else if (gfc_is_span_addressed_dummy (sym))
+	{
+	  GFC_DECL_PTR_ARRAY_P (decl) = 1;
+	  GFC_DECL_SPAN (decl) = gfc_create_var (gfc_array_index_type, "span");
+	}
     }
 
   if (sym->ns->proc_name->backend_decl == current_function_decl

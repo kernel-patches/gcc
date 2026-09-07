@@ -1,3 +1,13 @@
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* config/i386/i386-expand.cc (ix86_expand_call): User setting of
+	no_caller_saved_registers overrides lazy symbol stub reservations.
+
+2026-09-06  wangjue  <juewang@linux.alibaba.com>
+
+	* config/m68k/m68k.cc (m68k_sched_issue_rate): Return one for CPUs
+	without a scheduling model.
+
 2026-09-05  Jin Ma  <jinma@linux.alibaba.com>
 
 	PR target/126196

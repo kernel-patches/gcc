@@ -2815,7 +2815,9 @@ numeric_group_attrs( const cbl_field_t *field ) {
   if( field->parent > 0 && symbol_at(field->parent)->type == SymField ) {
     cbl_field_t *parent = parent_of(field);
     assert(parent);
-    return inherit & parent->attr;
+    if( parent->type == FldGroup ) {
+      return inherit & parent->attr;
+    }
   }
   return 0;
 }

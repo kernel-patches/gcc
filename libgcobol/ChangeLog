@@ -1,3 +1,47 @@
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* inspect.cc (the_alpha_and_omega_sbc): Modified.
+	(the_alpha_and_omega_backward_sbc): New routine.
+	(match_lengths_sbc): New routine.
+	(matches_sbc): Improved routine.
+	(set_trailing_bounds_sbc): Likewise.
+	(__gg__inspect_format_1_sbc): Likewise.
+	(__gg__inspect_format_2_sbc): New routine.
+	(__gg__inspect_format_4_sbc): New routine.
+
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* Makefile.am: Incorporate new unstring.cc file.
+	* Makefile.in: Regenerate.
+	* libgcobol.cc (string_operand): Moved.
+	(__gg__string_1): Likewise.
+	(find_string_24): Likewise.
+	(__gg__string_24): Likewise.
+	(__gg__string): Likewise.
+	(struct unstring_finder_1): Likewise.
+	(struct unstring_finder_24): Likewise.
+	(unstring_fixed): Likewise.
+	(__gg__unstring_1): Likewise.
+	(__gg__unstring_24): Likewise.
+	(__gg__unstring): Likewise.
+	(__gg__move_stash_release): Formatting.
+	* libgcobol.h (__gg__move_literala): New declaration.
+	* unstring.cc: New file.
+
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* gmath.cc (__gg__multiplyf1_phase2): Remove trailing spaces.
+	(__gg__dividef45): Likewise.
+	(compute_fixed_add): Likewise.
+	(compute_float_add): Likewise.
+	(compute_float_pow): Likewise.
+	(__gg__compute_float): Likewise.
+	(__gg__int128_to_int128_rounded): Repaired and moved to gmath.cc.
+	* gmath.h (GMATH_H_): Irrelevant change to declarations.
+	* libgcobol.cc (int128_to_int128_rounded): Moved to gmath.cc.
+	(int128_to_field): Use the new __gg__int128_to_int128_rounded
+	* libgcobol.h (__gg__int128_to_int128_rounded): New declaration.
+
 2026-09-04  Robert Dubner  <rdubner@symas.com>
 
 	* libgcobol.cc (string_operand): New structure.

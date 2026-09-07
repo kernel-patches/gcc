@@ -5558,7 +5558,7 @@ gfc_conv_subref_array_arg (gfc_se *se, gfc_expr * expr, int g77,
 			   sym_intent intent, bool formal_ptr,
 			   const gfc_symbol *fsym, const char *proc_name,
 			   gfc_symbol *sym, bool check_contiguous,
-			   bool deep_copy)
+			   bool deep_copy, bool span_only)
 {
   gfc_se lse;
   gfc_se rse;
@@ -5934,9 +5934,13 @@ class_array_fcn:
 	    }
 	  else
 	    {
-	      /* cont_var = is_contiguous (expr); .  */
+	      /* cont_var = is_contiguous (expr), or just that the span is the
+		 element length for a dummy that takes any stride.  */
 	      gfc_init_se (&cont_se, parmse);
-	      gfc_conv_is_contiguous_expr (&cont_se, expr);
+	      if (span_only)
+		gfc_conv_span_is_elem_len (&cont_se, expr);
+	      else
+		gfc_conv_is_contiguous_expr (&cont_se, expr);
 	      gfc_add_block_to_block (&se->pre, &(&cont_se)->pre);
 	      gfc_add_modify (&se->pre, cont_var, cont_se.expr);
 	      gfc_add_block_to_block (&se->pre, &(&cont_se)->post);
@@ -7202,8 +7206,36 @@ is_subobject_ref (gfc_expr *e)
 }
 
 
-/* Return true if the actual argument E for the dummy FSYM may be passed as a
-   copy-in/copy-out temporary.  A pointer associated with a TARGET or POINTER
+/* Return true if expr is a span addressed dummy that is passed on as a whole,
+   rather than a reference to a subobject of the elements of an array.  */
+
+static bool
+is_whole_span_addressed_dummy (gfc_expr *e)
+{
+  return e->expr_type == EXPR_VARIABLE
+	 && e->symtree && e->symtree->n.sym
+	 && gfc_is_span_addressed_dummy (e->symtree->n.sym)
+	 && !is_subobject_ref (e);
+}
+
+
+/* Return true if the dummy fsym has an array descriptor and so addresses its
+   elements by the strides held in it.  Such a dummy accepts an actual
+   argument of any stride; only a dummy without a descriptor, or one declared
+   CONTIGUOUS, needs it packed into contiguous storage.  */
+
+static bool
+dummy_accepts_strided_arg (gfc_symbol *fsym, bool nodesc_arg)
+{
+  return fsym && !nodesc_arg && !fsym->attr.contiguous && fsym->as
+	 && (fsym->as->type == AS_ASSUMED_SHAPE
+	     || fsym->as->type == AS_ASSUMED_RANK
+	     || fsym->as->type == AS_DEFERRED);
+}
+
+
+/* Return true if the actual argument expr for the dummy fsym may be passed as
+   a copy-in/copy-out temporary.  A pointer associated with a TARGET or POINTER
    dummy must remain valid after the call, so the actual argument is passed
    directly, with a descriptor whose span provides the element spacing.  An
    actual argument with a vector subscript is not definable and its pointer
@@ -7215,7 +7247,7 @@ copy_in_out_allowed (gfc_symbol *fsym, gfc_expr *e, bool nodesc_arg)
   if (fsym == NULL || nodesc_arg || gfc_has_vector_subscript (e))
     return true;
 
-  if (gfc_is_span_addressed_dummy (fsym))
+  if (gfc_dummy_requires_direct_arg (fsym))
     return false;
 
   return !(fsym->attr.pointer && !fsym->attr.contiguous && fsym->as
@@ -8284,13 +8316,19 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
 		   is converted to a temporary, which is passed and then
 		   written back after the procedure call.  The elements of
 		   a span addressed dummy passed on as a whole are usually
-		   contiguous, so the copy is made conditional.  */
-		gfc_conv_subref_array_arg (&parmse, e, nodesc_arg,
+		   contiguous, so the copy is made conditional.  A dummy that
+		   has a descriptor takes any stride, so for it the condition
+		   is only that the span be the element length.  */
+		{
+		  bool whole_span = is_whole_span_addressed_dummy (e);
+		  gfc_conv_subref_array_arg (&parmse, e, nodesc_arg,
 				fsym ? fsym->attr.intent : INTENT_INOUT,
 				fsym && fsym->attr.pointer, fsym, sym->name,
-				NULL,
-				gfc_is_span_addressed_dummy (e->symtree->n.sym)
-				&& !is_subobject_ref (e));
+				NULL, whole_span, false,
+				whole_span
+				&& dummy_accepts_strided_arg (fsym,
+							      nodesc_arg));
+		}
 
 	      else if (e->ts.type == BT_CLASS && CLASS_DATA (e)->as
 		       && CLASS_DATA (e)->as->type == AS_ASSUMED_SIZE

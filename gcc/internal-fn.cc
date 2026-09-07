@@ -5722,32 +5722,7 @@ expand_FLOATTOBITINT (internal_fn, gcall *stmt)
   rtx arg0 = expand_normal (gimple_call_arg (stmt, 0));
   rtx arg1 = expand_normal (gimple_call_arg (stmt, 1));
   rtx arg2 = expand_normal (gimple_call_arg (stmt, 2));
-  const char *mname = GET_MODE_NAME (mode);
-  unsigned mname_len = strlen (mname);
-  int len = 12 + mname_len;
-  if (DECIMAL_FLOAT_MODE_P (mode))
-    len += 4;
-  char *libfunc_name = XALLOCAVEC (char, len);
-  char *p = libfunc_name;
-  const char *q;
-  if (DECIMAL_FLOAT_MODE_P (mode))
-    {
-#if ENABLE_DECIMAL_BID_FORMAT
-      memcpy (p, "__bid_fix", 9);
-#else
-      memcpy (p, "__dpd_fix", 9);
-#endif
-      p += 9;
-    }
-  else
-    {
-      memcpy (p, "__fix", 5);
-      p += 5;
-    }
-  for (q = mname; *q; q++)
-    *p++ = TOLOWER (*q);
-  memcpy (p, "bitint", 7);
-  rtx fun = init_one_libfunc (libfunc_name);
+  rtx fun = optab_libfunc (bitintfromfp_optab, mode);
   emit_library_call (fun, LCT_NORMAL, VOIDmode, arg0, ptr_mode, arg1,
 		     SImode, arg2, mode);
 }
@@ -5761,32 +5736,7 @@ expand_BITINTTOFLOAT (internal_fn, gcall *stmt)
   machine_mode mode = TYPE_MODE (TREE_TYPE (lhs));
   rtx arg0 = expand_normal (gimple_call_arg (stmt, 0));
   rtx arg1 = expand_normal (gimple_call_arg (stmt, 1));
-  const char *mname = GET_MODE_NAME (mode);
-  unsigned mname_len = strlen (mname);
-  int len = 14 + mname_len;
-  if (DECIMAL_FLOAT_MODE_P (mode))
-    len += 4;
-  char *libfunc_name = XALLOCAVEC (char, len);
-  char *p = libfunc_name;
-  const char *q;
-  if (DECIMAL_FLOAT_MODE_P (mode))
-    {
-#if ENABLE_DECIMAL_BID_FORMAT
-      memcpy (p, "__bid_floatbitint", 17);
-#else
-      memcpy (p, "__dpd_floatbitint", 17);
-#endif
-      p += 17;
-    }
-  else
-    {
-      memcpy (p, "__floatbitint", 13);
-      p += 13;
-    }
-  for (q = mname; *q; q++)
-    *p++ = TOLOWER (*q);
-  *p = '\0';
-  rtx fun = init_one_libfunc (libfunc_name);
+  rtx fun = optab_libfunc (bitinttofp_optab, mode);
   rtx target = expand_expr (lhs, NULL_RTX, VOIDmode, EXPAND_WRITE);
   rtx val = emit_library_call_value (fun, target, LCT_PURE, mode,
 				     arg0, ptr_mode, arg1, SImode);

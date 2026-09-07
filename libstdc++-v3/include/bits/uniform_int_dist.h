@@ -271,9 +271,20 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 	  _Up __low = _Up(__product);
 	  if (__low < __range)
 	    {
-	      _Up __threshold = -__range % __range;
+	      const _Up __threshold = -__range % __range;
 	      while (__low < __threshold)
 		{
+       		  __product = _Wp(__g() - __min) * _Wp(__range);
+		  __low = _Up(__product);
+
+		  // The algorithm is modified to alternate between rejecting
+		  // from the beginning and end of the range. This guarantees
+		  // that we stop for non-uniform engines that always result
+		  // in values below the __threshold.
+		  const _Up __back_treshold = _Up_traits::__max - __threshold;
+		  if (__low <= __back_treshold)
+		    break;
+
 		  __product = _Wp(__g() - __min) * _Wp(__range);
 		  __low = _Up(__product);
 		}

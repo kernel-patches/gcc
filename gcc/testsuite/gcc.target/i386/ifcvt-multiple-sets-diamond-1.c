@@ -1,27 +1,27 @@
 /* { dg-do run } */
 /* { dg-require-effective-target lp64 } */
 /* { dg-options "-O2 -mtune=generic -fdump-rtl-ce1" } */
-/* { dg-additional-options "--param=max-rtl-if-conversion-predictable-cost=100" } */
+/* { dg-additional-options "--param=max-rtl-if-conversion-insns=3 --param=max-rtl-if-conversion-predictable-cost=100 --param=max-rtl-if-conversion-unpredictable-cost=100" } */
 
-/* The single-set arm is the likely fallthrough block.  Speculative arithmetic
-   clobbers FLAGS, so each conditional move must re-materialize the
+/* The arms have disjoint live-out destinations.  The speculative xor
+   clobbers FLAGS, so the conversion must not reuse the incoming
    comparison.  */
 
-volatile long ga, gb;
+volatile long ga, gb, gd;
 
 __attribute__ ((noipa)) void
-f (long c, long x, long y, long b)
+f (long c, long x, long y, long a, long b, long d)
 {
-  long a;
-  if (__builtin_expect (c <= 7, 1))
-    a = y + 3;
-  else
+  if (__builtin_expect (c > 7, 0))
     {
       a = x + 1;
       b = y + 2;
     }
+  else
+    d = x ^ y;
   ga = a;
   gb = b;
+  gd = d;
 }
 
 /* Keep the runtime driver out of noce so that the dump count is specific to
@@ -33,9 +33,10 @@ main (void)
     for (long x = -8; x != 9; ++x)
       for (long y = -8; y != 9; ++y)
 	{
-	  f (c, x, y, 4);
-	  if (ga != (c > 7 ? x + 1 : y + 3)
-	      || gb != (c > 7 ? y + 2 : 4))
+	  f (c, x, y, 2, 4, 6);
+	  if (ga != (c > 7 ? x + 1 : 2)
+	      || gb != (c > 7 ? y + 2 : 4)
+	      || gd != (c > 7 ? 6 : (x ^ y)))
 	    __builtin_abort ();
 	}
   return 0;

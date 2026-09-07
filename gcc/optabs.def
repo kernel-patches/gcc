@@ -207,6 +207,9 @@ OPTAB_NL(unord_optab, NULL, UNORDERED, "unord", '2', gen_fp_libfunc)
 
 OPTAB_NL(powi_optab, NULL, UNKNOWN, "powi", '2', gen_fp_libfunc)
 
+OPTAB_NL(bitinttofp_optab, NULL, UNKNOWN, "float", '0', gen_bitint_fp_libfunc)
+OPTAB_NL(bitintfromfp_optab, NULL, UNKNOWN, "fix", '1', gen_bitint_fp_libfunc)
+
 /* These are all initialized individually, on a per-host basis.  */
 OPTAB_NC(sqrt_optab, "sqrt$a2", SQRT)
 OPTAB_NC(sync_old_add_optab, "sync_old_add$I$a", UNKNOWN)

@@ -514,6 +514,82 @@ span_addressed_array (tree expr)
 }
 
 
+/* Return true if the spacing of the elements of a directly passed actual
+   argument can be folded into the strides of the dummy's descriptor, so
+   that the elements are addressed by a constant element length instead of
+   by the span.  */
+
+bool
+gfc_span_folds_into_stride (gfc_symbol *sym)
+{
+  if (!gfc_dummy_requires_direct_arg (sym))
+    return false;
+
+  /* A character element length is not necessarily constant and a complex or
+     derived type can be larger than its alignment.  */
+  if (sym->ts.type != BT_INTEGER
+      && sym->ts.type != BT_REAL
+      && sym->ts.type != BT_LOGICAL)
+    return false;
+
+  /* An assumed rank dummy has no strides to fold the spacing into.  */
+  if (!sym->as || sym->as->type != AS_ASSUMED_SHAPE || sym->as->rank < 1)
+    return false;
+
+  tree etype = gfc_typenode_for_spec (&sym->ts);
+  tree size = etype ? TYPE_SIZE_UNIT (etype) : NULL_TREE;
+
+  return (size
+	  && tree_fits_uhwi_p (size)
+	  && tree_to_uhwi (size) == TYPE_ALIGN_UNIT (etype));
+}
+
+
+/* Check if a dummy argument must be addressed using the span of its
+   descriptor.  Where the spacing of the elements is folded into the strides
+   instead, the dummy is addressed like any other array and its descriptor is
+   built with the element length as span, so it is not span addressed.  */
+
+bool
+gfc_is_span_addressed_dummy (gfc_symbol *sym)
+{
+  return gfc_dummy_requires_direct_arg (sym)
+	 && !gfc_span_folds_into_stride (sym);
+}
+
+
+/* Set se->expr to a test that the span of the descriptor of ARG is the
+   element length, ie. that its elements are not subobjects of larger
+   ones.  */
+
+void
+gfc_conv_span_is_elem_len (gfc_se *se, gfc_expr *arg)
+{
+  gfc_se argse;
+  gfc_ss *ss;
+
+  if (arg->ts.type == BT_CLASS)
+    gfc_add_class_array_ref (arg);
+
+  ss = gfc_walk_expr (arg);
+  gcc_assert (ss != gfc_ss_terminator);
+
+  gfc_init_se (&argse, NULL);
+  argse.data_not_needed = 1;
+  gfc_conv_expr_descriptor (&argse, arg);
+  gfc_add_block_to_block (&se->pre, &argse.pre);
+  gfc_add_block_to_block (&se->post, &argse.post);
+  gfc_free_ss_chain (ss);
+
+  tree desc = gfc_evaluate_now (argse.expr, &se->pre);
+  tree span = gfc_conv_descriptor_span_get (desc);
+  tree elem_len = fold_convert (TREE_TYPE (span),
+				gfc_conv_descriptor_elem_len_get (desc));
+  se->expr = fold_build2_loc (input_location, EQ_EXPR, boolean_type_node,
+			      span, elem_len);
+}
+
+
 /* If the symbol or expression reference a CFI descriptor, return the
    pointer to the converted gfc descriptor. If an array reference is
    present as the last argument, check that it is the one applied to
@@ -7522,6 +7598,42 @@ gfc_trans_dummy_array_bias (gfc_symbol * sym, tree tmpdesc,
   /* Set the offset.  */
   if (VAR_P (GFC_TYPE_ARRAY_OFFSET (type)))
     gfc_add_modify (&init, GFC_TYPE_ARRAY_OFFSET (type), offset);
+
+  /* Fold the element spacing of the actual argument into the strides and the
+     offset, so that the elements are addressed by the constant element length
+     rather than by a span loaded from the descriptor.  */
+  if (DECL_LANG_SPECIFIC (tmpdesc) && GFC_DECL_SPAN_NORMALIZED (tmpdesc))
+    {
+      tree element = fold_convert (gfc_array_index_type,
+				   TYPE_SIZE_UNIT (gfc_get_element_type (type)));
+      tree span = gfc_evaluate_now (gfc_conv_descriptor_span_get (dumdesc),
+				    &init);
+      tree unit = fold_build2_loc (input_location, EQ_EXPR, logical_type_node,
+				   span, element);
+      tree factor = fold_build2_loc (input_location, TRUNC_DIV_EXPR,
+				     gfc_array_index_type, span, element);
+      factor = gfc_evaluate_now (factor, &init);
+
+      auto scale = [&] (tree var)
+	{
+	  tree scaled = fold_build2_loc (input_location, MULT_EXPR,
+					 gfc_array_index_type, var, factor);
+	  scaled = fold_build3_loc (input_location, COND_EXPR,
+				    gfc_array_index_type, unit, var, scaled);
+	  gfc_add_modify (&init, var, scaled);
+	};
+
+      /* A span addressed dummy is never repacked, so its strides and its
+	 offset are all variables loaded from the descriptor.  */
+      for (n = 0; n < as->rank; n++)
+	{
+	  gcc_assert (VAR_P (GFC_TYPE_ARRAY_STRIDE (type, n)));
+	  scale (GFC_TYPE_ARRAY_STRIDE (type, n));
+	}
+
+      gcc_assert (VAR_P (GFC_TYPE_ARRAY_OFFSET (type)));
+      scale (GFC_TYPE_ARRAY_OFFSET (type));
+    }
 
   /* Load the span once here, like the bounds above, so that element
      addressing does not reload it from the descriptor.  The descriptor

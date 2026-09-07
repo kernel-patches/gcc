@@ -158,4 +158,11 @@ extern "C" __int128 __gg__int128_to_int128_rounded( cbl_round_t rounded,
                                                     __int128    factor,
                                                     int        *compute_error);
 
+extern "C" int __gg__move_literala( cblc_field_t *field,
+                                    size_t        field_offset,
+                                    size_t        field_size,
+                                    cbl_round_t   rounded_,
+                                    const char   *str,
+                                    size_t        strlen );
+
 #endif

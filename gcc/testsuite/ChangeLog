@@ -1,3 +1,84 @@
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.target/i386/truncsfbf-3.c: Do not override
+	asynchronous-unwind-tables on Darwin.
+	* gcc.target/i386/truncsfbf-4.c: Likewise.
+	* gcc.target/i386/truncsfbf-5.c: Require avxneconvert.
+	* gcc.target/i386/truncsfbf-6.c: Require avx512vl.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.target/i386/pr36502.c: Add -mdynamic-no-pic for Darwin.
+	* gcc.target/i386/pr85667-6.c: Likewise.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.dg/lto/pr113197_0.c: Skip for Darwin.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.dg/lto/pr99849_0.c: Allo baz and qux to be undefined at
+	static-link time.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.dg/lto/attr-weakref-2_0.c: Undefine '__weak' for this
+	test.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.dg/lto/pr64415_0.c: Add -shared to the Darwin options.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* gcc.dg/vect/vect-early-break_109-pr113588.c: Define
+	MAP_ANONYMOUS to MAP_ANON on Darwin, where needed.
+	* gcc.dg/vect/vect-early-break_130.c: Likewise.
+	* gcc.dg/vect/vect-multi-peel-gaps.c:: Likewise.
+	* gcc.dg/vect/vect-pr124037.c:: Likewise.
+	* gcc.dg/vect/vect-early-break_137-pr121190.c: Define
+	MAP_ANONYMOUS to MAP_ANON on Darwin, where needed. Require
+	AVX2.
+	* gcc.dg/vect/vect-early-break_138-pr121020.c:: Likewise.
+	* gcc.dg/vect/vect-reduc-in-order-1.c: Do not XFAIL the
+	run on Darwin.
+	* gcc.dg/vect/vect-reduc-in-order-2.c: Likewise.
+	* gcc.dg/vect/vect-reduc-in-order-3.c: Likewise.
+	* gcc.dg/vect/vect-reduc-in-order-4.c: Likewise.
+
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* cobol.dg/group2/EXIT_PERFORM_CYCLE.cob: Removed.
+	* cobol.dg/group2/EXIT_PERFORM_CYCLE.out: Removed.
+
+2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
+
+	* algol68/execute/whole-1.a68: Allow 2x timeout.
+	* lib/algol68.exp: Add support for dg-timeout-factor.
+
+2026-09-06  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* gfortran.dg/associated_target_9.f90: New test.
+
+2026-09-06  Robert Dubner  <rdubner@symas.com>
+
+	* cobol.dg/group2/Checking_IS_NUMERIC__2_.cob: New test.
+	* cobol.dg/group2/Checking_IS_NUMERIC__2_.out: New test.
+	* cobol.dg/group2/EXIT_PERFORM__times__CYCLE.cob: New test.
+	* cobol.dg/group2/EXIT_PERFORM__times__CYCLE.out: New test.
+	* cobol.dg/group2/EXIT_PERFORM__until__CYCLE.cob: New test.
+	* cobol.dg/group2/EXIT_PERFORM__until__CYCLE.out: New test.
+	* cobol.dg/group2/ROUNDED_to_PIC_999.cob: New test.
+	* cobol.dg/group2/ROUNDED_to_PIC_999.out: New test.
+	* cobol.dg/group2/ROUNDED_to_PIC_999v9.cob: New test.
+	* cobol.dg/group2/ROUNDED_to_PIC_999v9.out: New test.
+
+2026-09-06  wangjue  <juewang@linux.alibaba.com>
+
+	* gcc.target/riscv/ifcvt-parallel-cost-1.c: New test.
+	* gcc.target/riscv/ifcvt-parallel-cost-2.c: Likewise.
+
 2026-09-05  Jin Ma  <jinma@linux.alibaba.com>
 
 	PR target/126196

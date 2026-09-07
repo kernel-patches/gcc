@@ -1,41 +1,58 @@
 /* { dg-do run } */
-/* { dg-options "-O2 --param=max-rtl-if-conversion-unpredictable-cost=100 -fdump-rtl-ce1" } */
+/* { dg-options "-O2 -fno-ssa-phiopt -fno-tree-ter -fno-tree-coalesce-vars -fdump-rtl-ce1" } */
+/* { dg-additional-options "--param=max-rtl-if-conversion-unpredictable-cost=100 --param=max-rtl-if-conversion-predictable-cost=100" } */
 
-volatile long ga, gt, ge;
+volatile long ga, gt, ge, gw;
 
 __attribute__ ((noipa)) void
-convertible (long c, long p, long q)
+disjoint_arm_values (long a, long b, long c, long d, long s,
+		     long x, long y, long z, long w)
 {
-  long a, t;
-  if (c > 7)
+  if (s > 0)
     {
-      a = p + 1;
-      t = q + 2;
+      x = a;
+      y = b - 2;
     }
   else
     {
-      a = p - 3;
-      t = q - 4;
+      z = c;
+      w = d - 4;
     }
-  ga = a;
-  gt = t;
+  ga = x;
+  gt = y;
+  ge = z;
+  gw = w;
 }
 
+/* Each arm has one set and defines a different live-out destination.  */
 __attribute__ ((noipa)) void
-reject_arm_only_values (long c, long p, long q, long t, long e)
+single_set_arms (long c, long a, long b, long x, long y)
 {
-  long a;
-  if (c > 7)
+  if (c > 0)
+    x = a + 1;
+  else
+    y = b - 1;
+  ga = x;
+  gt = y;
+}
+
+/* The arms share X through register copies and compute distinct live-out
+   destinations.  */
+__attribute__ ((noipa)) void
+partially_overlapping_values (long c, long a, long b,
+			      long x, long t, long e)
+{
+  if (c > 0)
     {
-      a = p + 1;
-      t = q + 2;
+      x = a;
+      t = b + 1;
     }
   else
     {
-      a = p - 3;
-      e = q - 4;
+      x = b;
+      e = a - 1;
     }
-  ga = a;
+  ga = x;
   gt = t;
   ge = e;
 }
@@ -43,23 +60,27 @@ reject_arm_only_values (long c, long p, long q, long t, long e)
 __attribute__ ((optimize ("O0"))) int
 main (void)
 {
-  convertible (8, 10, 20);
-  if (ga != 11 || gt != 22)
+  disjoint_arm_values (10, 20, 30, 40, 1, 50, 60, 70, 80);
+  if (ga != 10 || gt != 18 || ge != 70 || gw != 80)
     __builtin_abort ();
-  convertible (7, 10, 20);
-  if (ga != 7 || gt != 16)
+  disjoint_arm_values (10, 20, 30, 40, 0, 50, 60, 70, 80);
+  if (ga != 50 || gt != 60 || ge != 30 || gw != 36)
     __builtin_abort ();
 
-  reject_arm_only_values (8, 10, 20, 31, 47);
-  if (ga != 11 || gt != 22 || ge != 47)
+  single_set_arms (1, 10, 20, 30, 40);
+  if (ga != 11 || gt != 40)
     __builtin_abort ();
-  reject_arm_only_values (7, 10, 20, 31, 47);
-  if (ga != 7 || gt != 31 || ge != 16)
+  single_set_arms (0, 10, 20, 30, 40);
+  if (ga != 30 || gt != 19)
+    __builtin_abort ();
+
+  partially_overlapping_values (1, 10, 20, 30, 40, 50);
+  if (ga != 10 || gt != 21 || ge != 50)
+    __builtin_abort ();
+  partially_overlapping_values (0, 10, 20, 30, 40, 50);
+  if (ga != 20 || gt != 40 || ge != 9)
     __builtin_abort ();
   return 0;
 }
 
-/* The first diamond is handled by the existing conditional-move path.  The
-   second must be rejected because each arm has a live-out value not assigned
-   by the other arm.  */
-/* { dg-final { scan-rtl-dump-not "if-conversion succeeded through noce_convert_multiple_sets" "ce1" } } */
+/* { dg-final { scan-rtl-dump-times "if-conversion succeeded through noce_convert_multiple_sets" 3 "ce1" } } */
