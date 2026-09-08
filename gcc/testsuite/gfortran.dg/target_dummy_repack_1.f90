@@ -1,8 +1,9 @@
 ! { dg-do run }
 ! { dg-options "-fdump-tree-original" }
 ! PR126964
-! The spacing of the elements of a numeric TARGET assumed-shape dummy is
-! folded into the strides of its descriptor on entry, so the dummy is not
+! The spacing of the elements of a numeric TARGET assumed-shape dummy whose
+! element length is its alignment is folded into the strides of its
+! descriptor on entry, so the dummy is not
 ! addressed through its span and its elements are not subobjects of larger
 ! ones.  Passing it on to a dummy that has a descriptor of its own therefore
 ! needs neither a copy nor a test.  Testing full contiguity instead made a
@@ -73,5 +74,5 @@ program p
 end program
 
 ! The dummy is passed on directly: no copy and no test of its span.
-! { dg-final { scan-tree-dump-not "contiguous\\.\[0-9\]+" "original" } }
-! { dg-final { scan-tree-dump-not "atmp\\.\[0-9\]+" "original" } }
+! { dg-final { scan-tree-dump-not "contiguous\\.\[0-9\]+" "original" { target natural_alignment_32 } } }
+! { dg-final { scan-tree-dump-not "atmp\\.\[0-9\]+" "original" { target natural_alignment_32 } } }

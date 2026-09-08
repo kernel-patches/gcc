@@ -2667,8 +2667,8 @@
         (sign_extend:GPI (match_operand:SHORT 1 "nonimmediate_operand")))]
   ""
   {@ [ cons: =0 , 1 ; attrs: type , arch ]
-     [ r        , r ; extend      , *    ] sxt<SHORT:size>\t%<GPI:w>0, %w1
-     [ r        , m ; load_4      , *    ] ldrs<SHORT:size>\t%<GPI:w>0, %1
+     [ r        , r ; extend      , *    ] sxt<SHORT:extsize>\t%<GPI:w>0, %w1
+     [ r        , m ; load_4      , *    ] ldrs<SHORT:extsize>\t%<GPI:w>0, %1
      [ r        , w ; neon_to_gp  , fp   ] smov\t%<GPI:w>0, %1.<SHORT:size>[0]
   }
 )
@@ -3192,7 +3192,7 @@
    (set (match_operand:GPI 0 "register_operand" "=r")
 	(plus:GPI (ANY_EXTEND:GPI (match_dup 1)) (match_dup 2)))]
   ""
-  "adds\\t%<GPI:w>0, %<GPI:w>2, %w1, <su>xt<ALLX:size>"
+  "adds\\t%<GPI:w>0, %<GPI:w>2, %w1, <su>xt<ALLX:extsize>"
   [(set_attr "type" "alus_ext")]
 )
 
@@ -3206,7 +3206,7 @@
    (set (match_operand:GPI 0 "register_operand" "=r")
 	(minus:GPI (match_dup 1) (ANY_EXTEND:GPI (match_dup 2))))]
   ""
-  "subs\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:size>"
+  "subs\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:extsize>"
   [(set_attr "type" "alus_ext")]
 )
 
@@ -3224,7 +3224,7 @@
 			      (match_dup 2))
 		  (match_dup 3)))]
   ""
-  "adds\\t%<GPI:w>0, %<GPI:w>3, %w1, <su>xt<ALLX:size> %2"
+  "adds\\t%<GPI:w>0, %<GPI:w>3, %w1, <su>xt<ALLX:extsize> %2"
   [(set_attr "type" "alus_ext")]
 )
 
@@ -3242,7 +3242,7 @@
 		   (ashift:GPI (ANY_EXTEND:GPI (match_dup 2))
 			       (match_dup 3))))]
   ""
-  "subs\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:size> %3"
+  "subs\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:extsize> %3"
   [(set_attr "type" "alus_ext")]
 )
 
@@ -3308,7 +3308,7 @@
 	(plus:GPI (ANY_EXTEND:GPI (match_operand:ALLX 1 "register_operand" "r"))
 		  (match_operand:GPI 2 "register_operand" "r")))]
   ""
-  "add\\t%<GPI:w>0, %<GPI:w>2, %w1, <su>xt<ALLX:size>"
+  "add\\t%<GPI:w>0, %<GPI:w>2, %w1, <su>xt<ALLX:extsize>"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3319,7 +3319,7 @@
          (plus:SI (ANY_EXTEND:SI (match_operand:SHORT 1 "register_operand" "r"))
 		  (match_operand:GPI 2 "register_operand" "r"))))]
   ""
-  "add\\t%w0, %w2, %w1, <su>xt<SHORT:size>"
+  "add\\t%w0, %w2, %w1, <su>xt<SHORT:extsize>"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3330,7 +3330,7 @@
 			      (match_operand 2 "aarch64_imm3" "Ui3"))
 		  (match_operand:GPI 3 "register_operand" "r")))]
   ""
-  "add\\t%<GPI:w>0, %<GPI:w>3, %w1, <su>xt<ALLX:size> %2"
+  "add\\t%<GPI:w>0, %<GPI:w>3, %w1, <su>xt<ALLX:extsize> %2"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3343,7 +3343,7 @@
 			     (match_operand 2 "aarch64_imm3" "Ui3"))
 		  (match_operand:SI 3 "register_operand" "r"))))]
   ""
-  "add\\t%w0, %w3, %w1, <su>xt<SHORT:size> %2"
+  "add\\t%w0, %w3, %w1, <su>xt<SHORT:extsize> %2"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3959,7 +3959,7 @@
 		   (ANY_EXTEND:GPI
 		    (match_operand:ALLX 2 "register_operand" "r"))))]
   ""
-  "sub\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:size>"
+  "sub\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:extsize>"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3971,7 +3971,7 @@
 		   (ANY_EXTEND:SI
 		    (match_operand:SHORT 2 "register_operand" "r")))))]
   ""
-  "sub\\t%w0, %w1, %w2, <su>xt<SHORT:size>"
+  "sub\\t%w0, %w1, %w2, <su>xt<SHORT:extsize>"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3982,7 +3982,7 @@
 				(match_operand:ALLX 2 "register_operand" "r"))
 			       (match_operand 3 "aarch64_imm3" "Ui3"))))]
   ""
-  "sub\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:size> %3"
+  "sub\\t%<GPI:w>0, %<GPI:w>1, %w2, <su>xt<ALLX:extsize> %3"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -3995,7 +3995,7 @@
 			       (match_operand:SHORT 2 "register_operand" "r"))
 			      (match_operand 3 "aarch64_imm3" "Ui3")))))]
   ""
-  "sub\\t%w0, %w1, %w2, <su>xt<SHORT:size> %3"
+  "sub\\t%w0, %w1, %w2, <su>xt<SHORT:extsize> %3"
   [(set_attr "type" "alu_ext")]
 )
 
@@ -4714,7 +4714,7 @@
 			 (match_operand:ALLX 0 "register_operand" "r"))
 			(match_operand:GPI 1 "register_operand" "r")))]
   ""
-  "cmp\\t%<GPI:w>1, %w0, <su>xt<ALLX:size>"
+  "cmp\\t%<GPI:w>1, %w0, <su>xt<ALLX:extsize>"
   [(set_attr "type" "alus_ext")]
 )
 
@@ -4726,7 +4726,7 @@
 			 (match_operand 1 "aarch64_imm3" "Ui3"))
 	(match_operand:GPI 2 "register_operand" "r")))]
   ""
-  "cmp\\t%<GPI:w>2, %w0, <su>xt<ALLX:size> %1"
+  "cmp\\t%<GPI:w>2, %w0, <su>xt<ALLX:extsize> %1"
   [(set_attr "type" "alus_ext")]
 )
 

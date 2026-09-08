@@ -1,3 +1,66 @@
+2026-09-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* gfortran.dg/target_dummy_span_2.f90: New test.
+	* gfortran.dg/c_loc_test_22.f90: Expect the addressing of the
+	target.
+	* gfortran.dg/gomp/target-span-1.f90: Likewise.
+	* gfortran.dg/target_dummy_repack_1.f90: Likewise.
+	* gfortran.dg/target_dummy_span_1.f90: Likewise.
+	* gfortran.dg/class_to_type_9.f90: Do not assert whether an
+	assumed shape dummy is passed the strides or a copy.
+
+2026-09-07  Tobias Burnus  <tburnus@baylibre.com>
+
+	* gfortran.dg/gomp/underscore_directives-2.f90: New test.
+	* gfortran.dg/gomp/underscore_directives.f90: New test.
+
+2026-09-07  Roger Sayle  <roger@nextmovesoftware.com>
+
+	* gcc.target/i386/builtin-bitreverse-1.c: New test case.
+
+2026-09-07  Richard Earnshaw  <rearnsha@arm.com>
+
+	PR target/111609
+	* gcc.target/arm/vfp-shift-a2t2.c: Fix test and simplify match
+	patterns.
+
+2026-09-07  Andrew Stubbs  <ams@baylibre.com>
+
+	* gcc.target/gcn/avgpr-spill-double.c: Switch to vector type.
+	* gcc.target/gcn/avgpr-spill-int.c: Likewise.
+	* gcc.target/gcn/avgpr-spill-long.c: Likewise.
+	* gcc.target/gcn/avgpr-spill-short.c: Likewise.
+	* gcc.target/gcn/sgpr-spill-double.c: New test.
+	* gcc.target/gcn/sgpr-spill-int.c: New test.
+	* gcc.target/gcn/sgpr-spill-long.c: New test.
+	* gcc.target/gcn/sgpr-spill-short.c: New test.
+
+2026-09-07  Kyrylo Tkachov  <ktkachov@nvidia.com>
+	    Cui Lili  <lili.cui@intel.com>
+
+	PR tree-optimization/125557
+	* gcc.target/aarch64/ifcvt_multiple_sets_diamond_4.c: Test disjoint,
+	partially overlapping, and one-set outputs.
+	* gcc.target/aarch64/ifcvt_multiple_sets_diamond_5.c: Update expected
+	code generation for the fixed arm order.
+	* gcc.target/aarch64/ifcvt_multiple_sets_diamond_6.c: New test.
+	* gcc.target/aarch64/ifcvt_multiple_sets_diamond_7.c: New test.
+	* gcc.target/i386/ifcvt-multiple-sets-diamond-1.c: Test disjoint outputs
+	with a condition-code clobber.
+
+2026-09-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* gfortran.dg/target_dummy_repack_1.f90: New test.
+	* gfortran.dg/target_dummy_repack_2.f90: New test.
+	* gfortran.dg/target_dummy_span_1.f90: New test.
+	* gfortran.dg/c_loc_test_22.f90: Update for addressing by the
+	element length.
+	* gfortran.dg/gomp/target-span-1.f90: Likewise.
+	* gfortran.dg/class_to_type_9.f90: Likewise, and expect an
+	assumed shape dummy to take no copy of a strided actual argument.
+
 2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
 
 	* gcc.target/i386/truncsfbf-3.c: Do not override

@@ -12900,7 +12900,6 @@ instantiate_class_template (tree type)
   tree pbinfo;
   tree base_list;
   unsigned int saved_maximum_field_alignment;
-  tree fn_context;
 
   if (type == error_mark_node)
     return error_mark_node;
@@ -12961,20 +12960,7 @@ instantiate_class_template (tree type)
 
   maybe_diagnose_erroneous_template (t ? TI_TEMPLATE (t) : templ);
 
-  int saved_unevaluated_operand = cp_unevaluated_operand;
-  int saved_inhibit_evaluation_warnings = c_inhibit_evaluation_warnings;
-
-  fn_context = decl_function_context (TYPE_MAIN_DECL (type));
-  /* Also avoid push_to_top_level for a lambda in an NSDMI.  */
-  if (!fn_context && LAMBDA_TYPE_P (type) && TYPE_CLASS_SCOPE_P (type))
-    fn_context = error_mark_node;
-  if (!fn_context)
-    push_to_top_level ();
-  else
-    {
-      cp_unevaluated_operand = 0;
-      c_inhibit_evaluation_warnings = 0;
-    }
+  bool push_to_top = maybe_push_to_top_level (TYPE_MAIN_DECL (type));
 
   mark_template_arguments_used (templ, CLASSTYPE_TI_ARGS (type));
 
@@ -13385,14 +13371,6 @@ instantiate_class_template (tree type)
 	}
     }
 
-  if (fn_context)
-    {
-      /* Restore these before substituting into the lambda capture
-	 initializers.  */
-      cp_unevaluated_operand = saved_unevaluated_operand;
-      c_inhibit_evaluation_warnings = saved_inhibit_evaluation_warnings;
-    }
-
   /* Set the file and line number information to whatever is given for
      the class itself.  This puts error messages involving generated
      implicit functions at a predictable point, and the same point
@@ -13432,8 +13410,7 @@ instantiate_class_template (tree type)
   popclass ();
   pop_scope (pushed_scope);
   maximum_field_alignment = saved_maximum_field_alignment;
-  if (!fn_context)
-    pop_from_top_level ();
+  maybe_pop_from_top_level (push_to_top);
   pop_tinst_level ();
 
   /* The vtable for a template class can be emitted in any translation
@@ -23098,7 +23075,7 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
 	    tree operand;
 	    tree uneval;
 	    {
-	      cp_unevaluated u;
+	      cp_unevaluated u (/* typeid_operand= */ true);
 	      uneval = RECUR (operand_0);
 	    }
 	    /* If we're already within an unevaluated operand, everything

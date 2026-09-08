@@ -1411,23 +1411,23 @@
   "register_operand (operands[0], SFmode)
    || register_operand (operands[1], SFmode)"
   {@ [cons: =0, 1; attrs: type, length]
-     [D, Gz; move  , 2] movi.n\t%0, 0
-     [a, Gz; move  , 3] movi\t%0, 0
-     [f, Gc; farith, 3] const.s\t%0, %G1
-     [W, iF; move  , 6] const16\t%0, %t1\;const16\t%0, %b1
-     [a,  Y; load  , 3] movi\t%0, %y1
-     [a,  T; load  , 3] %v1l32r\t%0, %1
-     [D,  d; move  , 2] mov.n\t%0, %1
-     [a,  r; move  , 3] mov\t%0, %1
-     [f,  f; farith, 3] mov.s\t%0, %1
-     [f,  r; farith, 3] wfr\t%0, %1
-     [a,  f; farith, 3] rfr\t%0, %1
-     [D,  R; load  , 2] %v1l32i.n\t%0, %1
-     [a,  U; load  , 3] %v1l32i\t%0, %1
-     [f,  U; fload , 3] %v1lsi\t%0, %1
-     [R,  d; store , 2] %v0s32i.n\t%1, %0
-     [U,  r; store , 3] %v0s32i\t%1, %0
-     [U,  f; fstore, 3] %v0ssi\t%1, %0
+     [ D, Gz; move  , 2] movi.n\t%0, 0
+     [ a, Gz; move  , 3] movi\t%0, 0
+     [ f, Gc; farith, 3] const.s\t%0, %G1
+     [ W, iF; move  , 6] const16\t%0, %t1\;const16\t%0, %b1
+     [ a,  Y; load  , 3] movi\t%0, %y1
+     [ a,  T; load  , 3] %v1l32r\t%0, %1
+     [ D,  d; move  , 2] mov.n\t%0, %1
+     [ a,  r; move  , 3] mov\t%0, %1
+     [ f,  f; farith, 3] mov.s\t%0, %1
+     [ f,  r; farith, 3] wfr\t%0, %1
+     [ a,  f; farith, 3] rfr\t%0, %1
+     [ D,  R; load  , 2] %v1l32i.n\t%0, %1
+     [ a,  U; load  , 3] %v1l32i\t%0, %1
+     [*f,  U; fload , 3] %v1lsi\t%0, %1
+     [ R,  d; store , 2] %v0s32i.n\t%1, %0
+     [ U,  r; store , 3] %v0s32i\t%1, %0
+     [ U, *f; fstore, 3] %v0ssi\t%1, %0
   }
   [(set_attr "mode" "SF")])
 

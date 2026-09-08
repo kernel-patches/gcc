@@ -1400,8 +1400,9 @@ store_fixed_bit_field_1 (rtx op0, scalar_int_mode mode,
 
   if (! all_zero)
     {
-      temp = expand_binop (mode, ior_optab, temp, value,
-			   NULL_RTX, 1, OPTAB_LIB_WIDEN);
+      /* Use aop_optab if the field has been cleared.  */
+      temp = expand_binop (mode, all_one ? ior_optab : aop_optab,
+			   temp, value, NULL_RTX, 1, OPTAB_LIB_WIDEN);
       temp = force_reg (mode, temp);
     }
 

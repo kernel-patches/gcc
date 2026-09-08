@@ -9127,7 +9127,7 @@ vect_slp_analyze_node_operations (vec_info *vinfo, slp_tree node,
 
 	  /* Make sure we can generate them and then cost them.  */
 	  unsigned nvectors, excess_elts;
-	  if (!vect_get_num_copies_for_invariant (vinfo, node, &nvectors,
+	  if (!vect_get_num_copies_for_invariant (vinfo, child, &nvectors,
 						  &excess_elts))
 	    return false;
 	  vect_prologue_cost_for_slp (child, nvectors, cost_vec);

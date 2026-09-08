@@ -1049,13 +1049,23 @@ decode_omp_directive (void)
     case 'd':
       matchdo ("declare mapper", gfc_match_omp_declare_mapper,
 	       ST_OMP_DECLARE_MAPPER);
+      matchdo ("declare_mapper", gfc_match_omp_declare_mapper,
+	       ST_OMP_DECLARE_MAPPER);
       matchds ("declare reduction", gfc_match_omp_declare_reduction,
+	       ST_OMP_DECLARE_REDUCTION);
+      matchds ("declare_reduction", gfc_match_omp_declare_reduction,
 	       ST_OMP_DECLARE_REDUCTION);
       matchds ("declare simd", gfc_match_omp_declare_simd,
 	       ST_OMP_DECLARE_SIMD);
+      matchds ("declare_simd", gfc_match_omp_declare_simd,
+	       ST_OMP_DECLARE_SIMD);
       matchdo ("declare target", gfc_match_omp_declare_target,
 	       ST_OMP_DECLARE_TARGET);
+      matchdo ("declare_target", gfc_match_omp_declare_target,
+	       ST_OMP_DECLARE_TARGET);
       matchdo ("declare variant", gfc_match_omp_declare_variant,
+	       ST_OMP_DECLARE_VARIANT);
+      matchdo ("declare_variant", gfc_match_omp_declare_variant,
 	       ST_OMP_DECLARE_VARIANT);
       break;
     case 'e':
@@ -1115,6 +1125,8 @@ decode_omp_directive (void)
       break;
     case 'c':
       matcho ("cancellation% point", gfc_match_omp_cancellation_point,
+	      ST_OMP_CANCELLATION_POINT);
+      matcho ("cancellation_point", gfc_match_omp_cancellation_point,
 	      ST_OMP_CANCELLATION_POINT);
       matcho ("cancel", gfc_match_omp_cancel, ST_OMP_CANCEL);
       matcho ("critical", gfc_match_omp_critical, ST_OMP_CRITICAL);
@@ -1186,6 +1198,7 @@ decode_omp_directive (void)
       matcho ("end sections", gfc_match_omp_end_nowait, ST_OMP_END_SECTIONS);
       matcho ("end single", gfc_match_omp_end_single, ST_OMP_END_SINGLE);
       matcho ("end target data", gfc_match_omp_eos_error, ST_OMP_END_TARGET_DATA);
+      matcho ("end target_data", gfc_match_omp_eos_error, ST_OMP_END_TARGET_DATA);
       matchs ("end target parallel do simd", gfc_match_omp_end_nowait,
 	      ST_OMP_END_TARGET_PARALLEL_DO_SIMD);
       matcho ("end target parallel do", gfc_match_omp_end_nowait,
@@ -1306,9 +1319,14 @@ decode_omp_directive (void)
       break;
     case 't':
       matcho ("target data", gfc_match_omp_target_data, ST_OMP_TARGET_DATA);
+      matcho ("target_data", gfc_match_omp_target_data, ST_OMP_TARGET_DATA);
       matcho ("target enter data", gfc_match_omp_target_enter_data,
 	      ST_OMP_TARGET_ENTER_DATA);
+      matcho ("target_enter_data", gfc_match_omp_target_enter_data,
+	      ST_OMP_TARGET_ENTER_DATA);
       matcho ("target exit data", gfc_match_omp_target_exit_data,
+	      ST_OMP_TARGET_EXIT_DATA);
+      matcho ("target_exit_data", gfc_match_omp_target_exit_data,
 	      ST_OMP_TARGET_EXIT_DATA);
       matchs ("target parallel do simd", gfc_match_omp_target_parallel_do_simd,
 	      ST_OMP_TARGET_PARALLEL_DO_SIMD);
@@ -1334,6 +1352,8 @@ decode_omp_directive (void)
 	      ST_OMP_TARGET_TEAMS_LOOP);
       matcho ("target teams", gfc_match_omp_target_teams, ST_OMP_TARGET_TEAMS);
       matcho ("target update", gfc_match_omp_target_update,
+	      ST_OMP_TARGET_UPDATE);
+      matcho ("target_update", gfc_match_omp_target_update,
 	      ST_OMP_TARGET_UPDATE);
       matcho ("target", gfc_match_omp_target, ST_OMP_TARGET);
       matcho ("taskgroup", gfc_match_omp_taskgroup, ST_OMP_TASKGROUP);

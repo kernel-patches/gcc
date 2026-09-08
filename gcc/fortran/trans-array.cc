@@ -87,6 +87,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h" /* For lookup_attribute.  */
 #include "trans.h"
 #include "fold-const.h"
+#include "stor-layout.h" /* For min_align_of_type.  */
 #include "constructor.h"
 #include "trans-types.h"
 #include "trans-array.h"
@@ -541,7 +542,7 @@ gfc_span_folds_into_stride (gfc_symbol *sym)
 
   return (size
 	  && tree_fits_uhwi_p (size)
-	  && tree_to_uhwi (size) == TYPE_ALIGN_UNIT (etype));
+	  && tree_to_uhwi (size) == min_align_of_type (etype));
 }
 
 

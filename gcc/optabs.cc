@@ -1632,6 +1632,16 @@ expand_binop (machine_mode mode, optab binoptab, rtx op0, rtx op1,
 	}
     }
 
+  /* If backend's machine description doesn't specify an any_or_plus
+     (AOP) preference, choose for it.  */
+  if (binoptab == aop_optab)
+    {
+      binoptab = (mode == word_mode || mode == SImode) ? add_optab
+						       : ior_optab;
+      return expand_binop (mode, binoptab, op0, op1,
+			   target, unsignedp, methods);
+    }
+
   /* If this is a vector shift by a scalar, see if we can do a vector
      shift by a vector.  If so, broadcast the scalar into a vector.  */
   if (mclass == MODE_VECTOR_INT)
@@ -1975,7 +1985,7 @@ expand_binop (machine_mode mode, optab binoptab, rtx op0, rtx op1,
 				     NULL_RTX, unsignedp, next_methods);
 
 	  if (into_temp1 != 0 && into_temp2 != 0)
-	    inter = expand_binop (word_mode, add_optab, into_temp1, into_temp2,
+	    inter = expand_binop (word_mode, aop_optab, into_temp1, into_temp2,
 				  into_target, unsignedp, next_methods);
 	  else
 	    inter = 0;
@@ -1991,7 +2001,7 @@ expand_binop (machine_mode mode, optab binoptab, rtx op0, rtx op1,
 				      NULL_RTX, unsignedp, next_methods);
 
 	  if (inter != 0 && outof_temp1 != 0 && outof_temp2 != 0)
-	    inter = expand_binop (word_mode, add_optab,
+	    inter = expand_binop (word_mode, aop_optab,
 				  outof_temp1, outof_temp2,
 				  outof_target, unsignedp, next_methods);
 
@@ -3029,7 +3039,7 @@ expand_bitreverse (scalar_int_mode mode, rtx op0, rtx target)
 				NULL_RTX, true, OPTAB_LIB_WIDEN);
       if (lo == NULL_RTX) goto fail;
 
-      x = expand_binop (mode, ior_optab, hi, lo,
+      x = expand_binop (mode, aop_optab, hi, lo,
 			NULL_RTX, true, OPTAB_LIB_WIDEN);
       if (x == NULL_RTX) goto fail;
     }
@@ -3056,7 +3066,7 @@ expand_bitreverse (scalar_int_mode mode, rtx op0, rtx target)
 			      NULL_RTX, true, OPTAB_LIB_WIDEN);
     if (lo == NULL_RTX) goto fail;
 
-    x = expand_binop (mode, ior_optab, hi, lo,
+    x = expand_binop (mode, aop_optab, hi, lo,
 		      NULL_RTX, true, OPTAB_LIB_WIDEN);
     if (x == NULL_RTX) goto fail;
   }
@@ -3084,7 +3094,7 @@ expand_bitreverse (scalar_int_mode mode, rtx op0, rtx target)
 			      NULL_RTX, true, OPTAB_LIB_WIDEN);
     if (lo == NULL_RTX) goto fail;
 
-    x = expand_binop (mode, ior_optab, hi, lo,
+    x = expand_binop (mode, aop_optab, hi, lo,
 		      target, true, OPTAB_LIB_WIDEN);
     if (x == NULL_RTX) goto fail;
   }

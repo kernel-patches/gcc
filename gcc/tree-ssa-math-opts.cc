@@ -4932,12 +4932,16 @@ match_arith_overflow (gimple_stmt_iterator *gsi, gimple *stmt,
 	    }
 	}
     }
+  internal_fn ifn = (code == MULT_EXPR
+		     ? IFN_MUL_OVERFLOW
+		     : code != MINUS_EXPR
+		     ? IFN_ADD_OVERFLOW : IFN_SUB_OVERFLOW);
+  if (code != MINUS_EXPR
+      && tree_swap_operands_p (rhs1, rhs2))
+    std::swap (rhs1, rhs2);
+
   tree ctype = build_complex_type (type);
-  gcall *g = gimple_build_call_internal (code == MULT_EXPR
-					 ? IFN_MUL_OVERFLOW
-					 : code != MINUS_EXPR
-					 ? IFN_ADD_OVERFLOW : IFN_SUB_OVERFLOW,
-					 2, rhs1, rhs2);
+  gcall *g = gimple_build_call_internal (ifn, 2, rhs1, rhs2);
   tree ctmp = make_ssa_name (ctype);
   gimple_call_set_lhs (g, ctmp);
   gsi_insert_before (gsi, g, GSI_SAME_STMT);

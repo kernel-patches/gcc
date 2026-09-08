@@ -4,8 +4,8 @@
 ! PR126964
 !
 ! The elements of a TARGET assumed-shape dummy can be spaced by more than
-! the element length.  Where the element length divides the spacing, the
-! spacing is folded into the strides on entry, so that the elements are
+! the element length.  Where the element length is the element alignment,
+! the spacing is folded into the strides on entry, so that the elements are
 ! addressed by the constant element length rather than by a span loaded
 ! from the descriptor.  Addressing by a runtime span leaves the data
 ! reference step symbolic, which stops the loops from being vectorized.
@@ -51,12 +51,12 @@ program p
   if (any (x%a /= -1.0_8)) stop 5
 end program
 
-! The spacing is read from the descriptor once, on entry, and scales both
-! strides and the offset.
-! { dg-final { scan-tree-dump-times "= self->span;" 1 "original" } }
-! { dg-final { scan-tree-dump-times "\\? stride\.\[0-9\]+ \\* \[^;\]+ : stride\.\[0-9\]+;" 2 "original" } }
-! { dg-final { scan-tree-dump-times "\\? offset\.\[0-9\]+ \\* \[^;\]+ : offset\.\[0-9\]+;" 1 "original" } }
-! No span variable is created and the elements are addressed by the element
+! Where the element length is the element alignment, the spacing is read from
+! the descriptor once, on entry, and scales both strides and the offset; no
+! span variable is created and the elements are addressed by the element
 ! length.
-! { dg-final { scan-tree-dump-not "span\.\[0-9\]+" "original" } }
+! { dg-final { scan-tree-dump-times "= self->span;" 1 "original" } }
+! { dg-final { scan-tree-dump-times "\\? stride\.\[0-9\]+ \\* \[^;\]+ : stride\.\[0-9\]+;" 2 "original" { target natural_alignment_64 } } }
+! { dg-final { scan-tree-dump-times "\\? offset\.\[0-9\]+ \\* \[^;\]+ : offset\.\[0-9\]+;" 1 "original" { target natural_alignment_64 } } }
+! { dg-final { scan-tree-dump-not "span\.\[0-9\]+" "original" { target natural_alignment_64 } } }
 ! { dg-final { scan-tree-dump-not "\\* self->span" "original" } }

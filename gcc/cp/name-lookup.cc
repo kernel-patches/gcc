@@ -9069,6 +9069,7 @@ push_to_top_level (void)
   s->need_pop_function_context = need_pop;
   s->function_decl = current_function_decl;
   s->unevaluated_operand = cp_unevaluated_operand;
+  s->unevaluated_typeid_cutoff = cp_unevaluated_typeid_cutoff;
   s->inhibit_evaluation_warnings = c_inhibit_evaluation_warnings;
   s->suppress_location_wrappers = suppress_location_wrappers;
   s->x_stmt_tree.stmts_are_full_exprs_p = true;
@@ -9080,6 +9081,7 @@ push_to_top_level (void)
   current_namespace = global_namespace;
   push_class_stack ();
   cp_unevaluated_operand = 0;
+  cp_unevaluated_typeid_cutoff = 0;
   c_inhibit_evaluation_warnings = 0;
   suppress_location_wrappers = 0;
 }
@@ -9112,6 +9114,7 @@ pop_from_top_level (void)
     pop_function_context ();
   current_function_decl = s->function_decl;
   cp_unevaluated_operand = s->unevaluated_operand;
+  cp_unevaluated_typeid_cutoff = s->unevaluated_typeid_cutoff;
   c_inhibit_evaluation_warnings = s->inhibit_evaluation_warnings;
   suppress_location_wrappers = s->suppress_location_wrappers;
 
@@ -9129,6 +9132,7 @@ namespace {
 struct local_state_t
 {
   int cp_unevaluated_operand;
+  int cp_unevaluated_typeid_cutoff;
   int c_inhibit_evaluation_warnings;
   int cp_noexcept_operand_;
   bool has_cfun;
@@ -9139,6 +9143,8 @@ struct local_state_t
     local_state_t s;
     s.cp_unevaluated_operand = ::cp_unevaluated_operand;
     ::cp_unevaluated_operand = 0;
+    s.cp_unevaluated_typeid_cutoff = ::cp_unevaluated_typeid_cutoff;
+    ::cp_unevaluated_typeid_cutoff = 0;
     s.c_inhibit_evaluation_warnings = ::c_inhibit_evaluation_warnings;
     ::c_inhibit_evaluation_warnings = 0;
     s.cp_noexcept_operand_ = ::cp_noexcept_operand;
@@ -9153,6 +9159,7 @@ struct local_state_t
   restore () const
   {
     ::cp_unevaluated_operand = this->cp_unevaluated_operand;
+    ::cp_unevaluated_typeid_cutoff = this->cp_unevaluated_typeid_cutoff;
     ::c_inhibit_evaluation_warnings = this->c_inhibit_evaluation_warnings;
     ::cp_noexcept_operand = this->cp_noexcept_operand_;
     if (this->has_cfun)

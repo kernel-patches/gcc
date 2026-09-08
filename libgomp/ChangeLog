@@ -1,3 +1,24 @@
+2026-09-07  Tobias Burnus  <tburnus@baylibre.com>
+
+	* libgomp.texi (OpenMP 6.0 implementation status): Mark
+	'need_device_addr' as supported.
+	(GOMP_RUNTIME_USM): Improve wording of the unsupported part.
+
+2026-09-07  Tobias Burnus  <tburnus@baylibre.com>
+
+	* libgomp.texi (OpenMP 6.0 Impl Status): Mark underscore
+	variant of multi-word directive names as supported by Fortran.
+
+2026-09-07  Andrew Stubbs  <ams@baylibre.com>
+
+	* config/gcn/time.c (omp_get_wtime): Use "=Sg".
+
+2026-09-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* testsuite/libgomp.oacc-fortran/host_data-5.F90: Expect no copy
+	of a span normalized dummy passed to a dummy without a descriptor.
+
 2026-09-04  Tobias Burnus  <tburnus@baylibre.com>
 
 	PR libgomp/127186

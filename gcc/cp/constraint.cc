@@ -1703,9 +1703,12 @@ tsubst_constraint_variables (tree t, tree args, subst_info info)
   /* Clear cp_unevaluated_operand across tsubst so that we get a proper chain
      of PARM_DECLs.  */
   int saved_unevaluated_operand = cp_unevaluated_operand;
+  int saved_unevaluated_typeid_cutoff = cp_unevaluated_typeid_cutoff;
   cp_unevaluated_operand = 0;
+  cp_unevaluated_typeid_cutoff = 0;
   tree vars = tsubst (t, args, info.complain, info.in_decl);
   cp_unevaluated_operand = saved_unevaluated_operand;
+  cp_unevaluated_typeid_cutoff = saved_unevaluated_typeid_cutoff;
   if (vars == error_mark_node)
     return error_mark_node;
   return declare_constraint_vars (t, vars);

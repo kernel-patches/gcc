@@ -93,6 +93,10 @@ struct cp_fold_data
     gcc_checking_assert (!(flags & ff_mce_false)
 			 || !(flags & ff_only_non_odr));
   }
+  mce_value mce ()
+  {
+    return flags & ff_mce_false ? mce_false : mce_unknown;
+  }
 };
 
 /* Forward declarations.  */
@@ -1740,9 +1744,7 @@ cp_fold_r (tree *stmt_p, int *walk_subtrees, void *data_)
 	{
 	  tree to = TREE_OPERAND (*stmt_p, 0);
 	  tree &from = TREE_OPERAND (*stmt_p, 1);
-	  tree folded = maybe_constant_init (from, to,
-					     (data->flags & ff_mce_false
-					      ? mce_false : mce_unknown));
+	  tree folded = maybe_constant_init (from, to, data->mce ());
 	  if (folded != from && TREE_CONSTANT (folded))
 	    from = folded;
 	}
@@ -1757,8 +1759,7 @@ cp_fold_r (tree *stmt_p, int *walk_subtrees, void *data_)
 	if (tree &init = TARGET_EXPR_INITIAL (stmt))
 	  {
 	    tree folded = maybe_constant_init (init, TARGET_EXPR_SLOT (stmt),
-					       (data->flags & ff_mce_false
-						? mce_false : mce_unknown));
+					       data->mce ());
 	    if (folded != init && TREE_CONSTANT (folded))
 	      init = folded;
 	  }

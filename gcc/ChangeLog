@@ -1,3 +1,72 @@
+2026-09-07  Roger Sayle  <roger@nextmovesoftware.com>
+
+	* expmed.cc (store_fixed_bit_field_1): Use new aop_optab when
+	writing a value into a fixed size bitfield of a structure.
+	* optabs.cc (expand_binop): If target doesn't provide a suitable
+	aop<mode>3 instruction, intelligently use PLUS or IOR instead.
+	(expand_binop): For rotations, use aop_optab to select AOP
+	implementation instead of hard-coding add_optab.
+	(expand_bitreverse): Likwise, Use aop_optab instead of ior_optab
+	when composing swapped bits and nibbles (allows use of shift_add).
+	* optabs.def (aop_optab): New named optab for any_or_plus.
+	* rtl.def (AOP): New RTX code to capture any_or_plus semantics.
+	* config/avr/avr.md (aop<mode>3): New define_expand to specify
+	that IOR should always be used to implement any_or_plus (AOP).
+
+2026-09-07  Andrew Stubbs  <ams@baylibre.com>
+
+	* config/gcn/gcn.cc (gcn_spill_class): Spill scalars to SGPRs.
+
+2026-09-07  Andrew Stubbs  <ams@baylibre.com>
+
+	* config/gcn/gcn-valu.md (vnhi): New mode attribute.
+	(VnHI): Likewise.
+	(<u>mul<mode><vnsi>3<exec>): New.
+	(<u>mul<mode><vnhi>3<exec>): New.
+	* config/gcn/gcn.md (<u>mulqihi3_scalar): Rename this ...
+	(<u>mulqihi3): ... to this.
+
+2026-09-07  Andrew Stubbs  <ams@baylibre.com>
+
+	* config/gcn/gcn-opts.h (TARGET_RDNA3_PLUS): New.
+	* config/gcn/gcn-valu.md (<expander><mode>2<exec>): New.
+	(<expander><mode>2): New.
+	(<expander><mode>2_natural): New.
+	* config/gcn/gcn.md (rnda): Add n3 and 3p values.
+	(enabled): Handle rdna n3 and 3p.
+	(mnemonic): Add clz and ctz.
+	(rdna_mnemonic): New code attribute.
+
+2026-09-07  Kyrylo Tkachov  <ktkachov@nvidia.com>
+	    Cui Lili  <lili.cui@intel.com>
+
+	PR tree-optimization/125557
+	* ifcvt.cc (noce_convert_multiple_sets): Build metadata for both arms.
+	Append entries for else-only live-out destinations, enforce the final
+	output limit, and preserve the then-arm source location.
+	(noce_convert_multiple_sets_1): Consume the unified output metadata.
+	Select incoming values for destinations defined by only one arm.
+	(init_noce_multiple_sets_info): Initialize stable metadata fields.
+	(bb_ok_for_noce_convert_multiple_sets): Remove final-source
+	classification.
+	(noce_process_if_block): Form the union of the arm live-outs, accept
+	arm-only destinations and one-set arms without a shared-source gate, and
+	keep the CFG arm order.
+
+2026-09-07  Jakub Jelinek  <jakub@redhat.com>
+
+	* optabs.def (bitinttofp_optab, bitintfromfp_optab): New optabs.
+	* optabs-libfuncs.h (gen_bitint_fp_libfunc): Declare.
+	* optabs-libfuncs.cc (gen_interclass_conv_libfunc): Move most of
+	the function into ...
+	(gen_interclass_conv_libfunc_name_name): New helper function.
+	(gen_bitint_fp_libfunc): New function.
+	* internal-fn.cc (expand_FLOATTOBITINT): Use
+	optab_libfunc (bitintfromfp_optab, mode) instead of constructing
+	libcall name manually.
+	(expand_BITINTTOFLOAT): Similarly with
+	optab_libfunc (bitinttofp_optab, mode).
+
 2026-09-06  Iain Sandoe  <iain@sandoe.co.uk>
 
 	* config/i386/i386-expand.cc (ix86_expand_call): User setting of

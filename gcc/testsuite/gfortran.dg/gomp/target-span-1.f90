@@ -6,8 +6,8 @@
 !
 ! A TARGET assumed-shape dummy is addressed through the span of its
 ! descriptor.  The descriptor is not mapped to the device, so the span has
-! to be read on entry and folded into the local strides, rather than the
-! target region dereferencing the descriptor.
+! to be read into a local variable on entry, rather than the target region
+! dereferencing the descriptor.
 
 module m
   use iso_c_binding
@@ -24,9 +24,12 @@ contains
   end subroutine inner
 end module m
 
-! The span is read from the descriptor once, on entry, and scales the strides.
+! The span is read from the descriptor once, on entry.  Where the element
+! length is the element alignment it scales the strides, and the element
+! reference uses the local strides and the element length.
 ! { dg-final { scan-tree-dump-times "= t->span;" 1 "original" } }
-! { dg-final { scan-tree-dump "stride\.\[0-9\]+ = \[^;\]* != 8 \\? stride\.\[0-9\]+ \\* \[^;\]* : stride\.\[0-9\]+;" "original" } }
-! The element reference uses the local strides and the element length.
-! { dg-final { scan-tree-dump "t\.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(offset\.\[0-9\]+ \\+ \[^)\]*stride\.\[0-9\]+\[^)\]*\\) \\* 8\\)" "original" } }
+! { dg-final { scan-tree-dump "stride\.\[0-9\]+ = \[^;\]* != 8 \\? stride\.\[0-9\]+ \\* \[^;\]* : stride\.\[0-9\]+;" "original" { target natural_alignment_64 } } }
+! { dg-final { scan-tree-dump "t\.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(offset\.\[0-9\]+ \\+ \[^)\]*stride\.\[0-9\]+\[^)\]*\\) \\* 8\\)" "original" { target natural_alignment_64 } } }
+! Elsewhere the reference uses that local span, not the descriptor.
+! { dg-final { scan-tree-dump "t\.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(offset\.\[0-9\]+ \\+ \[^)\]*stride\.\[0-9\]+\[^)\]*\\) \\* span\.\[0-9\]+\\)" "original" { target { ! natural_alignment_64 } } } }
 ! { dg-final { scan-tree-dump-not "\\* t->span" "original" } }

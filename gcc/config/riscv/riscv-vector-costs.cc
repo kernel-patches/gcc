@@ -1622,7 +1622,7 @@ costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 	m_unrolled_vls_stmts += count * m_unrolled_vls_niters;
     }
 
-  if (vectype)
+  if (m_cost_type != SCALAR_COST && vectype)
     stmt_cost = adjust_stmt_cost (kind, loop_vinfo, stmt_info, node, vectype,
 				  stmt_cost);
 

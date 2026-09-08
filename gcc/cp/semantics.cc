@@ -4682,15 +4682,21 @@ tree
 process_outer_var_ref (tree decl, tsubst_flags_t complain,
 		       bool odr_use/*=false*/)
 {
+  bool in_typeid_probe = false;
   if (cp_unevaluated_operand)
     {
       tree type = TREE_TYPE (decl);
       if (!dependent_type_p (type)
 	  && variably_modified_type_p (type, NULL_TREE))
 	/* VLAs are used even in unevaluated context.  */;
-      else
+      else if (cp_unevaluated_operand > cp_unevaluated_typeid_cutoff)
 	/* It's not a use (3.2) if we're in an unevaluated context.  */
 	return decl;
+      else
+	/* Inside a typeid operand's own probe: capture is still
+	   attempted below ([expr.prim.lambda.capture]/7), but a missing
+	   capture-default must not be diagnosed yet - see below.  */
+	in_typeid_probe = true;
     }
   if (decl == error_mark_node)
     return decl;
@@ -4777,6 +4783,12 @@ process_outer_var_ref (tree decl, tsubst_flags_t complain,
       if (flag_contracts && processing_contract_condition)
 	set_contract_capture_flag (decl, true);
     }
+  /* Capture was attempted above; whether it's really needed depends on
+     an evaluated-ness we don't know yet.  Defer instead of diagnosing:
+     a later, non-probe pass will complain if the operand turns out
+     evaluated, and there's nothing to complain about if it doesn't.  */
+  else if (in_typeid_probe)
+    return var;
   /* Only an odr-use of an outer automatic variable causes an
      error, and a constant variable can decay to a prvalue
      constant without odr-use.  So don't complain yet.  */

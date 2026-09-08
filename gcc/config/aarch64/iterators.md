@@ -1577,10 +1577,15 @@
 ;; Map a floating point or integer mode to the appropriate register name prefix
 (define_mode_attr s [(HF "h") (SF "s") (DF "d") (SI "s") (DI "d")])
 
-;; Give the length suffix letter for a sign- or zero-extension.
-(define_mode_attr size [(QI "b") (HI "h") (SI "w") (HF "") (BF "") (SF "")
+;; Give the length suffix letter for a load/store operation.
+(define_mode_attr size [(QI "b") (HI "h") (SI "") (HF "h") (BF "h") (SF "")
 			(V2QI "h") (V4QI "") (V2HI "")
 			(V2HF "") (V2BF "")])
+
+;; Give the length suffix letter for a sign- or zero-extension.
+(define_mode_attr extsize [(QI "b") (HI "h") (SI "w") (HF "h") (BF "h") (SF "w")
+			(V2QI "h") (V4QI "w") (V2HI "w")
+			(V2HF "w") (V2BF "w")])
 
 ;; Give the number of bits in the mode
 (define_mode_attr sizen [(QI "8") (HI "16") (SI "32") (DI "64")])

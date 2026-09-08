@@ -2,7 +2,6 @@
    run) may still point to a non-escaped local; the dependence against
    that local must be preserved.  Execution test: the store stream
    through 'tab[idx & 1]' aliases 't' when idx is even.  */
-/* { dg-do run } */
 /* { dg-additional-options "-O3 -ffast-math" } */
 
 extern void abort (void);

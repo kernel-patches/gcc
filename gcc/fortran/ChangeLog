@@ -1,3 +1,45 @@
+2026-09-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* trans-array.cc: Include stor-layout.h.
+	(gfc_span_folds_into_stride): Compare the element length against
+	the least alignment of its type rather than the alignment.
+
+2026-09-07  Tobias Burnus  <tburnus@baylibre.com>
+
+	* parse.cc (decode_omp_directive): Parse underscore
+	variant of multi-word directive names as well.
+
+2026-09-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* gfortran.h (gfc_dummy_requires_direct_arg): New prototype.
+	* symbol.cc (gfc_is_span_addressed_dummy): Rename to...
+	(gfc_dummy_requires_direct_arg): ... this and move the addressing
+	out of the description.
+	* trans.h (struct lang_decl): Add span_normalized.
+	(GFC_DECL_SPAN_NORMALIZED): New macro.
+	(gfc_conv_subref_array_arg): Add span_only argument.
+	* trans-array.h (gfc_span_folds_into_stride): New prototype.
+	(gfc_conv_span_is_elem_len): Likewise.
+	* trans-array.cc (gfc_span_folds_into_stride): New function.
+	(gfc_is_span_addressed_dummy): New function, false for a dummy
+	whose element spacing is folded into its strides.
+	(gfc_conv_span_is_elem_len): New function.
+	(gfc_trans_dummy_array_bias): Fold the element spacing of a span
+	normalized dummy into its strides and its offset on entry.
+	* trans-decl.cc (gfc_build_dummy_array_decl): Mark such a dummy
+	span normalized rather than giving it a span variable.
+	(gfc_get_symbol_decl): Do not set GFC_DECL_PTR_ARRAY_P for it.
+	* trans-expr.cc (is_whole_span_addressed_dummy): New function.
+	(dummy_accepts_strided_arg): New function.
+	(copy_in_out_allowed): Use gfc_dummy_requires_direct_arg, the
+	actual argument of a span normalized dummy being uncopied too.
+	(gfc_conv_subref_array_arg): Take span_only and, with it, test the
+	span of the descriptor instead of contiguity.
+	(gfc_conv_procedure_call): Ask for the span test when a span
+	addressed dummy is passed on to a dummy that has a descriptor.
+
 2026-09-05  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
 
 	PR fortran/126950

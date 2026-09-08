@@ -5099,7 +5099,7 @@
 	  (match_operand:VSSUB32_I 2 "aarch64_simd_or_scalar_imm_zero")))]
   "TARGET_FLOAT && !BYTES_BIG_ENDIAN"
   {@ [ cons: =0 , 1  ; attrs: type      ]
-     [ r        , r  ; mov_reg          ] uxt<size>\t%w0, %w1
+     [ r        , r  ; mov_reg          ] uxt<extsize>\t%w0, %w1
      [ r        , m  ; load_4           ] ldr<size>\t%<single_wx>0, %1
   }
 )
@@ -5139,7 +5139,7 @@
           (match_operand:VSSUB32_I 1 "nonimmediate_operand")))]
   "TARGET_FLOAT && BYTES_BIG_ENDIAN"
   {@ [ cons: =0 , 1  ; attrs: type      ]
-     [ r        , r  ; mov_reg          ] uxt<size>\t%w0, %w1
+     [ r        , r  ; mov_reg          ] uxt<extsize>\t%w0, %w1
      [ r        , m  ; load_4           ] ldr<size>\t%<single_wx>0, %1
   }
 )

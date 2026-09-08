@@ -10097,6 +10097,12 @@ sh_expand_sym_label2reg (rtx reg, rtx sym, rtx lab, bool sibcall_p)
 
 struct builtin_description
 {
+  /* Tells whether the built-in can be used.
+     A built-in that is not enabled is not declared.  This allows using
+     '__has_builtin' on it to check its presence.  However, if not present, it
+     will ultimately result in a function call to an undeclared function.
+     The alternative would be to always declare it and throw a compiler error
+     during builtin expansion, as it's done on i386.  */
   bool (* const is_enabled) (void);
   const enum insn_code icode;
   const char *const name;
@@ -10104,12 +10110,10 @@ struct builtin_description
   tree fndecl;
 };
 
-/* This function can be used if there are any built-ins that are not for
-   SHmedia.  It's commented out to avoid the defined-but-unused warning.  */
 static bool
-sh1_builtin_p (void)
+sh_fpu_p (void)
 {
-  return TARGET_SH1;
+  return TARGET_FPU_ANY;
 }
 
 /* describe number and signedness of arguments; arg[0] == result
@@ -10184,9 +10188,9 @@ static const char signature_args[][4] =
 /* nsb: takes long long arg, returns unsigned char.  */
 static struct builtin_description bdesc[] =
 {
-  { sh1_builtin_p,
+  { sh_fpu_p,
     CODE_FOR_sts_fpscr, "__builtin_sh_get_fpscr", SH_BLTIN_UV, 0 },
-  { sh1_builtin_p,
+  { sh_fpu_p,
     CODE_FOR_set_fpscr, "__builtin_sh_set_fpscr", SH_BLTIN_VU, 0 },
 };
 

@@ -1,3 +1,15 @@
+2026-09-07  Tomasz Kamiński  <tkaminsk@redhat.com>
+
+	PR libstdc++/118665
+	* include/bits/uniform_int_dist.h
+	(uniform_int_distribution::_S_nd): Alternate between rejecting
+	from beginning/end of the range.
+	* testsuite/26_numerics/random/uniform_int_distribution/operators/pr118665.cc:
+	New test.
+	* testsuite/26_numerics/random/uniform_real_distribution/operators/gencanon.cc:
+	Updated expected values for test_2p55p1 that's depends on
+	uniform_int_distribution.
+
 2026-09-03  Nathan Myers  <ncm@cantrip.org>
 
 	PR libstdc++/126800

@@ -4558,6 +4558,17 @@
   [(set_attr "length" "4,8,8,8")
    (set_attr "adjust_len" "*,out_bitop,out_bitop,out_bitop")])
 
+;; aop (any_or_plus) a.k.a. pixop.  Always use IOR.
+(define_expand "aop<mode>3"
+  [(set (match_operand:QISI 0 "register_operand")
+	(ior:QISI (match_operand:QISI 1 "register_operand")
+		  (match_operand:QISI 2 "nonmemory_operand")))]
+  ""
+  {
+    emit_insn (gen_ior<mode>3 (operands[0], operands[1], operands[2]));
+    DONE;
+  }
+)
 
 (define_split
   [(set (match_operand:SPLIT34 0 "register_operand")

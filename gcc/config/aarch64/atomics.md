@@ -729,7 +729,7 @@
          (match_operand:SI 2 "const_int_operand")]			;; model
        UNSPECV_LDAP)))]
   "TARGET_RCPC2 && (<GPI:sizen> > <ALLX:sizen>)"
-  "ldapurs<ALLX:size>\t%<GPI:w>0, %1"
+  "ldapurs<ALLX:extsize>\t%<GPI:w>0, %1"
 )
 
 (define_insn "atomic_store<mode>"

@@ -337,18 +337,18 @@ rtx_interchangeable_p (const_rtx a, const_rtx b)
 }
 
 
-/* Go through a bunch of insns, converting them to conditional
-   execution format if possible.  Return TRUE if all of the non-note
+/* Go through the insns from START to END, converting them to conditional
+   execution format if possible.  CE_INFO describes the if-block being
+   converted and is only read by the target IFCVT_MODIFY_INSN macro.  TEST is
+   the conditional-execution test to predicate them on and PROB_VAL the
+   probability that it holds.  MOD_OK allows one insn that modifies TEST, in
+   which case it must be the last one.  Return TRUE if all of the non-note
    insns were processed.  */
 
 static bool
 cond_exec_process_insns (ce_if_block *ce_info ATTRIBUTE_UNUSED,
-			 /* if block information */rtx_insn *start,
-			 /* first insn to look at */rtx end,
-			 /* last insn to look at */rtx test,
-			 /* conditional execution test */profile_probability
-							    prob_val,
-			 /* probability of branch taken. */bool mod_ok)
+			 rtx_insn *start, rtx end, rtx test,
+			 profile_probability prob_val, bool mod_ok)
 {
   bool must_be_last = false;
   rtx_insn *insn;
@@ -467,13 +467,13 @@ cond_exec_get_condition (rtx_insn *jump, bool get_reversed = false)
   return cond;
 }
 
-/* Given a simple IF-THEN or IF-THEN-ELSE block, attempt to convert it
-   to conditional execution.  Return TRUE if we were successful at
-   converting the block.  */
+/* Given a simple IF-THEN or IF-THEN-ELSE block described by CE_INFO, attempt
+   to convert it to conditional execution.  DO_MULTIPLE_P allows CE_INFO's
+   recorded chain of && or || test blocks to be converted as well.  Return
+   TRUE if we were successful at converting the block.  */
 
 static bool
-cond_exec_process_if_block (ce_if_block * ce_info,
-			    /* if block information */bool do_multiple_p)
+cond_exec_process_if_block (ce_if_block *ce_info, bool do_multiple_p)
 {
   basic_block test_bb = ce_info->test_bb;	/* last test block */
   basic_block then_bb = ce_info->then_bb;	/* THEN */
@@ -3558,7 +3558,7 @@ get_base_reg_or_constant (rtx exp)
     or `cond ? z : -1`.
   */
 
-static int
+static bool
 noce_try_cond_arith (struct noce_if_info *if_info)
 {
   rtx target, a, b, a_op0, a_op1, outer_a;
@@ -5930,7 +5930,7 @@ block_jumps_and_fallthru (basic_block cur_bb, basic_block target_bb)
 	return -1;
     }
 
-  if ((jump_p & fallthru_p) == 0)
+  if (!jump_p || !fallthru_p)
     return -1;
 
   /* Don't allow calls in the block, since this is used to group && and ||

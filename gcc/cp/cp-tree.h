@@ -2133,6 +2133,7 @@ struct GTY(()) saved_scope {
   bool expansion_stmt : 1;
 
   int unevaluated_operand;
+  int unevaluated_typeid_cutoff;
   int inhibit_evaluation_warnings;
   int noexcept_operand;
   int ref_temp_count;
@@ -6303,13 +6304,25 @@ extern bool cp_preserve_using_decl;
 
 extern int cp_unevaluated_operand;
 
+/* cp_unevaluated_operand depth up to which lambda capture is still
+   allowed.  A typeid operand's own unevaluated probe raises this so
+   that probe does not by itself suppress capture
+   ([expr.prim.lambda.capture]/7).  */
+
+extern int cp_unevaluated_typeid_cutoff;
+
 /* RAII class used to inhibit the evaluation of operands during parsing
-   and template instantiation.  Evaluation warnings are also inhibited.  */
+   and template instantiation.  Evaluation warnings are also inhibited.
+   TYPEID_OPERAND: this is a typeid operand's own probe, so it should
+   not by itself suppress lambda capture
+   ([expr.prim.lambda.capture]/7) - see cp_unevaluated_typeid_cutoff.  */
 
 class cp_unevaluated
 {
 public:
-  cp_unevaluated ();
+  int saved_cutoff;
+
+  cp_unevaluated (bool typeid_operand = false);
   ~cp_unevaluated ();
 };
 
@@ -6321,13 +6334,19 @@ class cp_evaluated
 public:
   int uneval;
   int inhibit;
+  int typeid_cutoff;
   cp_evaluated (bool reset = true)
-    : uneval(cp_unevaluated_operand), inhibit(c_inhibit_evaluation_warnings)
+    : uneval (cp_unevaluated_operand), inhibit (c_inhibit_evaluation_warnings),
+      typeid_cutoff (cp_unevaluated_typeid_cutoff)
   { if (reset)
-      cp_unevaluated_operand = c_inhibit_evaluation_warnings = 0; }
+      {
+	cp_unevaluated_operand = c_inhibit_evaluation_warnings = 0;
+	cp_unevaluated_typeid_cutoff = 0;
+      } }
   ~cp_evaluated ()
   { cp_unevaluated_operand = uneval;
-    c_inhibit_evaluation_warnings = inhibit; }
+    c_inhibit_evaluation_warnings = inhibit;
+    cp_unevaluated_typeid_cutoff = typeid_cutoff; }
 };
 
 /* in pt.cc  */

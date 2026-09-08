@@ -296,6 +296,12 @@ static FILE *cp_lexer_debug_stream;
    sizeof can be nested.  */
 int cp_unevaluated_operand;
 
+/* cp_unevaluated_operand depth up to which lambda capture is still
+   allowed; raised by a typeid operand's own unevaluated probe so that
+   probe does not by itself suppress capture
+   ([expr.prim.lambda.capture]/7).  */
+int cp_unevaluated_typeid_cutoff;
+
 /* Nonzero if we are parsing a reflect-expression and shouldn't strip
    using-declarations.  */
 bool cp_preserve_using_decl;
@@ -3241,16 +3247,21 @@ static tree cp_parser_omp_loop_nest (cp_parser *, bool *);
 // Unevaluated Operand Guard
 //
 // Implementation of an RAII helper for unevaluated operand parsing.
-cp_unevaluated::cp_unevaluated ()
+cp_unevaluated::cp_unevaluated (bool typeid_operand)
+  : saved_cutoff (cp_unevaluated_typeid_cutoff)
 {
+  bool transparent = (cp_unevaluated_operand == cp_unevaluated_typeid_cutoff);
   ++cp_unevaluated_operand;
   ++c_inhibit_evaluation_warnings;
+  if (typeid_operand && transparent)
+    cp_unevaluated_typeid_cutoff = cp_unevaluated_operand;
 }
 
 cp_unevaluated::~cp_unevaluated ()
 {
   --c_inhibit_evaluation_warnings;
   --cp_unevaluated_operand;
+  cp_unevaluated_typeid_cutoff = saved_cutoff;
 }
 
 // -------------------------------------------------------------------------- //
@@ -8579,7 +8590,7 @@ cp_parser_postfix_expression (cp_parser *parser, bool address_p, bool cast_p,
 	       (mark_used -> instantiation; lambda capture).  */
 	    cp_lexer_save_tokens (parser->lexer);
 	    {
-	      cp_unevaluated u;
+	      cp_unevaluated u (/* typeid_operand= */ true);
 	      expression = cp_parser_expression (parser, &idk);
 	    }
 	    /* If we're already within an unevaluated operand, everything

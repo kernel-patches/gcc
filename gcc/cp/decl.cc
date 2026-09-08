@@ -15678,12 +15678,15 @@ grokdeclarator (const cp_declarator *declarator,
 	    if (xobj_parm)
 	      {
 		if (!ctype
-		    && decl_context == NORMAL
+		    && (decl_context == NORMAL || friendp)
 		    && (in_namespace
 			|| !declarator->declarator->u.id.qualifying_scope))
-		  error_at (DECL_SOURCE_LOCATION (xobj_parm),
-			    "a non-member function cannot have "
-			    "an explicit object parameter");
+		  {
+		    error_at (DECL_SOURCE_LOCATION (xobj_parm),
+			      "a non-member function cannot have "
+			      "an explicit object parameter");
+		    is_xobj_member_function = false;
+		  }
 		else
 		  {
 		    if (virtualp)

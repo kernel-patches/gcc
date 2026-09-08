@@ -67,14 +67,21 @@ static const struct gfc_omp_directive gfc_omp_directives[] = {
   {"atomic", GFC_OMP_DIR_EXECUTABLE, ST_OMP_ATOMIC},
   {"barrier", GFC_OMP_DIR_EXECUTABLE, ST_OMP_BARRIER},
   {"cancellation point", GFC_OMP_DIR_EXECUTABLE, ST_OMP_CANCELLATION_POINT},
+  {"cancellation_point", GFC_OMP_DIR_EXECUTABLE, ST_OMP_CANCELLATION_POINT},
   {"cancel", GFC_OMP_DIR_EXECUTABLE, ST_OMP_CANCEL},
   {"critical", GFC_OMP_DIR_EXECUTABLE, ST_OMP_CRITICAL},
   /* {"declare induction", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_INDUCTION}, */
+  /* {"declare_induction", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_INDUCTION}, */
   {"declare mapper", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_MAPPER},
+  {"declare_mapper", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_MAPPER},
   {"declare reduction", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_REDUCTION},
+  {"declare_reduction", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_REDUCTION},
   {"declare simd", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_SIMD},
+  {"declare_simd", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_SIMD},
   {"declare target", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_TARGET},
+  {"declare_target", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_TARGET},
   {"declare variant", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_VARIANT},
+  {"declare_variant", GFC_OMP_DIR_DECLARATIVE, ST_OMP_DECLARE_VARIANT},
   {"depobj", GFC_OMP_DIR_EXECUTABLE, ST_OMP_DEPOBJ},
   {"dispatch", GFC_OMP_DIR_EXECUTABLE, ST_OMP_DISPATCH},
   {"distribute", GFC_OMP_DIR_EXECUTABLE, ST_OMP_DISTRIBUTE},
@@ -107,9 +114,13 @@ static const struct gfc_omp_directive gfc_omp_directives[] = {
   /* {"split", GFC_OMP_DIR_EXECUTABLE, ST_OMP_SPLIT}, */
   /* {"strip", GFC_OMP_DIR_EXECUTABLE, ST_OMP_STRIP}, */
   {"target data", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_DATA},
+  {"target_data", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_DATA},
   {"target enter data", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_ENTER_DATA},
+  {"target_enter_data", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_ENTER_DATA},
   {"target exit data", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_EXIT_DATA},
+  {"target_exit_data", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_EXIT_DATA},
   {"target update", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_UPDATE},
+  {"target_update", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET_UPDATE},
   {"target", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TARGET},
   /* {"taskgraph", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TASKGRAPH}, */
   /* {"task iteration", GFC_OMP_DIR_EXECUTABLE, ST_OMP_TASK_ITERATION}, */
@@ -3532,12 +3543,25 @@ gfc_match_omp_clauses (gfc_omp_clauses **cp, const omp_mask mask,
 		    "target update : %e )",
 		    "target enter data : %e )",
 		    "target exit data : %e )" };
+		  static const char *ifs2[] = {
+		    "target_data : %e )",
+		    "target_update : %e )",
+		    "target_enter_data : %e )",
+		    "target_exit_data : %e )" };
 		  int i;
 		  for (i = 0; i < OMP_IF_LAST; i++)
 		    if (c->if_exprs[i] == NULL
 			&& gfc_match (ifs[i], &c->if_exprs[i]) == MATCH_YES)
 		      break;
 		  if (i < OMP_IF_LAST)
+		    continue;
+		  for (i = 0; i < (int) ARRAY_SIZE (ifs2); i++)
+		    if (c->if_exprs[OMP_IF_TARGET_DATA + i] == NULL
+			&& (gfc_match (ifs2[i],
+				      &c->if_exprs[OMP_IF_TARGET_DATA + i])
+			    == MATCH_YES))
+		      break;
+		  if (i < (int) ARRAY_SIZE (ifs2))
 		    continue;
 		}
 	      if (gfc_match (" %e )", &c->if_expr) == MATCH_YES)
