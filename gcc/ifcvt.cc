@@ -1814,7 +1814,7 @@ noce_try_shifted_store_flag (struct noce_if_info *if_info)
   start_sequence ();
 
   /* If X and COMMON are the same, then we're going to need a temporary.  */
-  if (common && rtx_equal_p (common, if_info->x))
+  if (rtx_equal_p (common, if_info->x))
     {
       common = gen_reg_rtx (mode);
       noce_emit_move_insn (common, if_info->x);
@@ -2268,19 +2268,22 @@ noce_try_store_flag_mask (struct noce_if_info *if_info)
 {
   rtx target;
   rtx_insn *seq;
-  bool reversep;
 
   if (!noce_simple_bbs (if_info))
     return false;
 
-  reversep = false;
+  /* Match "if (test) x = 0;" and, with the arms the other way round,
+     "if (!test) x = 0;".  */
+  bool zero_a = (if_info->a == const0_rtx
+		 && (REG_P (if_info->b)
+		     || rtx_equal_p (if_info->b, if_info->x)));
+  bool zero_b = (if_info->b == const0_rtx
+		 && (REG_P (if_info->a)
+		     || rtx_equal_p (if_info->a, if_info->x)));
 
-  if ((if_info->a == const0_rtx
-       && (REG_P (if_info->b) || rtx_equal_p (if_info->b, if_info->x)))
-      || ((reversep = true)
-	  && if_info->b == const0_rtx
-	  && (REG_P (if_info->a) || rtx_equal_p (if_info->a, if_info->x))))
+  if (zero_a || zero_b)
     {
+      bool reversep = !zero_a;
       start_sequence ();
       target = noce_emit_store_flag (if_info,
 				     gen_reg_rtx (GET_MODE (if_info->x)),
@@ -3679,6 +3682,10 @@ noce_try_cond_arith (struct noce_if_info *if_info)
       gcc_assert (target);
     }
 
+  /* Every path through the fallback above either returns or produces a
+     conditional move, so TARGET is non-null below.  */
+  gcc_checking_assert (target);
+
   if (outer_a)
     {
       XEXP (a, 1) = target;
@@ -3693,8 +3700,6 @@ noce_try_cond_arith (struct noce_if_info *if_info)
     {
       rtx_insn *seq0 = end_sequence ();
       unsigned cost0 = seq_cost (seq0, if_info->speed_p);
-      if (!target)
-	cost0 = -1u;
 
       /* Produce `cond ? z : -1`. */
       rtx targetm1;
@@ -3707,9 +3712,6 @@ noce_try_cond_arith (struct noce_if_info *if_info)
       unsigned costm1 = seq_cost (seqm1, if_info->speed_p);
       if (!targetm1)
 	costm1 = -1u;
-      /* If both fails, then there is no costing to be done. */
-      if (!targetm1 && !target)
-	return false;
 
       /* If -1 is cheaper or the same cost to producing 0, then use that.  */
       if (costm1 <= cost0)
@@ -3724,8 +3726,7 @@ noce_try_cond_arith (struct noce_if_info *if_info)
 	    }
 	  end_sequence ();
 	}
-      if (!target)
-	return false;
+
       /* For 0 the produce sequence is:
 	 tmp = !cond ? y : 0
 	 x = (y & z) | tmp  */
@@ -3739,8 +3740,6 @@ noce_try_cond_arith (struct noce_if_info *if_info)
 	goto end_seq_n_fail;
       goto success;
     }
-  if (!target)
-    goto end_seq_n_fail;
 
   target = expand_simple_binop (mode, op, a_op0, target, if_info->x, 0,
 				OPTAB_WIDEN);
@@ -4158,8 +4157,6 @@ noce_convert_multiple_sets (struct noce_if_info *if_info)
 
   /* Decompose the condition attached to the jump.  */
   rtx cond = noce_get_condition (jump, &cond_earliest, false);
-  rtx x = XEXP (cond, 0);
-  rtx y = XEXP (cond, 1);
 
   auto_delete_vec<noce_multiple_sets_info> insn_info;
   init_noce_multiple_sets_info (then_bb, insn_info);
@@ -4284,8 +4281,6 @@ noce_convert_multiple_sets (struct noce_if_info *if_info)
     }
 
   set_used_flags (cond);
-  set_used_flags (x);
-  set_used_flags (y);
 
   unshare_all_rtl_in_chain (seq);
   end_sequence ();
@@ -6397,6 +6392,36 @@ block_has_only_trap (basic_block bb)
 
    (D) These heuristics need a lot of work.  */
 
+/* Return true if the if-case formed by TEST_BB, THEN_BB and ELSE_BB is one we
+   may convert at all.
+
+   If we are partitioning hot/cold basic blocks, we don't want to mess up
+   unconditional or indirect jumps that cross between hot and cold sections.
+   Basic block partitioning may result in some jumps that appear to be
+   optimizable (or blocks that appear to be mergeable), but which really must
+   be left untouched (they are required to make it safely across partition
+   boundaries).  See the comments at the top of
+   bb-reorder.cc:partition_hot_cold_basic_blocks for complete details.
+
+   TEST_BB must also end in a conditional jump with no other side-effects.  */
+
+static bool
+if_case_blocks_ok_p (basic_block test_bb, basic_block then_bb,
+		     basic_block else_bb)
+{
+  if ((BB_END (then_bb)
+       && JUMP_P (BB_END (then_bb))
+       && CROSSING_JUMP_P (BB_END (then_bb)))
+      || (JUMP_P (BB_END (test_bb))
+	  && CROSSING_JUMP_P (BB_END (test_bb)))
+      || (BB_END (else_bb)
+	  && JUMP_P (BB_END (else_bb))
+	  && CROSSING_JUMP_P (BB_END (else_bb))))
+    return false;
+
+  return onlyjump_p (BB_END (test_bb));
+}
+
 /* Tests for case 1 above.  */
 
 static bool
@@ -6409,28 +6434,7 @@ find_if_case_1 (basic_block test_bb, edge then_edge, edge else_edge)
   profile_probability then_prob;
   rtx else_target = NULL_RTX;
 
-  /* If we are partitioning hot/cold basic blocks, we don't want to
-     mess up unconditional or indirect jumps that cross between hot
-     and cold sections.
-
-     Basic block partitioning may result in some jumps that appear to
-     be optimizable (or blocks that appear to be mergeable), but which really
-     must be left untouched (they are required to make it safely across
-     partition boundaries).  See  the comments at the top of
-     bb-reorder.cc:partition_hot_cold_basic_blocks for complete details.  */
-
-  if ((BB_END (then_bb)
-       && JUMP_P (BB_END (then_bb))
-       && CROSSING_JUMP_P (BB_END (then_bb)))
-      || (JUMP_P (BB_END (test_bb))
-	  && CROSSING_JUMP_P (BB_END (test_bb)))
-      || (BB_END (else_bb)
-	  && JUMP_P (BB_END (else_bb))
-	  && CROSSING_JUMP_P (BB_END (else_bb))))
-    return false;
-
-  /* Verify test_bb ends in a conditional jump with no other side-effects.  */
-  if (!onlyjump_p (BB_END (test_bb)))
+  if (!if_case_blocks_ok_p (test_bb, then_bb, else_bb))
     return false;
 
   /* THEN has one successor.  */
@@ -6533,28 +6537,7 @@ find_if_case_2 (basic_block test_bb, edge then_edge, edge else_edge)
       && else_bb->loop_father->latch == else_bb)
     return false;
 
-  /* If we are partitioning hot/cold basic blocks, we don't want to
-     mess up unconditional or indirect jumps that cross between hot
-     and cold sections.
-
-     Basic block partitioning may result in some jumps that appear to
-     be optimizable (or blocks that appear to be mergeable), but which really
-     must be left untouched (they are required to make it safely across
-     partition boundaries).  See  the comments at the top of
-     bb-reorder.cc:partition_hot_cold_basic_blocks for complete details.  */
-
-  if ((BB_END (then_bb)
-       && JUMP_P (BB_END (then_bb))
-       && CROSSING_JUMP_P (BB_END (then_bb)))
-      || (JUMP_P (BB_END (test_bb))
-	  && CROSSING_JUMP_P (BB_END (test_bb)))
-      || (BB_END (else_bb)
-	  && JUMP_P (BB_END (else_bb))
-	  && CROSSING_JUMP_P (BB_END (else_bb))))
-    return false;
-
-  /* Verify test_bb ends in a conditional jump with no other side-effects.  */
-  if (!onlyjump_p (BB_END (test_bb)))
+  if (!if_case_blocks_ok_p (test_bb, then_bb, else_bb))
     return false;
 
   /* ELSE has one successor.  */

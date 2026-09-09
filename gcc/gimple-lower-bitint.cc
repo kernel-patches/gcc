@@ -1468,7 +1468,7 @@ bitint_large_huge::handle_cast (tree lhs_type, tree rhs1, tree idx)
 						  ? high - 1 - low : low));
 	      m_first = false;
 	      m_data[save_data_cnt + 2]
-		= build_int_cst (NULL_TREE, m_data_cnt);
+		= build_int_cst (integer_type_node, m_data_cnt);
 	      m_data_cnt = save_data_cnt;
 	      t = add_cast (signed_type_for (m_limb_type), t);
 	      tree lpm1 = build_int_cst (unsigned_type_node, limb_prec - 1);
@@ -1518,7 +1518,7 @@ bitint_large_huge::handle_cast (tree lhs_type, tree rhs1, tree idx)
 	      rhs1 = handle_operand (rhs1, idx);
 	      if (m_first)
 		m_data[save_data_cnt + 2]
-		  = build_int_cst (NULL_TREE, m_data_cnt);
+		  = build_int_cst (integer_type_node, m_data_cnt);
 	      m_first = save_first;
 	      return rhs1;
 	    }
@@ -1570,7 +1570,7 @@ bitint_large_huge::handle_cast (tree lhs_type, tree rhs1, tree idx)
 	  t1 = handle_operand (rhs1, t1);
 	  if (m_first)
 	    m_data[save_data_cnt + 2]
-	      = build_int_cst (NULL_TREE, m_data_cnt);
+	      = build_int_cst (integer_type_node, m_data_cnt);
 	  tree ext = NULL_TREE;
 	  tree bitfld = NULL_TREE;
 	  if (!single_comparison)
@@ -1699,7 +1699,7 @@ bitint_large_huge::handle_cast (tree lhs_type, tree rhs1, tree idx)
 					 ? size_int (high - 1 - tidx) : idx));
 	      if (m_first)
 		m_data[save_data_cnt + 2]
-		  = build_int_cst (NULL_TREE, m_data_cnt);
+		  = build_int_cst (integer_type_node, m_data_cnt);
 	    }
 	  else if (tidx < high)
 	    {
@@ -1707,7 +1707,7 @@ bitint_large_huge::handle_cast (tree lhs_type, tree rhs1, tree idx)
 						  ? high - 1 - low : low));
 	      if (m_first)
 		m_data[save_data_cnt + 2]
-		  = build_int_cst (NULL_TREE, m_data_cnt);
+		  = build_int_cst (integer_type_node, m_data_cnt);
 	      if (!useless_type_conversion_p (m_limb_type, TREE_TYPE (t)))
 		t = add_cast (m_limb_type, t);
 	      tree ext = NULL_TREE;
@@ -1731,7 +1731,7 @@ bitint_large_huge::handle_cast (tree lhs_type, tree rhs1, tree idx)
 					 ? size_int (high - 1)
 					 : size_zero_node));
 		  m_data[save_data_cnt + 2]
-		    = build_int_cst (NULL_TREE, m_data_cnt);
+		    = build_int_cst (integer_type_node, m_data_cnt);
 		}
 	      else
 		m_data_cnt = tree_to_uhwi (m_data[save_data_cnt + 2]);

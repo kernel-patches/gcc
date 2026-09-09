@@ -81,9 +81,8 @@ source_format_t::indicated( char *bol, const char *eol, char ch ) {
   auto ind = bol + left_margin();
   if( eol <= ind ) return NULL; // left margin would be after end of line
   // If TAB is in the line-number region, nothing is in the indicator column.
-  bool has_tab = std::any_of(bol, ind,
-                             [](const char ch) { return ch == '\t'; } );
-  if( has_tab ) return NULL;
+  auto ptab = std::find(bol, ind, '\t');
+  if( ptab != ind) return ptab;
   if( (bol += left_margin()) > eol ) return NULL;
   return ch == '\0' || ch == *bol? bol : NULL;
 }
@@ -1608,8 +1607,6 @@ cdftext::open_input( const char filename[] ) {
     dbgmsg( "could not open '%s': %s", filename, xstrerror(erc) );
   }
 
-  cbl_message(LexInputN, "opening %s for input", filename);
-
   return fd;
 }
 
@@ -1767,8 +1764,8 @@ cdftext::free_form_reference_format( int input,
 
     if( mfile.is_blank_line() ) continue;
 
-    char *indcol = format.top().indicated(mfile.cur, mfile.eol); // true only for fixed
-    //                                              // format
+    // indcol is true only for fixed format
+    char *indcol = format.top().indicated(mfile.cur, mfile.eol); 
 
     if( format.top().is_fixed() && !indcol ) { // short line
       erase_source(mfile.cur, mfile.eol);
@@ -1784,7 +1781,7 @@ cdftext::free_form_reference_format( int input,
         }
       }
 
-      switch( TOUPPER(*indcol) ) {
+      switch(*indcol) {
       case '-':
         gcc_assert(0 < current.line.size());
         /*
@@ -1807,8 +1804,10 @@ cdftext::free_form_reference_format( int input,
         }
         gcc_assert( ! mfile.line_contains_nul() );
         continue;
+      case TAB:
       case SPACE:
         break;
+      case 'd':
       case 'D':
         /*
          * Pass the D to the lexer as 0x8D, because WITH DEBUGGING MODE is
@@ -1867,6 +1866,24 @@ cobol_set_indicator_column( int column ) {
   source_format_t local;
   local.indicator_column_set(column);
   dbgmsg("%s: format now %s", __func__, local.description());
+}
+
+static inline void
+output_segment(const char *beg, const char *end,
+               std::ostream_iterator<char> ofs )
+{
+#if 1
+  std::copy(beg, end, ofs);
+#else
+  // Replace each tab with 8 spaces.
+  for (auto p = beg; p < end; ++p) {
+    if (*p == '\t') {
+      std::generate_n(ofs, 8, [](){ return ' '; });
+      continue;
+    } 
+    *ofs = *p;
+  }
+#endif
 }
 
 void
@@ -1959,7 +1976,7 @@ cdftext::process_file( filespan_t mfile, int output,
       copy.mfile = free_form_reference_format( copy.in, source_format );
 
       if( copied.partial_line.size() ) {
-        std::copy(copied.partial_line.p, copied.partial_line.pend, ofs);
+        output_segment(copied.partial_line.p, copied.partial_line.pend, ofs);
       }
       out.flush();
 
@@ -1997,14 +2014,14 @@ cdftext::process_file( filespan_t mfile, int output,
                     []( char ch ) { return ch == '\n'; } );
     }
     if( replace_directives.empty() ) {
-      std::copy(mfile.cur, mfile.eol, ofs);
+      output_segment(mfile.cur, mfile.eol, ofs);
       continue; // No active REPLACE directive.
     }
 
     std::list<span_t> segments = segment_line(mfile);
 
     for( const auto& segment : segments ) {
-      std::copy(segment.p, segment.pend, ofs);
+      output_segment(segment.p, segment.pend, ofs);
     }
 
     out.flush();
@@ -2012,7 +2029,7 @@ cdftext::process_file( filespan_t mfile, int output,
   // end of file
   if( !second_pass && --nfiles ) {
     static const char file_pop[] = "\f#FILE POP\f";
-    std::copy(file_pop, file_pop + strlen(file_pop), ofs);
+    output_segment(file_pop, file_pop + strlen(file_pop), ofs);
     out.flush();
   }
   if( !included_files.empty() ) { --nfiles; };

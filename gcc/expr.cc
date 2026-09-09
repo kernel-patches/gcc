@@ -13809,7 +13809,7 @@ maybe_optimize_mod_cmp (enum tree_code code, tree *arg0, tree *arg1)
     t = fold_build2_loc (loc, PLUS_EXPR, type, t, c5);
   if (shift)
     {
-      tree s = build_int_cst (NULL_TREE, shift);
+      tree s = build_int_cst (integer_type_node, shift);
       t = fold_build2_loc (loc, RROTATE_EXPR, type, t, s);
     }
 

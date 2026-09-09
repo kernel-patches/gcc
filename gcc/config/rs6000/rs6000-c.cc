@@ -921,7 +921,7 @@ altivec_build_resolved_builtin (tree *args, int n, tree fntype, tree ret_type,
 
       args[0] = c_fold_build2_loc (UNKNOWN_LOCATION, BIT_XOR_EXPR,
 				   TREE_TYPE (args[0]), args[0],
-				   build_int_cst (NULL_TREE, 2));
+				   build_int_cst (integer_type_node, 2));
     }
 
   for (int j = 0; j < n; j++)
@@ -1646,7 +1646,7 @@ resolve_vec_step (resolution *res, vec<tree, va_gc> *arglist, unsigned nargs)
     }
 
   *res = resolved;
-  return build_int_cst (NULL_TREE, TYPE_VECTOR_SUBPARTS (arg0_type));
+  return build_int_cst (integer_type_node, TYPE_VECTOR_SUBPARTS (arg0_type));
 }
 
 /* Look for a matching instance in a chain of instances.  INSTANCE points to

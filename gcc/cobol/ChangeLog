@@ -1,3 +1,51 @@
+2026-09-08  James K. Lowden  <jklowden@cobolworx.com>
+
+	* parse_ante.h (by_content_ok): Add test for literal.
+
+2026-09-08  James K. Lowden  <jklowden@cobolworx.com>
+
+	* gcobol.1: Update description of BY CONTENT and Intrinsics.
+
+2026-09-08  James K. Lowden  <jklowden@cobolworx.com>
+
+	* lexio.cc (source_format_t::indicated): Return pointer to TAB if found.
+	(cdftext::free_form_reference_format): Drop unnecessary TOUPPER.
+	* lexio.h (TAB): Define symbol.
+	* scan.l: Ignore text in comment_entries start condition.
+	* scan_ante.h (symbol_exists): Use single-name lookup as fallback.
+	* symbols.cc (field_str): Print partially-defined FldSwitch.
+
+2026-09-08  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cdf-copy.cc (copybook_elem_t::open_file):
+	Correct Wcopybook-found diagnostic.
+	* lexio.cc (cdftext::open_input): Same.
+	(output_segment): New function with defeated tab-expansion.
+	(cdftext::process_file): Use new output_segment function.
+	* parse.y: Support Wredefines-table and EXIT RETURNING.
+	Use diagnostic quotes.
+	* scan.l: Support PIC 9(2)9(3) and PIC 9(name).
+	Remove BLANK_OEOL pattern.
+	* scan_ante.h (repeat_count): Return uninterpreted input.
+	(ndigit): Interpret more than one count.
+	(picset): Accept optional length.
+	(symbol_lower_name): Remove function.
+	(symbol_exists): Use map-supported symbol_find().
+	(scanner_cache_update): Remove function.
+	(typed_name): Return UDF token, not name, if found.
+	(continue_string): New function for string concatenation.
+	* symbols.cc (symbol_function_impl): Use new symbols.functions map.
+	(symbol_file_add): Add file to symbol-table map.
+	(symbol_file): Remove scan, add search for GLOBAL FD.
+	* symbols.h (symbol_find): Quell diagnostic when called from lexer.
+	(class name_queue_t): Return empty list when queue is empty.
+	* symfind.cc (symbol_match): Accept quell parameter.
+	(symbol_find): Same.
+	(symbol_find_of): Supply quell parameter.
+	* util.cc (cdf_field_add): Use symbol_field_add.
+	(named_constant): New function.
+	(repeat_count): Declare to match new return type.
+
 2026-09-06  Robert Dubner  <rdubner@symas.com>
 
 	* genapi.cc (inspect_replacing): Use SBC version.

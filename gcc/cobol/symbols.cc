@@ -104,7 +104,7 @@ static struct symbol_table_t {
 
   struct symbol_elem_t *elems;
 
-  std::map<elem_key_t, size_t> specials, programs, functions;
+  std::map<elem_key_t, size_t> specials, files, programs, functions;
   std::map<elem_key_t, std::list<size_t>> labels;
 
   std::vector<symbol_pair_t> mappings;
@@ -136,13 +136,20 @@ static struct symbol_table_t {
     const char *name = cbl_label_of(e)->name;
     labels[ elem_key_t(e->program, name) ].push_back( symbol_index(e) );
   }
+  void file_add( size_t isym ) {
+    auto e = elems + isym;
+    auto L = cbl_file_of(e);
+    elem_key_t key(e->program, L->name);
+    files[key] = isym;
+  }
+
   void program_add( size_t isym ) { label_add(programs, isym); }
   void function_add( size_t isym ) { label_add(functions, isym); }
  protected:
   void label_add( std::map<elem_key_t, size_t>& M, size_t isym ) {
     auto e = elems + isym;
     auto L = cbl_label_of(e);
-    auto key( elem_key_t(e->program, L->name) );
+    elem_key_t key(e->program, L->name);
     M[key] = isym;
   }
 } symbols;
@@ -677,7 +684,6 @@ enum protoreq_t {
 static struct symbol_elem_t *
 symbol_function_impl( size_t parent, const char name[], protoreq_t protoreq )
 {
-#if 1
   auto key( elem_key_t(parent, name) );
   auto p = symbols.functions.find(key);
   if( p == symbols.functions.end() ) return nullptr;
@@ -686,29 +692,6 @@ symbol_function_impl( size_t parent, const char name[], protoreq_t protoreq )
   if( protoreq == proto_required_e   && !L->prototype ) return nullptr;
   if( protoreq == proto_disallowed_e &&  L->prototype ) return nullptr;
   return e;
-#else
-  auto p = std::find_if( symbols_begin(), symbols_end(),
-                         [parent, name, protoreq]( const auto& elem ) {
-                           if( elem.type == SymLabel ) {
-                             auto L = cbl_label_of(&elem);
-                             if( L->type == LblFunction ) {
-                               if( protoreq == proto_required_e && !L->prototype ) {
-                                 return false;
-                               }
-                               if( protoreq == proto_disallowed_e && L->prototype ) {
-                                 return false;
-                               }
-                               // allowed or meets above requirement
-                               return 0 == strcasecmp(L->name, name);
-                             }
-                           }
-                           return false;
-                         } );
-
-  if( yydebug && p == symbols_end() ) symbols_dump( symbols.first_program, true);
-
-  return p == symbols_end()? NULL : p;
-#endif
 }
 
 struct symbol_elem_t *
@@ -1659,7 +1642,8 @@ field_str( const cbl_field_t *field ) {
     }
   } else {
     init = "NULL";
-    if( field->type == FldSwitch ) {
+    if( field->type == FldSwitch
+     && field->data.etc_type == cbl_field_data_t::upsi_e ) {
       init = xasprintf("0x%02x", field->data.upsi_mask_of()->value);
     }
   }
@@ -2790,6 +2774,8 @@ symbol_file_add( size_t program, cbl_file_t *file ) {
     same_record_areas[f.same_record_as].insert(symbol_index(e));
   }
 
+  symbols.file_add( symbol_index(e) );
+
   return e;
 }
 
@@ -3094,47 +3080,30 @@ symbol_literalA( size_t program, const char name[] )
 
 struct symbol_elem_t *
 symbol_file( size_t program, const char name[] ) {
-  size_t nelem = symbols.nelem;
-  symbol_elem_t key{ SymFile, program }, *e = &key;
+  auto key( elem_key_t(program, name) );
+  auto p = symbols.files.find(key);
+  
+  if( p == symbols.files.end() ) { // Look for global FD in containing program.
+    while( key.program ) {
+      key.program = symbol_at(key.program)->program;
+      p = symbols.files.find(key);
+      if( p != symbols.files.end() ) {
+        auto f = cbl_file_of(symbol_at(p->second));
+        if( f->attr & global_e ) break;
+      }
+    }
+  }
 
-  assert(strlen(name) < sizeof(key.elem.file.name));
-  strcpy(key.elem.file.name, name);
-
-  // cppcheck-suppress-begin [knownConditionTrueFalse]
-  do {
-    e = static_cast<struct symbol_elem_t *>(lfind( &key, symbols.elems,
-                                                   &nelem, sizeof(*e),
-                                                   symbol_elem_cmp ) );
-    if( e ) break;
-    key.program = cbl_label_of(symbol_at(key.program))->parent;
-    if( key.program == 0 ) break; // no file without a program
-  } while( !e );
-  // cppcheck-suppress-end [knownConditionTrueFalse]
-
-  if( e ) {
-    assert(e->type == SymFile);
+  if( key.program ) {
+    gcc_assert(p != symbols.files.end());
+    dbgmsg("%s:%d: found: %s as #%lu", __func__, __LINE__,
+           name, (unsigned long)p->second);
+    auto e = symbol_at(p->second);
     return e;
-  }
+  }    
 
-  // perhaps a record name?
-  for( e = symbol_field(program, 0, name); e != NULL; e = symbol_parent(e) ) {
-    if( e->type == SymFile ) {
-      return e;
-    }
-    if( e->type != SymField ) {
-      dbgmsg("%s:%d: '%s' is not a file and has parent of type %s",
-            __func__, __LINE__, name, symbol_type_str(e->type));
-      return NULL;
-    }
-    if( symbol_index(e) == 0 ) {
-      dbgmsg("%s:%d: '%s' is not a file and has no parent",
-            __func__, __LINE__, name);
-      return NULL;
-    }
-  }
-
-  assert(!e);
-  return e;
+  dbgmsg("%s:%d: not found: %s", __func__, __LINE__, name);
+  return nullptr;
 }
 
 struct symbol_elem_t *

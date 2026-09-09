@@ -85,6 +85,9 @@ private:
   // Range cache for SSA names.
   ssa_lazy_cache m_cache;
 
+  // All the pointer typed exit dependencies in the path.
+  auto_vec<tree> m_pointer_exit_dependencies;
+
   // Path being analyzed.
   auto_vec<basic_block> m_path;
 

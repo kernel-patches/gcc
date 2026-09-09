@@ -88,7 +88,6 @@ BLANK  [[:blank:]]+
 OBLANK [[:blank:]]*
 EOL  \r?\n
 BLANK_EOL   [[:blank:]]*{EOL}
-BLANK_OEOL  [[:blank:]]*{EOL}?
 
 PICTURE   [^[:space:]]+
 
@@ -106,9 +105,13 @@ EOPIC	  [.,;]?[[:space:]]
 
 SKIP	  [[:blank:]]*SKIP[123][[:blank:]]*[.]?{BLANK_EOL}
 
+NAME      [[:alnum:]]+([_-]+[[:alnum:]]+)*
+
 COUNT     [(][[:digit:]]+[)]
-N9        9+|(9{COUNT})
-NP        P+|(P{COUNT})
+NAMECOUNT [(]{NAME}[)]
+                        
+N9        9+|9{COUNT}|9{NAMECOUNT}
+NP        P+|P{COUNT}
 
 UNSIGNED  [[:space:]]+UNSIGNED
 SIGNED    [[:space:]]+SIGNED
@@ -158,7 +161,6 @@ DATETIME_FMT ({DATE_FMT_B}T{TIME_FMT_B})|({DATE_FMT_E}T{TIME_FMT_E})
 
 TITLE    TITLE
 
-NAME      [[:alnum:]]+([_-]+[[:alnum:]]+)*
 SUBELEMS  {NAME}({SPC}{NAME})*
 
 EOP (EOP|END-OF-PAGE)
@@ -296,12 +298,13 @@ PROGRAM-ID{OSPC}{DOTSEP}?	{ yy_push_state(ident_state);
 
 <comment_entries>{
   (ENVIRONMENT|DATA|PROCEDURE){SPC}DIVISION  { myless(0); yy_pop_state(); }
+  {COMMENTARY}.*
+  [[:blank:]]+
+  [[:graph:]]+ 
   {BLANK_EOL}
-  [^[:space:]]{1,512}{BLANK_OEOL}  // about 1/2 KB at a time
 }
 
 <ident_state>{
-  {BLANK_OEOL}
   EJECT{DOTEOL}?			{ dialect_ok(yylloc, IbmEjectE, "EJECT"); }
   ID(ENTIFICATION)?{SPC}DIVISION	{ myless(0); yy_pop_state(); }
   (ENVIRONMENT|DATA|PROCEDURE){SPC}DIVISION {
@@ -312,7 +315,7 @@ PROGRAM-ID{OSPC}{DOTSEP}?	{ yy_push_state(ident_state);
   AS{SPC}[''] 	{ yy_push_state(quoted1); return AS; }
   IS		{ pop_return IS; }
 
-  {COMMENTARY} { BEGIN(comment_entries); }
+  {COMMENTARY}.* { BEGIN(comment_entries); }
 }
 
 <INITIAL>{
@@ -1358,9 +1361,6 @@ USE({SPC}FOR)?		{ return USE; }
     * Any blank or separator period ends terminates the picture.
     */
 <picture>{
-  ^[[:blank:]]+
-  ^{BLANK_EOL}
-
   {COMMA} 			|
   [[:blank:]]*{EOL}		|
   [[:blank:]]+{EOL}?		{ yy_pop_state(); /* embedded/trailing blank */ }
@@ -1372,21 +1372,18 @@ USE({SPC}FOR)?		{ return USE; }
   /* Sign, if any, first */
   S/({NP}|{N9}|V)+{EOPIC} { return picset('S'); }
   /* P's either lead (after sign) or trail, with any V adjacent, see Table 10. */
-  V?{NP}/{N9}*{EOPIC}   { yylval.number =   ndigit(yyleng); return picset(PIC_P); }
-  {NP}V?/{EOPIC}        { yylval.number =   ndigit(yyleng); return picset(PIC_P); }
+  V?{NP}/{N9}*{EOPIC}   { yylval.number = ndigit(yyleng); return picset(PIC_P); }
+  {NP}V?/{EOPIC}        { yylval.number = ndigit(yyleng); return picset(PIC_P); }
   /* Parser accepts any sequence of 9's with one optional V. */
-  {N9}?V/{N9}*{EOPIC}   { yylval.number = ndigit(yyleng - 1); return picset(NINEV); }
-  {N9}/{NP}?V?{EOPIC}   { yylval.number = ndigit(yyleng); return picset(NINES); }
-  /* Match 99(5) as 9 and 9(5) */
-  99+{COUNT}/(V|{N9})*{EOPIC} {
-    auto len = length_upto('(');
-    yylval.number = len;
-    myless(len);
-    return picset(NINES);
-  }
-  [9P]+[(]{NAME}[)] {
-    cbl_unimplemented_at(yylloc, "unimplemented: symbolic count for numeric PICTURE" );
-  }
+  {N9}*V/{N9}*{EOPIC}   { yylval.number = ndigit(yyleng - 1); return picset(NINEV); }
+  {N9}+{NP}?V?{EOPIC}   { const char *p = yytext + yyleng;
+			  yylval.number = ndigit(yyleng, &p);
+                          int len = p - yytext;
+                          int token = picset(NINES, len);
+                          if( len < yyleng ) myless(len);
+                          return token; }
+
+  [9P]+[(]{NAME}[)] { gcc_unreachable(); }
 
   1{1,31}/({COUNT}|[(]{NAME}[)]) {
                          yy_push_state(picture_count);
@@ -1505,7 +1502,12 @@ USE({SPC}FOR)?		{ return USE; }
   [""]{SPC}[&]{SPC}[""''] {
 		        if( yytext[yyleng - 1] == '\'' ) BEGIN(quoted1);
 		      }
-  [""]-{OSPC}({EOL}{OSPC})+[""] /* continue ...  */
+  [""]-{OSPC}{EOL}    {  // string continuation
+			int ch = continue_string(*yytext);
+                        if( ch != *yytext ) {
+			  error_msg(yylloc, "invalid string continuation");
+                        }
+		      }
   [""]                {
       			char *s = xstrdup(tmpstring? tmpstring : "\0");
                         yylval.literal.set_data(strlen(s), s);
@@ -1522,7 +1524,12 @@ USE({SPC}FOR)?		{ return USE; }
   ['']{SPC}[&]{SPC}[""''] {
 		        if( yytext[yyleng - 1] == '"' ) BEGIN(quoted2);
 		      }
-  ['']-{OSPC}({EOL}{OSPC})+[''] /* continue ...  */
+  ['']-{OSPC}{EOL}    {  // string continuation
+			int ch = continue_string(*yytext);
+                        if( ch != *yytext ) {
+			  error_msg(yylloc, "invalid string continuation");
+                        }
+		      }
   ['']                {
       			char *s = xstrdup(tmpstring? tmpstring : "\0");
                         yylval.literal.set_data(strlen(s), s);
@@ -2025,7 +2032,6 @@ USE({SPC}FOR)?		{ return USE; }
 }
 
 <program_id_state>{
-  {BLANK_OEOL}
   (IS)?[[:space:]]
   AS/{SPC} 	{ myless(0); yy_pop_state(); } /* => ident_state */
 
@@ -2041,8 +2047,6 @@ USE({SPC}FOR)?		{ return USE; }
 }
 
 <name_state>{           /* Either pop from here, or let the quoted state pop */
-  {BLANK_OEOL}
-
   {NAME}	        { yy_pop_state();
 			  yylval.string = xstrdup(yytext);
 			  return NAME; 
@@ -2078,7 +2082,7 @@ USE({SPC}FOR)?		{ return USE; }
   {PREFIX}?[""]/{STRING2}[""]      { yylval.literal.set_prefix(yytext, yyleng-1);
 			     yy_push_state(quoted2); }
 
-  {INTEGERZ}/[[:punct:]][[:space:]]{BLANK_OEOL} { return numstr_of(yytext); }
+  {INTEGERZ}/[[:punct:]][[:space:]]{BLANK_EOL}? { return numstr_of(yytext); }
   {dfc}/[[:blank:][:punct:]]         		{ return numstr_of(yytext); }
 
   [+-]?({dfc}|{dseq})([.,][[:digit:]])* { auto eotext = yytext + yyleng - 1;
@@ -2301,8 +2305,8 @@ USE({SPC}FOR)?		{ return USE; }
     auto p = std::find_if(beg, end, []( char ch ) { return ISSPACE(ch); });
     auto len = p.base() - yytext;
     myless(len); // avoid dangerous trailing context
-    return LENGTH_OF; }
-
+    return LENGTH_OF;
+  }
   {NAME}/{SPC}(IN|OF)[[:space:]] {
     tee_up_name(yylloc, xstrdup(yytext));
   }
@@ -2568,7 +2572,7 @@ USE({SPC}FOR)?		{ return USE; }
 [*]CBL		{ return STAR_CBL; }
 [*]CONTROL	{ return STAR_CBL; }
 
-(PROCESS|CBL)({BLANK}.*)?/{EOL} {
+(PROCESS|CBL)({BLANK}.*)?{EOL} {
 		  yylval.string = xstrdup(yytext);
                   for(char *p = yylval.string + strlen(yylval.string) - 1;
                       *p == 0x20; p-- ) {

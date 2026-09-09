@@ -6924,7 +6924,7 @@ alpha_va_start (tree valist, rtx nextarg ATTRIBUTE_UNUSED)
       TREE_SIDE_EFFECTS (t) = 1;
       expand_expr (t, const0_rtx, VOIDmode, EXPAND_NORMAL);
 
-      t = build_int_cst (NULL_TREE, NUM_ARGS * UNITS_PER_WORD);
+      t = build_int_cst (integer_type_node, NUM_ARGS * UNITS_PER_WORD);
       t = build2 (MODIFY_EXPR, TREE_TYPE (offset_field), offset_field, t);
       TREE_SIDE_EFFECTS (t) = 1;
       expand_expr (t, const0_rtx, VOIDmode, EXPAND_NORMAL);

@@ -4173,16 +4173,16 @@ compute_overlap_steps_for_affine_univar (HOST_WIDE_INT niter,
 	  tau2 = FLOOR_DIV (niter, step_overlaps_a);
 	  tau2 = MIN (tau2, FLOOR_DIV (niter, step_overlaps_b));
 	  last_conflict = tau2;
-	  *last_conflicts = build_int_cst (NULL_TREE, last_conflict);
+	  *last_conflicts = build_int_cst (integer_type_node, last_conflict);
 	}
       else
 	*last_conflicts = chrec_dont_know;
 
       *overlaps_a = affine_fn_univar (integer_zero_node, dim,
-				      build_int_cst (NULL_TREE,
+				      build_int_cst (integer_type_node,
 						     step_overlaps_a));
       *overlaps_b = affine_fn_univar (integer_zero_node, dim,
-				      build_int_cst (NULL_TREE,
+				      build_int_cst (integer_type_node,
 						     step_overlaps_b));
     }
 
@@ -4734,14 +4734,14 @@ analyze_subscript_affine_affine (tree chrec_a,
 
 	      *overlaps_a
 		= conflict_fn (1,
-			       affine_fn_univar (build_int_cst (NULL_TREE, x1),
+			       affine_fn_univar (build_int_cst (integer_type_node, x1),
 						 1,
-						 build_int_cst (NULL_TREE, i1)));
+						 build_int_cst (integer_type_node, i1)));
 	      *overlaps_b
 		= conflict_fn (1,
-			       affine_fn_univar (build_int_cst (NULL_TREE, y1),
+			       affine_fn_univar (build_int_cst (integer_type_node, y1),
 						 1,
-						 build_int_cst (NULL_TREE, j1)));
+						 build_int_cst (integer_type_node, j1)));
 	    }
 	  else
 	    {

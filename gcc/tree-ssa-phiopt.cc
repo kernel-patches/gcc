@@ -4569,6 +4569,10 @@ hoist_adjacent_loads (basic_block bb0, basic_block bb1,
       gsi_move_to_bb_end (&gsi2, bb0);
       gsi2 = gsi_for_stmt (def2);
       gsi_move_to_bb_end (&gsi2, bb0);
+      /* Clear range info from the defs we've moved from under the
+	 condition.  */
+      reset_flow_sensitive_info (gimple_assign_lhs (def1));
+      reset_flow_sensitive_info (gimple_assign_lhs (def2));
       statistics_counter_event (cfun, "hoisted loads", 1);
 
       if (dump_file && (dump_flags & TDF_DETAILS))

@@ -1,3 +1,9 @@
+2026-09-08  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
+
+	PR middle-end/126622
+	* d-builtins.cc (DEF_ATTR_INT): Use
+	build_int_cst (integer_type_node, cst).
+
 2026-09-04  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
 
 	PR middle-end/125507

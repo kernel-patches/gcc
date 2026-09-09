@@ -285,6 +285,8 @@ copybook_elem_t::open_file( const char directory[], bool literally ) {
       error_msg(source.loc, "recursive copybook: '%s' includes itself", path);
       (void)! close(fd);
       fd = -1;
+    } else {
+      cbl_message(LexInputN, "opening %qs for input", source.name);
     }
     return fd;
   }

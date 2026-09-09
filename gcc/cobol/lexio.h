@@ -40,6 +40,7 @@
 #ifndef _LEXIO_H_
 #define _LEXIO_H_
 
+#define TAB   '\t'
 #define SPACE ' '
 
 bool lexer_echo();

@@ -1,3 +1,201 @@
+2026-09-08  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
+
+	PR middle-end/126622
+	* config/alpha/alpha.cc (alpha_va_start): Use
+	build_int_cst (integer_type_node, cst).
+	* config/i386/i386-options.cc (ix86_handle_tm_regparm_attribute): Ditto.
+	* config/mips/mips.cc (mips_build_builtin_va_list): Ditto.
+	(mips_gimplify_va_arg_expr): Ditto.
+	* config/rs6000/rs6000-call.cc (rs6000_va_start): Ditto.
+	* config/rs6000/rs6000-c.cc (altivec_build_resolved_builtin): Ditto.
+	(resolve_vec_step): Ditto.
+	* config/s390/s390.cc (s390_va_start): Ditto.
+	* config/s390/s390-c.cc (s390_expand_overloaded_builtin): Ditto.
+	(s390_resolve_overloaded_builtin): Ditto.
+	* config/stormy16/stormy16.cc (xstormy16_expand_builtin_va_start): Ditto.
+	* gimple-lower-bitint.cc (bitint_large_huge::handle_cast): Ditto.
+	* omp-simd-clone.cc (simd_clone_adjust): Ditto.
+	* trans-mem.cc (ipa_tm_insert_irr_call): Ditto.
+	* tree-data-ref.cc (compute_overlap_steps_for_affine_univar): Ditto.
+	(analyze_subscript_affine_affine): Ditto.
+	* tsan.cc (instrument_builtin_call): Ditto.
+	* omp-expand.cc (expand_omp_atomic_fetch_op): Ditto.
+	(expand_omp_atomic_cas): Ditto.
+	(expand_omp_atomic_pipeline): Ditto.
+	* tree-vect-generic.cc (add_shift): Ditto.
+	* tree-vect-patterns.cc (vect_recog_divmod_pattern): Ditto.
+	* expr.cc (maybe_optimize_mod_cmp): Ditto.
+	* gimple-ssa-store-merging.cc (bswap_replace): Ditto.
+	(imm_store_chain_info::output_merged_store): Ditto.
+	* omp-low.cc (lower_omp_ordered): Ditto.
+
+2026-09-08  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
+
+	* tree-pretty-print.h (pp_double_int): Remove.
+	* tree-pretty-print.cc (pp_double_int): Ditto.
+
+2026-09-08  Aldy Hernandez  <aldy@quesejoda.com>
+
+	* gimple-range-path.h (path_range_query::m_pointer_exit_dependencies):
+	New.
+	* gimple-range-path.cc (path_range_query::adjust_for_non_null_uses):
+	Walk m_pointer_exit_dependencies, and return early for a block with no
+	inferred ranges.
+	(path_range_query::compute_ranges): Fill in m_pointer_exit_dependencies.
+
+2026-09-08  Aldy Hernandez  <aldy@quesejoda.com>
+
+	* gimple-range-path.cc (path_range_query::reset_path): Splice
+	into the existing path vector.
+	(path_range_query::compute_ranges): Reset the path oracle
+	unconditionally.
+	* tree-ssa-threadbackward.cc (back_threader::m_solver): New.
+	(back_threader::back_threader): Allocate it.
+	(back_threader::~back_threader): Free it.
+	(back_threader::find_taken_edge_goto): Use it.
+	(back_threader::find_taken_edge_switch): Same.
+	(back_threader::find_taken_edge_cond): Same.
+
+2026-09-08  Rohith Kapelli  <kapellirohith@gmail.com>
+
+	PR ipa/119006
+	* ipa-icf-gimple.cc (func_checker::compare_operand): Pass
+	OEP_ADDRESS_OF_SAME_FIELD to operand_equal_p.
+
+2026-09-08  Dominic P  <gcc@gcc.dp11.uk>
+
+	* match.pd (((x >> 1) + (y >> 1)) + ((x | y) & 1)): New pattern.
+
+2026-09-08  Zhongyao Chen  <chenzhongyao.hit@gmail.com>
+
+	PR target/126932
+	* config/riscv/autovec.md: Rewrite vector FMA patterns.
+	* config/riscv/autovec-opt.md: Likewise and add new patterns.
+
+2026-09-08  Andrea Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR tree-optimization/117193
+	* fold-const.cc (combine_comparisons): Add support
+	for LT, GT, LE, and GE.
+	* match.pd (`(a CMP0 b) OP (a OP1 b)`): Change to use simple_comparison
+	instead of eq/ne.
+
+2026-09-08  Andrea Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR tree-optimization/107881
+	* fold-const.cc (enum comparison_code): Mark underlying type as
+	unsigned char. Wrap in an anonymous namespace.
+	(operator~): New function.
+	(operator|): New function.
+	(operator&): New function.
+	(operator^): New function.
+	(combine_comparisons): Add support for 	NE/XOR and EQ.
+	* match.pd (`(a CMP1 b) OP (a CMP2 b)`): Move
+	above others and add NE, XOR and EQ to the list of OPs.
+	(`(a CMP1 b) ^ (a CMP2 b)`): Remove.
+	(`(a CMP1 b) == (a CMP2 b)`): Remove.
+
+2026-09-08  Andrea Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR middle-end/126912
+	* doc/match-and-simplify.texi: Document new
+	with optional operands.
+	* genmatch.cc (fprint_indent): New function.
+	(class c_code_id): New class.
+	(c_code_id::gen_checking): New mthod.
+	(get_operator): For c_code_id, mark it as used too.
+	(lower_for): Treat c_code_id like a function.
+	(get_operand_type): Handle c_code_id with cmps
+	set as a comparison.
+	(expr::gen_transform): Likewise.
+	Call gen_checking for c_code_id and handle
+	c_code_id for generic for function and tree code case.
+	(dt_simplify::gen_1): Handle c_code_id.
+	(parser::parse_c_with_ids): New method.
+	(parser::parse_result): Handle optional part of with.
+	* match.pd (`(a CMP1 b) bitop (a CMP2 b)`): Remove rcmp
+	loop and update for the new syntax.
+	(other comparison loops): Update for the new syntax.
+
+2026-09-08  Joel Sherrill  <joel@rtems.org>
+
+	* config/microblaze/rtems.h: RTEMS needs this defined to
+	select the proper procedure for executing the
+	global constructors.
+
+2026-09-08  Wang Yaduo  <wangyaduo@linux.alibaba.com>
+
+	* config/riscv/riscv-vector-costs.cc (costs::add_stmt_cost): Skip
+	statement cost adjustments for scalar costing.
+
+2026-09-08  Richard Biener  <rguenther@suse.de>
+
+	PR tree-optimization/127245
+	* tree-vect-slp.cc (vect_slp_analyze_node_operations): Check
+	whether child passes vect_get_num_copies_for_invariant.
+
+2026-09-08  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* ifcvt.cc (cond_exec_process_insns): Document the parameters in the
+	function comment instead of between them.
+	(cond_exec_process_if_block): Likewise.
+
+2026-09-08  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* ifcvt.cc (noce_try_cond_arith): Return bool instead of int.
+	(block_jumps_and_fallthru): Use a logical test on the bool flags.
+
+2026-09-08  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* tree-ssa-math-opts.cc (match_arith_overflow): Canonicalize the
+	operands of commutative overflow internal functions.
+
+2026-09-08  Chung-Lin Tang  <cltang@baylibre.com>
+
+	PR middle-end/122205
+	* omp-offload.cc (omp_discover_implicit_declare_target): For variables,
+	under 'OMP_REQUIRES_SELF_MAPS | OMP_REQUIRES_UNIFIED_SHARED_MEMORY',
+	remove "omp declare target" attribute and add "omp declare target link".
+
+2026-09-08  Artemiy Volkov  <artemiy.volkov@arm.com>
+
+	* config/aarch64/aarch64.md
+	(*extend<SHORT:mode><GPI:mode>2_aarch64): Use extsize instead of
+	size.
+	(*adds_<optab><ALLX:mode>_<GPI:mode>): Likewise.
+	(*subs_<optab><ALLX:mode>_<GPI:mode>): Likewise.
+	(*adds_<optab><ALLX:mode>_shift_<GPI:mode>): Likewise.
+	(*subs_<optab><ALLX:mode>_shift_<GPI:mode>): Likewise.
+	(*add_<optab><ALLX:mode>_<GPI:mode>): Likewise.
+	(*add_<optab><SHORT:mode>_si_uxtw): Likewise.
+	(*add_<optab><ALLX:mode>_shft_<GPI:mode>): Likewise.
+	(*add_<optab><SHORT:mode>_shft_si_uxtw): Likewise.
+	(*sub_<optab><ALLX:mode>_<GPI:mode>): Likewise.
+	(*sub_<optab><SHORT:mode>_si_uxtw): Likewise.
+	(*sub_<optab><ALLX:mode>_shft_<GPI:mode>): Likewise.
+	(*sub_<optab><SHORT:mode>_shft_si_uxtw): Likewise.
+	(*cmp_swp_<optab><ALLX:mode>_reg<GPI:mode>): Likewise.
+	(*cmp_swp_<optab><ALLX:mode>_shft_<GPI:mode>): Likewise.
+	* config/aarch64/aarch64-simd.md (*aarch64_combinez<mode>):
+	Likewise.
+	(*aarch64_combinez_be<mode>): Likewise.
+	* config/aarch64/atomics.md
+	(*aarch64_atomic_load<ALLX:mode>_rcpc_sext): Likewise.
+	* config/aarch64/iterators.md (size): Yield empty string for SI.
+	(extsize): New iterator.
+
+2026-09-08  Takayuki 'January June' Suwa  <jjsuwa_sys3175@yahoo.co.jp>
+
+	* config/xtensa/xtensa.md (movsf_internal):
+	Prefix register constraints with '*' for hardware FP register load
+	and store alternatives.
+
+2026-09-08  Jack O'Donohue  <jackodonohue41@gmail.com>
+
+	* config/sh/sh.cc (sh1_builtin_p): Rename to sh_fpu_p.
+	(sh_fpu_p): Check TARGET_FPU_ANY instead of TARGET_SH1.
+	(bdesc): Update sh1_builtin_p to sh_fpu_p.
+
 2026-09-07  Roger Sayle  <roger@nextmovesoftware.com>
 
 	* expmed.cc (store_fixed_bit_field_1): Use new aop_optab when

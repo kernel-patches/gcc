@@ -4146,7 +4146,7 @@ struct GTY(()) lang_decl {
 /* Below are the setter and getter of the NON_DEFAULT_TEMPLATE_ARGS_COUNT
    property.  */
 #define SET_NON_DEFAULT_TEMPLATE_ARGS_COUNT(NODE, INT_VALUE) \
-  NON_DEFAULT_TEMPLATE_ARGS_COUNT(NODE) = build_int_cst (NULL_TREE, INT_VALUE)
+  NON_DEFAULT_TEMPLATE_ARGS_COUNT(NODE) = build_int_cst (integer_type_node, INT_VALUE)
 #if CHECKING_P
 #define GET_NON_DEFAULT_TEMPLATE_ARGS_COUNT(NODE) \
     int_cst_value (NON_DEFAULT_TEMPLATE_ARGS_COUNT (NODE))

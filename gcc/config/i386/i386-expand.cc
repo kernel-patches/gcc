@@ -19557,7 +19557,10 @@ ix86_expand_vector_init_v4sf (rtx target, rtx *ops)
 	  rtx tmp1 = gen_reg_rtx (V2SFmode);
 	  ix86_expand_vector_init_concat (V2SFmode, tmp1, ops, 2);
 	  rtx tmp2 = gen_reg_rtx (V2SFmode);
-	  emit_insn (gen_rtx_SET (tmp2, CONST0_RTX (V2SFmode)));
+	  /* Without both MMX and TARGET_MMX_WITH_SSE there's no movv2sf,
+	     go through emit_move_insn so the zero can be materialized in
+	     the corresponding integer mode.  */
+	  emit_move_insn (tmp2, CONST0_RTX (V2SFmode));
 	  rtx tmp = gen_rtx_VEC_CONCAT (V4SFmode, tmp1, tmp2);
 	  emit_insn (gen_rtx_SET (target, tmp));
 	}

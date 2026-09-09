@@ -1,3 +1,12 @@
+2026-09-08  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
+
+	PR middle-end/126622
+	* gcc-interface/utils.cc (DEF_ATTR_INT): Use
+	build_int_cst (integer_type_node, cst).
+	* gcc-interface/utils2.cc (expand_sloc): Ditto.
+	* gcc-interface/trans.cc (Attribute_to_gnu): Ditto.
+	(gnat_gimplify_stmt): Ditto.
+
 2026-08-26  Eric Botcazou  <ebotcazou@adacore.com>
 
 	PR ada/127026

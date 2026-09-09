@@ -1,3 +1,92 @@
+2026-09-08  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/126964
+	* gfortran.dg/c_loc_test_22.f90: Do not expect span addressing
+	where the spacing is not known to be folded.
+	* gfortran.dg/gomp/target-span-1.f90: Likewise.
+
+2026-09-08  James K. Lowden  <jklowden@cobolworx.com>
+
+	* cobol.dg/group2/PR126612_-_Ignore_TRACE_-_gnu.cob: New test.
+	* cobol.dg/group2/PR126612_-_Ignore_TRACE_-_ibm.cob: New test.
+	* cobol.dg/group2/PR126612_-_Ignore_TRACE_-_iso.cob: New test.
+	* cobol.dg/group2/PR126612_-_Ignore_TRACE_-_mf.cob: New test.
+	* cobol.dg/group2/RT3611_-_BY_CONTENT_LENGTH_OF.cob: New test.
+	* cobol.dg/group2/__define__text_.cob: New test.
+	* cobol.dg/group2/__define__text_.out: New test.
+	* cobol.dg/group2/customer_bug_Heuristic_Fail.cob: New test.
+	* cobol.dg/group2/customer_bug_Heuristic_Fail.out: New test.
+
+2026-09-08  Rohith Kapelli  <kapellirohith@gmail.com>
+
+	PR ipa/119006
+	* g++.dg/ipa/pr119006.C: New test.
+
+2026-09-08  Dominic P  <gcc@gcc.dp11.uk>
+
+	* gcc.dg/tree-ssa/avg-ceil-1.c: New test.
+	* gcc.dg/tree-ssa/avg-ceil-2.c: New test.
+	* gcc.target/aarch64/sve/pr89007-1.c: Expect the four-operation
+	form of the rounded average.
+
+2026-09-08  Zhongyao Chen  <chenzhongyao.hit@gmail.com>
+
+	PR target/126932
+	* gcc.target/riscv/rvv/autovec/ternop/pr126932.c: New test.
+
+2026-09-08  Andrea Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR tree-optimization/117193
+	* gcc.dg/tree-ssa/cmple-1.c: New test.
+
+2026-09-08  Andrea Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR tree-optimization/107881
+	* gcc.dg/tree-ssa/cmpeq-5.c: New test.
+	* gcc.dg/tree-ssa/cmpxor-2.c: New test.
+
+2026-09-08  Jason Merrill  <jason@redhat.com>
+
+	* g++.dg/vect/pr36648.cc: Require !implicit_constexpr.
+
+2026-09-08  Lunex  <imlunex2011@gmail.com>
+	    Jason Merrill  <jason@redhat.com>
+
+	PR c++/122258
+	* g++.dg/cpp23/explicit-obj-diagnostics13.C: New test.
+
+2026-09-08  Vladislav Semykin  <vladislav.semykin@gmail.com>
+
+	PR c++/127132
+	* g++.dg/rtti/typeid-lambda-capture-pr127132.C: New test,
+	consolidating the original PR127132 reproducer with the /7 cases
+	previously added to pr125886.C, plus this-capture coverage and
+	closure-size checks.
+
+2026-09-08  Richard Biener  <rguenther@suse.de>
+
+	PR tree-optimization/127245
+	* gcc.dg/vect/vect-pr127245.c: New testcase.
+
+2026-09-08  Kyrylo Tkachov  <ktkachov@nvidia.com>
+
+	* gcc.target/aarch64/add-overflow-canonical-1.c: New test.
+
+2026-09-08  Torbjörn SVENSSON  <torbjorn.svensson@foss.st.com>
+
+	* gcc.dg/vect/vect-alias-check-ptr-info-2.c: Remove explict
+	"dg-do run".
+
+2026-09-08  Tobias Burnus  <tburnus@baylibre.com>
+
+	* gfortran.dg/gomp/underscore_directives-3.f90: New test.
+
+2026-09-08  Jack O'Donohue  <jackodonohue41@gmail.com>
+
+	* gcc.target/sh/getset-fpscr-1.c: New test.
+	* gcc.target/sh/getset-fpscr-2.c: New test.
+	* gcc.target/sh/getset-fpscr-3.c: New test.
+
 2026-09-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
 
 	PR fortran/126964

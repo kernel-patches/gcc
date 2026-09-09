@@ -100,10 +100,11 @@ int folding_initializer = 0;
    during folding in that context.  */
 bool folding_cxx_constexpr = false;
 
+namespace {
 /* The following constants represent a bit based encoding of GCC's
    comparison operators.  This encoding simplifies transformations
    on relational comparison operators, such as AND and OR.  */
-enum comparison_code {
+enum comparison_code : unsigned char {
   COMPCODE_FALSE = 0,
   COMPCODE_LT = 1,
   COMPCODE_EQ = 2,
@@ -121,6 +122,48 @@ enum comparison_code {
   COMPCODE_UNGE = 14,
   COMPCODE_TRUE = 15
 };
+
+// Implements bitwise operators on comparison_code so the
+// upper unused bits are cleared.
+
+// Implements bitwise not on comparison_code
+// clearing the upper unused bits.
+comparison_code
+operator ~(comparison_code cmp)
+{
+  unsigned char newcmp = cmp;
+  newcmp = ~newcmp & 0xF;
+  return (comparison_code)newcmp;
+}
+
+// Implements bitwise ior on comparison_code.
+comparison_code
+operator |(comparison_code cmp0, comparison_code cmp1)
+{
+  unsigned char newcmp = ((unsigned char)cmp0) | cmp1;
+  newcmp = newcmp & 0xF;
+  return (comparison_code)newcmp;
+}
+
+// Implements bitwise and on comparison_code.
+comparison_code
+operator &(comparison_code cmp0, comparison_code cmp1)
+{
+  unsigned char newcmp = ((unsigned char)cmp0) & cmp1;
+  newcmp = newcmp & 0xF;
+  return (comparison_code)newcmp;
+}
+
+// Implements bitwise xor on comparison_code.
+comparison_code
+operator ^(comparison_code cmp0, comparison_code cmp1)
+{
+  unsigned char newcmp = ((unsigned char)cmp0) ^ cmp1;
+  newcmp = newcmp & 0xF;
+  return (comparison_code)newcmp;
+}
+
+}
 
 static bool negate_expr_p (tree);
 static tree negate_expr (tree);
@@ -2962,6 +3005,35 @@ combine_comparisons (enum tree_code code, enum tree_code lcode,
     case TRUTH_OR_EXPR: case TRUTH_ORIF_EXPR:
     case BIT_IOR_EXPR:
       compcode = lcompcode | rcompcode;
+      break;
+
+    case BIT_XOR_EXPR:
+    case NE_EXPR:
+      compcode = lcompcode ^ rcompcode;
+      break;
+
+    case EQ_EXPR:
+      compcode = ~(lcompcode ^ rcompcode);
+      break;
+
+    //`bool0 < bool1` is `!bool0 & bool1`
+    case LT_EXPR:
+      compcode = ~lcompcode & rcompcode;
+      break;
+
+    //`bool0 > bool1` is `bool0 & !bool1`
+    case GT_EXPR:
+      compcode = lcompcode & ~rcompcode;
+      break;
+
+    // `bool0 <= bool1` as !bool0 | bool1
+    case LE_EXPR:
+      compcode = ~lcompcode | rcompcode;
+      break;
+
+    //`bool0 >= bool1` is `bool0 | !bool1`
+    case GE_EXPR:
+      compcode = lcompcode | ~rcompcode;
       break;
 
     default:

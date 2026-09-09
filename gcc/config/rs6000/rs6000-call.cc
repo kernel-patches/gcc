@@ -2509,7 +2509,7 @@ rs6000_va_start (tree valist, rtx nextarg)
   if (cfun->va_list_gpr_size)
     {
       t = build2 (MODIFY_EXPR, TREE_TYPE (gpr), gpr,
-		  build_int_cst (NULL_TREE, n_gpr));
+		  build_int_cst (integer_type_node, n_gpr));
       TREE_SIDE_EFFECTS (t) = 1;
       expand_expr (t, const0_rtx, VOIDmode, EXPAND_NORMAL);
     }
@@ -2517,7 +2517,7 @@ rs6000_va_start (tree valist, rtx nextarg)
   if (cfun->va_list_fpr_size)
     {
       t = build2 (MODIFY_EXPR, TREE_TYPE (fpr), fpr,
-		  build_int_cst (NULL_TREE, n_fpr));
+		  build_int_cst (integer_type_node, n_fpr));
       TREE_SIDE_EFFECTS (t) = 1;
       expand_expr (t, const0_rtx, VOIDmode, EXPAND_NORMAL);
 

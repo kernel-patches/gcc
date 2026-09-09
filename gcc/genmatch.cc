@@ -841,6 +841,15 @@ fprintf_indent (FILE *f, unsigned int indent, const char *format, ...)
   va_end (ap);
 }
 
+// Prints INDENT spaces to F.
+static void
+fprint_indent (FILE *f, unsigned int indent)
+{
+  for (; indent >= 8; indent -= 8)
+    fputc ('\t', f);
+  fprintf (f, "%*s", indent, "");
+}
+
 /* Secondary stream for fp_decl.  */
 static FILE *header_file;
 
@@ -1121,7 +1130,7 @@ comparison_code_p (enum tree_code code)
 class id_base : public nofree_ptr_hash<id_base>
 {
 public:
-  enum id_kind { CODE, FN, PREDICATE, USER, NULL_ID } kind;
+  enum id_kind { CODE, FN, PREDICATE, USER, C_CODE_ID, NULL_ID } kind;
 
   id_base (id_kind, const char *, int = -1);
 
@@ -1199,6 +1208,102 @@ public:
   vec<simplify *> matchers;
 };
 
+// Identifier that maps to a operator defined by a 'C' identifier.
+// Contains code in the id
+// Defined in the `with` expressions.
+
+class c_code_id : public id_base
+{
+public:
+  c_code_id (const char *id_, location_t loc)
+    : id_base (id_base::C_CODE_ID, xstrdup (id_)), m_loc (loc) {}
+  static id_base *get_c_code_id (const char *);
+  ~c_code_id() { delete const_cast<char*>(id); }
+  vec<id_base*> possible_values{vNULL};
+  // These are cached values based on possible_values.
+  // This contains just coparisons.
+  bool m_cmp = false;
+  // Possible values are tree code only.
+  bool m_code_only = false;
+  // Possible values are (combined) functions only.
+  bool m_fn_only = false;
+
+  // Marking so we can detect if the declaration was done in C code.
+  bool used = false;
+  location_t m_loc;
+  void gen_checking (FILE *, int);
+};
+
+
+/* Generates the checking code to make sure that the value of the identifier
+   is only one of the possible values.
+   F is where the printed to.  INDENT is the initial indentation of the
+   code.  */
+
+void
+c_code_id::gen_checking (FILE *f, int indent)
+{
+  // This checking is only done when checking is enabled.
+  fprintf_indent (f, indent, "if (flag_checking)\n");
+  indent+=2;
+
+  fprintf_indent (f, indent, "{\n");
+  indent+=2;
+
+  // For cases were there are possible codes, emit
+  // an assert that the identifier is not an ERROR_MARK.
+  if (!m_fn_only)
+    fprintf_indent (f, indent, "gcc_assert (%s != ERROR_MARK);\n", id);
+
+  // For comparisons, emit an quick assert first.
+  if (m_cmp)
+    fprintf_indent (f, indent, "gcc_assert (TREE_CODE_CLASS (%s) == tcc_comparison);\n", id);
+
+  // Currently only support the case where there is only either functions
+  // or tree codes; not both.
+
+  if (m_code_only)
+    fprintf_indent (f, indent, "switch ((tree_code)%s)\n", id);
+  else
+    fprintf_indent (f, indent, "switch ((combined_fn)%s)\n", id);
+
+  indent+=2;
+  fprintf_indent (f, indent, "{\n");
+  int t = 0;
+
+  // Emit the possible values as a case.
+  for (id_base *i : possible_values)
+    {
+      if (t == 0)
+	fprint_indent (f, indent);
+      if (*id == CONVERT_EXPR || *id == NOP_EXPR)
+	fprintf (f, "CASE_CONVERT:");
+      else
+	fprintf (f, "case %s:", i->id);
+      t++;
+      // Putting 4 on each line for more compact source.
+      if (t < 4)
+	fprintf (f, " ");
+      else
+	{
+	  fprintf (f, "\n");
+	  t = 0;
+	}
+    }
+  if (t != 0)
+    fprintf (f, "\n");
+  fprintf_indent (f, indent, "  break;\n");
+  fprintf_indent (f, indent, "default:\n");
+  fprintf_indent (f, indent, "  gcc_unreachable ();\n");
+  fprintf_indent (f, indent, "}\n");
+  indent-=2;
+
+  indent-=2;
+  fprintf_indent (f, indent, "}\n");
+  indent-=2;
+}
+
+
 /* Identifier that maps to a operator defined by a 'for' directive.  */
 
 class user_id : public id_base
@@ -1242,6 +1347,14 @@ inline bool
 is_a_helper <user_id *>::test (id_base *id)
 {
   return id->kind == id_base::USER;
+}
+
+template<>
+template<>
+inline bool
+is_a_helper <c_code_id *>::test (id_base *id)
+{
+  return id->kind == id_base::C_CODE_ID;
 }
 
 /* If ID has a pair of consecutive, commutative operands, return the
@@ -1398,6 +1511,11 @@ get_operator (const char *id, bool allow_null = false)
     {
       /* If this is a user-defined identifier track whether it was used.  */
       if (user_id *uid = dyn_cast<user_id *> (op))
+	uid->used = true;
+
+      // If this was an C code id, we track to make sure it was declared
+      //  in the C part of the expression.
+      if (c_code_id *uid = dyn_cast<c_code_id *> (op))
 	uid->used = true;
       return op;
     }
@@ -1617,8 +1735,9 @@ class with_expr : public operand
 public:
   with_expr (location_t loc)
     : operand (OP_WITH, loc), with (NULL), subexpr (NULL) {}
-  c_expr *with;
+  c_expr *with{NULL};
   operand *subexpr;
+  vec<c_code_id*> m_ids{};
 };
 
 template<>
@@ -2300,6 +2419,8 @@ lower_for (simplify *sin, vec<simplify *>& simplifiers)
 		  can_delay_subst = false;
 	      }
 	    else if (is_a <fn_id *> (ids[i]->substitutes[j]))
+	      ;
+	    else if (is_a <c_code_id *> (ids[i]->substitutes[j]))
 	      ;
 	    else
 	      can_delay_subst = false;
@@ -3222,8 +3343,10 @@ get_operand_type (id_base *op, unsigned pos,
   else if (*op == REALPART_EXPR
 	   || *op == IMAGPART_EXPR)
     return other_oprnd_type;
-  else if (is_a <operator_id *> (op)
-	   && strcmp (as_a <operator_id *> (op)->tcc, "tcc_comparison") == 0)
+  else if ((is_a <operator_id *> (op)
+	    && strcmp (as_a <operator_id *> (op)->tcc, "tcc_comparison") == 0)
+	   || (is_a <c_code_id *> (op)
+	       && as_a <c_code_id *>(op)->m_cmp))
     return other_oprnd_type;
   else if (*op == COND_EXPR
 	   && pos == 0)
@@ -3285,8 +3408,10 @@ expr::gen_transform (FILE *f, int indent, const char *dest, bool gimple,
 		depth);
       type = optype;
     }
-  else if (is_a <operator_id *> (opr)
-	   && !strcmp (as_a <operator_id *> (opr)->tcc, "tcc_comparison"))
+  else if ((is_a <operator_id *> (opr)
+	     && !strcmp (as_a <operator_id *> (opr)->tcc, "tcc_comparison"))
+	   || (is_a <c_code_id *> (opr)
+	       && as_a <c_code_id *> (opr)->m_cmp))
     {
       /* comparisons use boolean_type_node (or what gets in), but
          their operands need to figure out the types themselves.  */
@@ -3353,6 +3478,10 @@ expr::gen_transform (FILE *f, int indent, const char *dest, bool gimple,
     opr_name = "NOP_EXPR";
   else
     opr_name = operation->id;
+
+  // For C code ID, emit the checking for possible values.
+  if (c_code_id *op_c = dyn_cast<c_code_id*> (operation))
+    op_c->gen_checking (f, indent);
 
   if (gimple)
     {
@@ -3444,6 +3573,7 @@ expr::gen_transform (FILE *f, int indent, const char *dest, bool gimple,
     }
   else
     {
+      c_code_id *cid = dyn_cast <c_code_id *> (opr);
       if (possible_noop_convert (opr))
 	{
 	  fprintf_indent (f, indent, "if (TREE_TYPE (_o%d[0]) != %s)\n",
@@ -3451,7 +3581,8 @@ expr::gen_transform (FILE *f, int indent, const char *dest, bool gimple,
 	  fprintf_indent (f, indent + 2, "{\n");
 	  indent += 4;
 	}
-      if (opr->kind == id_base::CODE)
+      if (opr->kind == id_base::CODE
+	  || (cid && cid->m_code_only))
 	fprintf_indent (f, indent, "_r%d = fold_build%d_loc (loc, %s, %s",
 			depth, ops.length(), opr_name, type);
       else
@@ -3460,7 +3591,8 @@ expr::gen_transform (FILE *f, int indent, const char *dest, bool gimple,
       for (unsigned i = 0; i < ops.length (); ++i)
 	fprintf (f, ", _o%d[%u]", depth, i);
       fprintf (f, ");\n");
-      if (opr->kind != id_base::CODE)
+      if (opr->kind != id_base::CODE
+	  && !(cid && cid->m_code_only))
 	{
 	  fprintf_indent (f, indent, "if (!_r%d)\n", depth);
 	  fprintf_indent (f, indent, "  goto %s;\n", fail_label);
@@ -4466,6 +4598,8 @@ dt_simplify::gen_1 (FILE *f, int indent, bool gimple, operand *result)
 	    opr = uid->substitutes[0];
 	  else if (is_a <predicate_id *> (opr))
 	    is_predicate = true;
+	  if (c_code_id *cid = dyn_cast <c_code_id *> (opr))
+	    cid->gen_checking (f, indent);
 	  if (!is_predicate)
 	    fprintf_indent (f, indent, "res_op->set_op (%s, type, %d);\n",
 			    *e->operation == CONVERT_EXPR
@@ -4633,7 +4767,10 @@ dt_simplify::gen_1 (FILE *f, int indent, bool gimple, operand *result)
 				"_r = non_lvalue_loc (loc, res_op0);\n");
 	      else
 		{
-		  if (is_a <operator_id *> (opr))
+		  c_code_id *cid = dyn_cast <c_code_id *> (opr);
+		  if (cid)
+		    cid->gen_checking (f, indent);
+		  if (is_a <operator_id *> (opr) || (cid && cid->m_code_only))
 		    fprintf_indent (f, indent,
 				    "_r = fold_build%d_loc (loc, %s, type",
 				    e->ops.length (),
@@ -4647,7 +4784,7 @@ dt_simplify::gen_1 (FILE *f, int indent, bool gimple, operand *result)
 		  for (unsigned j = 0; j < e->ops.length (); ++j)
 		    fprintf (f, ", res_op%d", j);
 		  fprintf (f, ");\n");
-		  if (!is_a <operator_id *> (opr))
+		  if (!is_a <operator_id *> (opr) && !is_a<c_code_id *> (opr))
 		    {
 		      fprintf_indent (f, indent, "if (!_r)\n");
 		      fprintf_indent (f, indent, "  goto %s;\n", fail_label);
@@ -5153,6 +5290,7 @@ private:
   operand *parse_capture (operand *, bool);
   operand *parse_expr ();
   c_expr *parse_c_expr (cpp_ttype);
+  void parse_c_with_ids (vec<c_code_id*> *);
   operand *parse_op ();
 
   void record_operlist (location_t, user_id *);
@@ -5545,6 +5683,100 @@ parser::parse_expr ()
   while (1);
 }
 
+// Parse the C identifiers part of the `with` expressions.
+// `id (id+)`
+
+void
+parser::parse_c_with_ids (vec<c_code_id*> *ids)
+{
+  const cpp_token *token;
+  while (1)
+    {
+      token = peek ();
+      if (token->type != CPP_NAME)
+	break;
+
+      // Insert the C defined operators into the operator hash.
+      const char *id = get_ident ();
+      if (get_operator (id, true) != NULL)
+	fatal_at (token, "operator already defined");
+      c_code_id *op = new c_code_id (id, token->src_loc);
+      id_base **slot = operators->find_slot_with_hash (op, op->hashval, INSERT);
+      *slot = op;
+      ids->safe_push (op);
+
+      eat_token (CPP_OPEN_PAREN);
+      while ((token = peek_ident ()) != 0)
+	{
+	  const char *oper = get_ident ();
+	  id_base *idb = get_operator (oper, true);
+	  if (idb == NULL)
+	    fatal_at (token, "no such operator '%s'", oper);
+	  if (idb == null_id)
+	    fatal_at (token, "null operator not allowed in possible opperators");
+	  if (is_a<predicate_id*> (idb))
+	    fatal_at (token, "predicate oeprator not allowed in possible opperators");
+	  if (is_a<c_code_id*> (idb))
+	    fatal_at (token, "A value operator is not in possible opperators");
+	  if (user_id *p = dyn_cast<user_id*> (idb))
+	    {
+	      if (p->is_oper_list)
+		op->possible_values.safe_splice (p->substitutes);
+	      else
+		fatal_at (token, "iterators cannot be used as possible opperators");
+	    }
+	  else
+	    op->possible_values.safe_push (idb);
+	}
+      token = expect (CPP_CLOSE_PAREN);
+      if (!op->possible_values.length ())
+	fatal_at (token, "possible operator-list should be non empty");
+      bool cmps = true;
+      bool code_only = true;
+      bool fn_only = true;
+      // Remove duplicates.
+      // Add a warning?
+      for (size_t i = 0; i < op->possible_values.length (); i++)
+	{
+	  for (size_t j = i + 1; j < op->possible_values.length (); j++)
+	    {
+	      if (op->possible_values[i] == op->possible_values[j]
+		  || (*op->possible_values[i] == CONVERT_EXPR
+		      && *op->possible_values[j] == NOP_EXPR)
+		  || (*op->possible_values[j] == CONVERT_EXPR
+		      && *op->possible_values[i] == NOP_EXPR))
+		{
+		  op->possible_values.unordered_remove (j);
+		  j--;
+		}
+	    }
+	}
+
+      // Cache some information about the possible operators:
+      // compares, functions only, tree code only.
+      for (id_base *i : op->possible_values)
+	{
+	  if (operator_id *ii = dyn_cast <operator_id *> (i))
+	    {
+	      fn_only = false;
+	      if (strcmp (ii->tcc, "tcc_comparison") != 0)
+		cmps = false;
+	    }
+	  else if (is_a <fn_id*>(i))
+	    cmps = code_only = false;
+	  else
+	    gcc_unreachable ();
+	}
+      op->m_cmp = cmps;
+      op->m_code_only = code_only;
+      op->m_fn_only = fn_only;
+      // FIXME: Add support for a mixed case,
+      // generic handling is more complex
+      if (!code_only && !fn_only)
+	fatal_at (token, "Cannot support a mix of functions and tree codes at this point.");
+    }
+}
+
 /* Lex native C code delimited by START recording the preprocessing tokens
    for later processing.
      c_expr = ('{'|'(') <pp token>... ('}'|')')  */
@@ -5737,11 +5969,24 @@ parser::parse_result (operand *result, predicate_id *matcher)
     {
       eat_ident ("with");
       with_expr *withe = new with_expr (token->src_loc);
+      parse_c_with_ids (&withe->m_ids);
       /* Parse (with c-expr expr) as (if-with (true) expr).  */
       withe->with = parse_c_expr (CPP_OPEN_BRACE);
+      // Check to see if the id was declared in the with statement.
+      // This is a basic check; there can be false positives
+      for (c_code_id *id : withe->m_ids)
+	{
+	  if (!id->used)
+	    {
+	      fatal_at (id->m_loc, "operator %s declared inside 'with' but not in C expression", id->id);
+	    }
+	}
       withe->with->nr_stmts = 0;
       withe->subexpr = parse_result (result, matcher);
       eat_token (CPP_CLOSE_PAREN);
+      // Remove operators from the hash as they are now out of scope.
+      for (c_code_id *id : withe->m_ids)
+	operators->remove_elt (id);
       return withe;
     }
   else if (peek_ident ("switch"))

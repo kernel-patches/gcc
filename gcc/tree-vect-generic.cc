@@ -482,7 +482,7 @@ add_shift (gimple_stmt_iterator *gsi, tree type, tree op0, int *shiftcnts,
       if (op != unknown_optab
 	  && can_implement_p (op, TYPE_MODE (type)))
 	return gimplify_build2 (gsi, code, type, op0,
-				build_int_cst (NULL_TREE, shiftcnts[0]));
+				build_int_cst (integer_type_node, shiftcnts[0]));
     }
 
   op = optab_for_tree_code (code, type, optab_vector);

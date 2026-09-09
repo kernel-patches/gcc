@@ -3271,11 +3271,17 @@ void
 by_content_ok( const cbl_loc_t& loc,
                const std::list<cbl_ffi_arg_t>& args ) {
   for( const auto& arg : args ) {
-    if( arg.by_content() && arg.field()->has_attr(intermediate_e) ) {
-      auto e = symbol_program( 0, arg.field()->name, true ); // seek prototoype
+    const cbl_field_t *field = arg.field();
+    if( arg.by_content() && field->has_attr(intermediate_e) ) {
+      auto e = symbol_program( 0, field->name, true ); // seek prototoype
       if( ! e ) {
         dialect_ok(loc, IbmContentExpr, "BY CONTENT expression");
       }
+    }
+    if( arg.crv == by_value_e &&
+        ! (is_literal(field->type) || is_elementary(field->type)) ) {
+      error_msg(loc, "%qs must be an elementary data item",
+                nice_name_of(field));
     }
   }
 }

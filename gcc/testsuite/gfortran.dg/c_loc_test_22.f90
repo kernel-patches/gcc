@@ -25,8 +25,5 @@ end
 ! { dg-final { scan-tree-dump-not "span.\[0-9\]+ = yyy->span;" "original" { target natural_alignment_32 } } }
 ! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) yyy.\[0-9\]+;" 1 "original" { target natural_alignment_32 } } }
 ! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) yyy.\[0-9\]+ \\+ \\(sizetype\\) \\(D.\[0-9\]+ \\* 16\\);" 1 "original" { target natural_alignment_32 } } }
-! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) &\\(.yyy.\[0-9\]+\\)\\\[0\\\];" 1 "original" { target { ! natural_alignment_32 } } } }
-! { dg-final { scan-tree-dump-times "span.\[0-9\]+ = yyy->span;" 1 "original" { target { ! natural_alignment_32 } } } }
-! { dg-final { scan-tree-dump-times "parm.\[0-9\]+.data = \\(void .\\) yyy.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(D.\[0-9\]+ \\* span.\[0-9\]+\\) \\* 4\\);" 1 "original" { target { ! natural_alignment_32 } } } }
 
 ! { dg-final { scan-tree-dump-times "D.\[0-9\]+ = parm.\[0-9\]+.data;\[^;]+ptr\[1-4\] = D.\[0-9\]+;" 4 "original" } }

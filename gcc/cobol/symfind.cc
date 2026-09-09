@@ -585,7 +585,7 @@ symbol_match2( size_t program,
  * N-1.
  */
 static symbol_map_t
-symbol_match( size_t program, const std::list<const char *>& names ) {
+symbol_match( size_t program, const std::list<const char *>& names, bool diagnose ) {
   auto matched = symbol_match2( program, names );
   symbol_map_t output;
 
@@ -600,7 +600,7 @@ symbol_match( size_t program, const std::list<const char *>& names ) {
       continue;
     }
     auto inserted = output.insert(*p);
-    if( ! inserted.second ) {
+    if( diagnose && ! inserted.second ) {
       error_msg_direct("%s is not a unique reference", key.name);
     }
   }
@@ -619,8 +619,8 @@ symbol_field_alias_end() {
 }
 
 std::pair <symbol_elem_t *, bool>
-symbol_find( size_t program, std::list<const char *> names ) {
-  symbol_map_t items = symbol_match(program, names);
+symbol_find( size_t program, std::list<const char *> names, bool diagnose ) {
+  symbol_map_t items = symbol_match(program, names, diagnose);
 
   if( symbol_field_alias_01 && items.size() != 1 ) {
     symbol_map_t qualified;
@@ -673,7 +673,7 @@ public:
 
 symbol_elem_t *
 symbol_find_of( size_t program, std::list<const char *> names, size_t group ) {
-  symbol_map_t input = symbol_match(program, names);
+  symbol_map_t input = symbol_match(program, names, true);
 
   symbol_map_t items;
   std::copy_if( input.begin(), input.end(),

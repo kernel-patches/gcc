@@ -25592,7 +25592,7 @@ c_parser_omp_for_loop (location_t loc, c_parser *parser, enum tree_code code,
       error_at (OMP_CLAUSE_LOCATION (ordered_cl),
 		"%<ordered%> clause parameter is less than %<collapse%>");
       OMP_CLAUSE_ORDERED_EXPR (ordered_cl)
-	= build_int_cst (NULL_TREE, collapse);
+	= build_int_cst (integer_type_node, collapse);
       ordered = collapse;
     }
 

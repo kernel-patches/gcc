@@ -1837,7 +1837,7 @@ Attribute_to_gnu (Node_Id gnat_node, tree *gnu_result_type_p,
 	      if (build_descriptor)
 		{
 		  t = build2 (FDESC_EXPR, TREE_TYPE (gnu_field), gnu_prefix,
-			      build_int_cst (NULL_TREE, i));
+			      build_int_cst (integer_type_node, i));
 		  TREE_CONSTANT (t) = 1;
 		}
 	      else
@@ -9522,7 +9522,7 @@ gnat_gimplify_stmt (tree *stmt_p)
 	      gnu_cond = build3 (ANNOTATE_EXPR, TREE_TYPE (gnu_cond), gnu_cond,
 				 build_int_cst (integer_type_node,
 						annot_expr_unroll_kind),
-				 build_int_cst (NULL_TREE, USHRT_MAX));
+				 build_int_cst (integer_type_node, USHRT_MAX));
 	    if (LOOP_STMT_NO_VECTOR (stmt))
 	      gnu_cond = build3 (ANNOTATE_EXPR, TREE_TYPE (gnu_cond), gnu_cond,
 				 build_int_cst (integer_type_node,

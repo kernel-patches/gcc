@@ -5679,7 +5679,7 @@ cxx_init_decl_processing (void)
   set_call_expr_flags (decl, ECF_NOTHROW | ECF_LEAF);
   SET_DECL_IMMEDIATE_FUNCTION_P (decl);
 
-  integer_two_node = build_int_cst (NULL_TREE, 2);
+  integer_two_node = build_int_cst (integer_type_node, 2);
 
   /* Guess at the initial static decls size.  */
   vec_alloc (static_decls, 500);

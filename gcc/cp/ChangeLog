@@ -1,3 +1,65 @@
+2026-09-08  Kael Andrew Alonzo Franco  <kaelfandrew@gmail.com>
+
+	PR middle-end/126622
+	* parser.cc (cp_parser_handle_statement_omp_attributes): Use
+	build_int_cst (integer_type_node, cst).
+	(cp_parser_omp_for_loop): Ditto.
+	(cp_parser_late_parsing_omp_declare_simd): Ditto.
+	(cp_maybe_parse_omp_decl): Ditto.
+	(cp_parser_omp_metadirective): Ditto.
+	* class.cc (finish_struct_1): Ditto.
+	(build_vtbl_initializer): Ditto.
+	* rtti.cc (build_headof): Ditto.
+	(get_tinfo_ptr_dynamic): Ditto.
+	(ptr_initializer): Ditto.
+	(ptm_initializer): Ditto.
+	(get_pseudo_ti_init0): Ditto.
+	* cp-tree.h (SET_NON_DEFAULT_TEMPLATE_ARGS_COUNT): Ditto.
+	* decl.cc (cxx_init_decl_processing): Ditto.
+
+2026-09-08  Jason Merrill  <jason@redhat.com>
+
+	* cp-gimplify.cc (struct cp_fold_data): Add mce().
+	(cp_fold_r): Use it.
+
+2026-09-08  Jason Merrill  <jason@redhat.com>
+
+	* pt.cc (instantiate_class_template): Use maybe_push_to_top_level.
+
+2026-09-08  Lunex  <imlunex2011@gmail.com>
+	    Jason Merrill  <jason@redhat.com>
+
+	PR c++/122258
+	* decl.cc (grokdeclarator): Extend non-member explicit object
+	parameter check to include unqualified friends and clear
+	is_xobj_member_function.
+
+2026-09-08  Vladislav Semykin  <vladislav.semykin@gmail.com>
+
+	PR c++/127132
+	* cp-tree.h (saved_scope): Save unevaluated_typeid_cutoff.
+	(cp_unevaluated_typeid_cutoff): Declare.
+	(cp_unevaluated): Add a defaulted TYPEID_OPERAND parameter; save
+	and restore the cutoff.
+	(cp_evaluated): Save, reset, and restore the cutoff.
+	* parser.cc (cp_unevaluated_typeid_cutoff): Define.
+	(cp_unevaluated::cp_unevaluated, cp_unevaluated::~cp_unevaluated):
+	Implement TYPEID_OPERAND cutoff handling.
+	(cp_parser_postfix_expression): Pass typeid_operand=true for the
+	typeid probe.
+	* pt.cc (instantiate_class_template): Save/reset/restore the
+	cutoff around NSDMI / lambda capture substitution.
+	(tsubst_expr): Pass typeid_operand=true for TYPEID_EXPR's probe.
+	* semantics.cc (process_outer_var_ref): Allow lambda capture
+	through a typeid probe per [expr.prim.lambda.capture]/7; defer
+	the "not captured" diagnostic to a later, non-probe pass.
+	* lambda.cc (lambda_expr_this_capture): Same cutoff and deferral
+	for 'this'.
+	* constraint.cc (tsubst_constraint_variables): Save/reset/restore
+	the cutoff with cp_unevaluated_operand.
+	* name-lookup.cc (push_to_top_level, pop_from_top_level): Same.
+	(local_state_t): Same.
+
 2026-09-05  Patrick Palka  <ppalka@redhat.com>
 
 	PR c++/127207

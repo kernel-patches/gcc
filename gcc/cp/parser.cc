@@ -14097,7 +14097,7 @@ cp_parser_handle_statement_omp_attributes (cp_parser *parser, tree attrs)
       cp_token tok = {};
       tok.type = CPP_PRAGMA;
       tok.keyword = RID_MAX;
-      tok.u.value = build_int_cst (NULL, v->dir->id);
+      tok.u.value = build_int_cst (integer_type_node, v->dir->id);
       tok.location = first->location;
       lexer->buffer->quick_push (tok);
       while (++first < last)
@@ -50536,7 +50536,7 @@ cp_parser_omp_for_loop (cp_parser *parser, enum tree_code code, tree clauses,
       error_at (OMP_CLAUSE_LOCATION (ordered_cl),
 		"%<ordered%> clause parameter is less than %<collapse%>");
       OMP_CLAUSE_ORDERED_EXPR (ordered_cl)
-	= build_int_cst (NULL_TREE, collapse);
+	= build_int_cst (integer_type_node, collapse);
       ordered = collapse;
     }
 
@@ -54430,7 +54430,7 @@ cp_parser_late_parsing_omp_declare_simd (cp_parser *parser, tree attrs,
 		cp_token tok = {};
 		tok.type = CPP_PRAGMA;
 		tok.keyword = RID_MAX;
-		tok.u.value = build_int_cst (NULL, PRAGMA_OMP_DECLARE);
+		tok.u.value = build_int_cst (integer_type_node, PRAGMA_OMP_DECLARE);
 		tok.location = first->location;
 		lexer->buffer->quick_push (tok);
 		while (++first < last)
@@ -54555,7 +54555,7 @@ cp_maybe_parse_omp_decl (tree decl, tree d)
   cp_token tok = {};
   tok.type = CPP_PRAGMA;
   tok.keyword = RID_MAX;
-  tok.u.value = build_int_cst (NULL, dir->id);
+  tok.u.value = build_int_cst (integer_type_node, dir->id);
   tok.location = first->location;
   lexer->buffer->quick_push (tok);
   while (++first < last)
@@ -55294,7 +55294,7 @@ cp_parser_omp_metadirective (cp_parser *parser, cp_token *pragma_tok,
 	  cp_token pragma_token;
 	  pragma_token.type = CPP_PRAGMA;
 	  pragma_token.location = loc;
-	  pragma_token.u.value = build_int_cst (NULL, omp_directive->id);
+	  pragma_token.u.value = build_int_cst (integer_type_node, omp_directive->id);
 
 	  directives.safe_push (omp_directive);
 	  directive_tokens.safe_push (pragma_token);
@@ -55363,7 +55363,7 @@ cp_parser_omp_metadirective (cp_parser *parser, cp_token *pragma_tok,
       pragma_token.type = CPP_PRAGMA;
       pragma_token.keyword = RID_MAX;
       pragma_token.location = UNKNOWN_LOCATION;
-      pragma_token.u.value = build_int_cst (NULL, PRAGMA_OMP_NOTHING);
+      pragma_token.u.value = build_int_cst (integer_type_node, PRAGMA_OMP_NOTHING);
 
       directives.safe_push (omp_directive);
       directive_tokens.safe_push (pragma_token);

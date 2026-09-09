@@ -58,7 +58,7 @@ int repository_function_tok( const char name[] );
 
 void next_sentence_label(cbl_label_t*);
 
-int repeat_count( const char picture[] );
+std::pair<int, int> repeat_count(const char picture[]);
 
 size_t program_level();
 
@@ -712,21 +712,47 @@ level_of( const char input[] ) {
   return output;
 }
 
-// Called by lexer with leading or trailing V, which is ignored.
-static inline int
-ndigit(int len) {
-  const char *input = yytext + (TOUPPER(yytext[0]) == 'V'? 1 : 0);
-  if( input == yytext + yyleng ) return 0; // Only the V
-  int n = repeat_count(input);
-  return n == -1? len : n;
+/*
+ * Input may have leading or trailing V, which is ignored.
+ * Return the decoded picture size insofar as possible.  
+ * If the picture switches from 9s to Ps, say, set pleft to the remainder.
+ */
+static int
+ndigit(int len, const char **pleft = nullptr) {
+  const char *p = yytext, *pend = yytext + len;
+  if( TOUPPER(p[0]) == 'V' ) p++;
+  if( p == pend ) return 0; // Only the V
+  int n = 0;
+  
+  for( char model = *p; p < pend; p++ ) {
+    assert(*p == model);
+    n++;
+    if( p[1] == model ) continue;
+
+    std::pair<int,int> result = repeat_count(p);
+    int count = result.first, pos = result.second;
+    
+    if( pos == -1 ) {
+      if( pleft ) *pleft = ++p;  // because *p at least was ok, per assertion.
+      break;
+    }
+    --n += count; // the 9 before the paren in 9(8) doesn't count
+    p += pos;
+    if( *p != model ) {
+      if( pleft ) *pleft  = p;
+      break;
+    }
+    --p; // point to closing parenthesis
+  }
+  return n;
 }
 
 static int
-picset( int token ) {
+picset( int token, int leng = yyleng ) {
   static const char * const eop = orig_picture + sizeof(orig_picture);
   char *p = orig_picture + strlen(orig_picture);
 
-  if( eop < p + yyleng ) {
+  if( eop < p + leng ) {
     error_msg(yylloc, "PICTURE exceeds maximum size of %zu bytes",
              sizeof(orig_picture) - 1);
   }
@@ -1145,72 +1171,25 @@ in_identification_division();
 bool in_procedure_division();
 bool in_environment_division();
 
-static const char *
-symbol_lower_name( const symbol_elem_t *e, cbl_name_t lname ) {
-  const char *pname = nullptr;
-
-  switch(e->type) {
-  case SymFile:
-    pname = cbl_file_of(e)->name;
-    break;
-  case SymField:
-    pname = cbl_field_of(e)->name;
-    break;
-  case SymLabel:
-    pname = cbl_label_of(e)->name;
-    break;
-  default:
-    return nullptr;
-  }
-  gcc_assert(pname);
-  std::fill(lname, lname + sizeof(cbl_name_t), '\0');
-  std::transform( pname, pname + strlen(pname) + 1, lname, tolower );
-  return lname;
-}
-
 static symbol_elem_t *
-symbol_exists( const char name[], const symbol_elem_t *constant = nullptr ) {
-  typedef std::map <std::string, size_t> name_cache_t;
-  static std::map <size_t, name_cache_t> cachemap;
-
-  cbl_name_t lname;
-  std::transform( name, name + strlen(name) + 1, lname, tolower );
-  auto& cache = cachemap[PROGRAM];
-
+symbol_exists( const char name[] ) {
   if( in_procedure_division() ) {
-    if( cache.empty() ) {
-      for( auto e = symbols_begin(PROGRAM) + 1;
-           e < symbols_end() && PROGRAM == e->program; e++ ) {
-        cbl_name_t name;
-        const char *pname = symbol_lower_name(e, name);
-        if( pname ) {
-          cache[pname] = symbol_index(e);
-        }
-      }
-      cache.erase(""); // remove unnamed symbols
-    }
-    if( constant ) { // Johnny-come-lately named literal from CDF.
-      gcc_assert(constant->type == SymField);
-      cache[lname] = symbol_index(constant);
-    }
-    auto p = cache.find(lname);
-    if( p == cache.end() ) return nullptr;
-    return symbol_at(p->second);
+    auto names = teed_up_names();
+    names.push_front(name);
+    auto found = symbol_find( PROGRAM, names, false);
+    if( found.second ) return found.first;
+    // try again with just one name in case of e.g. FldClass
+    names.clear();
+    names.push_front(name);
+    found = symbol_find( PROGRAM, names, false);
+    if( found.second ) return found.first;
   }
   /*
-   * Before data division has been defined and the cache populated, search the
-   * symbol table in case of named literal.
+   * Before data division has been defined and the cache populated, or if the
+   * map search failes, search the symbol table in case of named literal.
    */  
   symbol_elem_t *e = symbol_field( PROGRAM, 0, name );
   return e;
-}
-
-void
-scanner_cache_update( const symbol_elem_t *elem ) {
-  if( elem->type == SymField ) {
-    auto f = cbl_field_of(elem);
-    symbol_exists(f->name, elem);
-  }
 }
 
 static int
@@ -1232,6 +1211,7 @@ typed_name( const char name[] ) {
       }
     }
     break;
+  case FUNCTION_UDF:
   case FUNCTION_UDF_0:
     yylval.number = symbol_function_token(name);
     __attribute__((fallthrough));
@@ -1353,6 +1333,28 @@ static inline bool is_quote( const char ch ) {
 
 static int yyinput();
 static void yyunput(int ch, char yytext_ptr[]);
+
+static int
+continue_string( char quote ) {
+  int ch;
+  
+  for( ; (ch = yyinput()) != quote; yylloc.last_column++ ) {
+    switch(ch) {
+    case EOF: case 0:  return ch;
+    case '\n':
+      yylloc.last_line = ++yylineno;
+      yylloc.last_column = 0;
+      break;
+    default:
+      if( ! ISSPACE(ch) ) {
+        return ch;
+      }
+    }
+  }
+
+  yylloc.last_column++;
+  return ch;
+}
 
 static std::string
 skip_string(char delimiter) {

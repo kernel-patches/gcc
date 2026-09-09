@@ -347,12 +347,9 @@ cdf_file_name( const cbl_file_t *file ) {
 
 void
 cdf_field_add( const cbl_loc_t& loc, const std::string& name, const cdfval_t& value ) {
-  void scanner_cache_update( const symbol_elem_t *elem );
-
   if( symbols_begin() < symbols_end() ) {
     cbl_field_t field = cdf_literalize(loc, name, value);
-    auto e = symbol_field_add(current_program_index(), &field);
-    scanner_cache_update( e );
+    symbol_field_add(current_program_index(), &field);
   }
 }
 
@@ -545,20 +542,55 @@ determine_intermediate_type( const cbl_refer_t& aref,
 
 static char regexmsg[80];
 
+static int
+named_constant( const cbl_name_t name ) {
+  int output = -1;
+  
+  auto e = symbol_field( current_program_index(), 0, name );
+  if( e && e->type == SymField ) {
+    auto f = cbl_field_of(e);
+    if( f->has_attr(constant_e) && is_numeric(f->type) ) {
+      auto result = f->data.int64_of();
+      if( result.second) output = result.first;
+    }
+  }
+  return output;
+}
+
 /*
- * Scan part of the picture, parsing any repetition count.
+ * Scan part of the picture, parsing any repetition count.  Return the parsed
+ * count (a named constant, perhaps), and an index to any remaining input.  Use
+ * negative position to indicate failure.
  */
-int
-repeat_count( const char picture[] )
+extern cbl_loc_t yylloc;
+
+std::pair<int, int>
+repeat_count(const char picture[])
 {
   char ch;
-  int n, count = -1;
+  int count = 0, pos = -1;
 
-  n = sscanf( picture, "%c(%d)", &ch, &count );
-  if( count <= 0 && 4 < n ) { // parsed count is negative
-    count = 0; // zero is invalid; -1 means no repetition
+  int n = sscanf(picture, "%c(%d)%n", &ch, &count, &pos);
+
+  if( n == 2 ) {
+    if( count < 0 ) {
+      error_msg(yylloc, "not a positive integer constant: %d", count);
+    }
+  } else {
+    cbl_name_t name;
+    n = sscanf(picture, "%c(%s)%n", &ch, name, &pos);
+    if( n == 2 ) {
+      if( (count = named_constant(name)) < 0 ) {
+        error_msg(yylloc, "not a positive integer constant: %qs: %d", name, count);
+      }
+    } 
   }
-  return count;
+
+  if( n == 2 && 0 <= count ) {
+  return {count, pos};
+  }
+
+  return {0, -1};
 }
 
 const char *numed_message;

@@ -3818,7 +3818,7 @@ ix86_handle_tm_regparm_attribute (tree *node, tree, tree,
     alt = tree_cons (get_identifier ("fastcall"), NULL, NULL);
   else
     {
-      alt = tree_cons (NULL, build_int_cst (NULL, 2), NULL);
+      alt = tree_cons (NULL, build_int_cst (integer_type_node, 2), NULL);
       alt = tree_cons (get_identifier ("regparm"), alt, NULL);
     }
   decl_attributes (node, alt, flags);

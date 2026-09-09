@@ -173,7 +173,7 @@ build_headof (tree exp)
   exp = save_expr (exp);
 
   /* The offset-to-top field is at index -2 from the vptr.  */
-  index = build_int_cst (NULL_TREE,
+  index = build_int_cst (integer_type_node,
 			 -2 * TARGET_VTABLE_DATA_ENTRY_DISTANCE);
 
   offset = build_vtbl_ref (cp_build_fold_indirect_ref (exp),
@@ -279,7 +279,7 @@ get_tinfo_ptr_dynamic (tree exp, tsubst_flags_t complain, tree tinfo_ptr_type)
       tree index;
 
       /* The RTTI information is at index -1.  */
-      index = build_int_cst (NULL_TREE,
+      index = build_int_cst (integer_type_node,
 			     -1 * TARGET_VTABLE_DATA_ENTRY_DISTANCE);
       t = build_vtbl_ref (exp, index);
       t = convert (tinfo_ptr_type, t);
@@ -1084,7 +1084,7 @@ ptr_initializer (tinfo_s *ti, tree target)
       to = build_exception_variant (to, NULL_TREE);
     }
   CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, init);
-  CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, build_int_cst (NULL_TREE, flags));
+  CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, build_int_cst (integer_type_node, flags));
   CONSTRUCTOR_APPEND_ELT (v, NULL_TREE,
 			  get_void_tinfo_ptr (TYPE_MAIN_VARIANT (to)));
 
@@ -1115,7 +1115,7 @@ ptm_initializer (tinfo_s *ti, tree target)
   if (!COMPLETE_TYPE_P (klass))
     flags |= 0x10;
   CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, init);
-  CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, build_int_cst (NULL_TREE, flags));
+  CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, build_int_cst (integer_type_node, flags));
   CONSTRUCTOR_APPEND_ELT (v, NULL_TREE,
 			  get_void_tinfo_ptr (TYPE_MAIN_VARIANT (to)));
   CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, get_void_tinfo_ptr (klass));
@@ -1273,8 +1273,8 @@ get_pseudo_ti_init (tree type, unsigned tk_index)
 	/* get_tinfo_ptr might have reallocated the tinfo_descs vector.  */
 	ti = &(*tinfo_descs)[tk_index];
 	return class_initializer (ti, type, 3,
-				  build_int_cst (NULL_TREE, hint),
-				  build_int_cst (NULL_TREE, nbases),
+				  build_int_cst (integer_type_node, hint),
+				  build_int_cst (integer_type_node, nbases),
 				  base_inits);
       }
     }

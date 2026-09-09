@@ -993,28 +993,29 @@ fold_using_range::range_of_address (prange &r, gimple *stmt, fur_source &src)
 }
 
 /* If TYPE is a pointer, return false.  Otherwise, add zero of TYPE (which must
-   be an integer) to R and return true.  */
+   be an integer or a float) to R and return true.  */
 
 static bool
 range_from_missing_constructor_part (vrange &r, tree type)
 {
   if (POINTER_TYPE_P (type))
     return false;
-  gcc_checking_assert (irange::supports_p (type));
-  wide_int zero = wi::zero (TYPE_PRECISION (type));
-  r.union_ (int_range<1> (type, zero, zero));
+  gcc_checking_assert (irange::supports_p (type)
+		       || frange::supports_p (type));
+  value_range zero (type);
+  zero.set_zero (type);
+  r.union_ (zero);
   return true;
 }
 
 // One step of fold_using_range::range_from_readonly_var.  Process expressions
 // in COMPS which together load a value of TYPE, from index I to 0 according to
 // the corresponding static initializer in CST which should be either a scalar
-// invariant or a constructor.  Currently TYPE must be either a pointer or an
-// integer.  If TYPE is a pointer, return true if all potentially loaded values
-// are known not to be zero and false if any of them can be zero.  Otherwise
-// return true if it is possible to add all constants which can be loaded from
-// CST (which must be storable to TYPE) to R and do so.
-// TODO: Add support for franges.
+// invariant or a constructor.  Currently TYPE must be a pointer, an integer
+// or a float.  If TYPE is a pointer, return true if all potentially loaded
+// values are known not to be zero and false if any of them can be zero.
+// Otherwise return true if it is possible to add all constants which can be
+// loaded from CST (which must be storable to TYPE) to R and do so.
 
 static bool
 range_from_readonly_load (vrange &r, tree type, tree cst,
@@ -1028,6 +1029,18 @@ range_from_readonly_load (vrange &r, tree type, tree cst,
       if (POINTER_TYPE_P (type))
 	{
 	  return tree_single_nonzero_p (cst);
+	}
+
+      if (TREE_CODE (cst) == REAL_CST)
+	{
+	  const REAL_VALUE_TYPE *rv = TREE_REAL_CST_PTR (cst);
+	  frange elt;
+	  if (real_isnan (rv))
+	    elt.set_nan (type, real_isneg (rv));
+	  else
+	    elt.set (type, *rv, *rv, nan_state (false));
+	  r.union_ (elt);
+	  return true;
 	}
 
       if (TREE_CODE (cst) != INTEGER_CST)
@@ -1118,9 +1131,9 @@ fold_using_range::range_from_readonly_var (vrange &r, gimple *stmt)
 {
   gcc_checking_assert (gimple_code (stmt) == GIMPLE_ASSIGN);
   tree type = TREE_TYPE (gimple_assign_lhs (stmt));
-  /* TODO: Add support for frange.  */
   if (!irange::supports_p (type)
-      && !prange::supports_p (type))
+      && !prange::supports_p (type)
+      && !frange::supports_p (type))
     return false;
 
   unsigned HOST_WIDE_INT limit = param_vrp_cstload_limit;

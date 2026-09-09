@@ -15739,7 +15739,7 @@
 	(vec_concat:V2DF
 	  (match_operand:DF 1 "nonimmediate_operand" " 0,x,v,0,x,vm,0,0")
 	  (match_operand:DF 2 "nonimm_or_0_operand"  " x,x,v,m,m, C,x,m")))]
-  "TARGET_SSE && !(MEM_P (operands[1]) && MEM_P (operands[2]))"
+  "TARGET_SSE && (operands[2] == CONST0_RTX (DFmode) || !MEM_P (operands[1]))"
   "@
    unpcklpd\t{%2, %0|%0, %2}
    vunpcklpd\t{%2, %1, %0|%0, %1, %2}

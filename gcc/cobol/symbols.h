@@ -2396,7 +2396,7 @@ bool was_fd_name( const cbl_field_t * field ); // uses symbol_map2, sort of
 symbol_elem_t * symbol_register( const char name[] );
 
 std::pair<symbol_elem_t *, bool>
-symbol_find( size_t program, std::list<const char *> names );
+symbol_find( size_t program, std::list<const char *> names, bool diagnose = true );
 symbol_elem_t * symbol_find_of( size_t program,
                                 std::list<const char *> names, size_t group );
 
@@ -2805,10 +2805,11 @@ struct cbl_nameloc_t {
 #include <queue>
 typedef std::list<const char *> cbl_namelist_t;
 typedef std::list<cbl_nameloc_t> cbl_namelocs_t;
+
 class name_queue_t : private std::queue<cbl_namelocs_t>
 {
   friend void tee_up_empty();
-  cbl_namelocs_t recent;
+  const cbl_namelocs_t none;
 
   void allocate() {
     std::queue<cbl_namelocs_t>::push( cbl_namelocs_t() );
@@ -2840,7 +2841,7 @@ class name_queue_t : private std::queue<cbl_namelocs_t>
   }
   cbl_namelocs_t pop() {
     assert(!empty());
-    recent = front();
+    auto recent = front();
     std::queue<cbl_namelocs_t>::pop();
     dump(__func__);
     return recent;
@@ -2851,7 +2852,7 @@ class name_queue_t : private std::queue<cbl_namelocs_t>
 
   void dump( const char tag[] ) const;
 
-  cbl_namelocs_t peek() const { dump(__func__); return empty()? recent : back(); }
+  cbl_namelocs_t peek() const { dump(__func__); return empty()? none : back(); }
 
   bool  empty() const { return std::queue<cbl_namelocs_t>::empty(); }
   size_t size() const { return std::queue<cbl_namelocs_t>::size(); }

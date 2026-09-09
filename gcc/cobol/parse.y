@@ -942,7 +942,7 @@ class locale_tgt_t {
 %type   <data_category> init_categora init_category
 %type   <replacement>   init_by
 %type   <replacements>  init_bys init_replace
-%type   <refer>         init_data exit_with stop_status
+%type   <refer>         init_data exit_giving exit_with stop_status
 %type   <cce_type>      cce_expr cce_factor const_value
 %type   <prog_end>      end_program1
 %type   <substitution>  subst_input
@@ -4619,10 +4619,8 @@ data_clauses:   data_clause
                       YYERROR;
                     }
                     if( parent->occurs.ntimes() > 0 ) {
-                      error_msg(@1, "%s cannot REDEFINE table %s",
-                               current_field()->name,
-                               parent->name);
-                      YYERROR;
+                      if( ! dialect_ok(@1, MfRedefinesTable,
+                                       "REDEFINE table") ) YYERROR;
                     }
                   }
                 data_clause_t clause = data_clause_t($1);
@@ -6270,10 +6268,11 @@ name88:		NAME88 {
                   name_queue.qualify(@1, $1);
 		  auto namelocs( name_queue.pop() );
 		  auto names( name_queue.namelist_of(namelocs) );
+                  auto inner = namelocs.back();
                   if( ($$ = field_find(@1, names)) == NULL ) {
                     if( procedure_div_e == current_division  ) {
 		      error_msg(namelocs.back().loc,
-				"DATA-ITEM '%s' not found", names.back() );
+				"DATA-ITEM %qs not found", inner.name );
                       YYERROR;
                     }
 		  }
@@ -6699,6 +6698,18 @@ end_program1:   END_PROGRAM  namestr[name]
                   $$.token = END_FUNCTION;
                   $$.name = $name;
                 }
+        |       END_FUNCTION FUNCTION_UDF[name]
+                {
+                  $$.loc = @name;
+                  $$.token = END_FUNCTION;
+                  $$.name = literal_of(cbl_label_of(symbol_at($name))->name);
+                }
+        |       END_FUNCTION FUNCTION_UDF_0[name]
+                {
+                  $$.loc = @name;
+                  $$.token = END_FUNCTION;
+                  $$.name = literal_of(cbl_label_of(symbol_at($name))->name);
+                }
 	|	END_PROGRAM  '.' // error
                 {
                   $$.loc = @1;
@@ -6776,6 +6787,7 @@ exit_with:      %empty
                 }
                 ;
 exit_what:      PROGRAM_kw                  { parser_exit_program(); }
+        |       PROGRAM_kw exit_giving      { parser_exit(*$2); }
         |       PROGRAM_kw exit_raising[ec] { parser_exit_program(); }
 	|	SECTION			    { parser_exit_section(); }
 	|	PARAGRAPH		    { parser_exit_paragraph(); }
@@ -6788,7 +6800,11 @@ exit_what:      PROGRAM_kw                  { parser_exit_program(); }
                   parser_exit_perform(&perform_current()->tgt, $1);
                 }
                 ;
-
+exit_giving:    retgiv num_value { $$ = $num_value; }
+                ;
+retgiv:         GIVING
+        |       RETURNING
+                ;
 exit_raising:   RAISING EXCEPTION EXCEPTION_NAME[ec]
 		{
 		  $$ = $ec;
@@ -8247,6 +8263,7 @@ stop_status:    status         { $$ = NULL; }
         |       status NUMSTR {
                   $$ = new_reference(new_literal(@2, $2.string, $2.radix));
                 }
+        |       OMITTED        { $$ = NULL; }
                 ;
 
 subscripts:     LPAREN subscript_exprs ')' {
@@ -9210,7 +9227,7 @@ write_body:     write_what[field] advance_when[when] advancing
                   statement_begin(@$, WRITE);
                   cbl_file_t *file = symbol_record_file($field);
                   if( !file ) {
-                    error_msg(@1, "no FD record found for %s", $field->name);
+                    error_msg(@1, "no FD record found for %qs", $field->name);
                     YYERROR;
                   }
                   $$ = file_write_args.init( file, $field, $when==AFTER, $advancing );
@@ -9221,7 +9238,7 @@ write_body:     write_what[field] advance_when[when] advancing
                   statement_begin(@$, WRITE);
                   cbl_file_t *file = symbol_record_file($field);
                   if( !file ) {
-                    error_msg(@1, "no FD record found for %s", $field->name);
+                    error_msg(@1, "no FD record found for %qs", $field->name);
                     YYERROR;
                   }
 		  cbl_refer_t lines;
@@ -9253,7 +9270,7 @@ file_record:    NAME
 		  auto names( name_queue.namelist_of(namelocs) );
 		  auto inner = namelocs.back();
                   if( ($$ = field_find(@1, names)) == NULL ) {
-                    error_msg(inner.loc, "no record name '%s'", inner.name);
+                    error_msg(inner.loc, "no record name %qs", inner.name);
                     YYERROR;
                   }
                 }
@@ -9510,10 +9527,15 @@ rewrite1:       REWRITE rewrite_body end_rewrite {
 rewrite_body:   write_what record
                 {
                   statement_begin(@$, REWRITE);
-                  symbol_elem_t *e = symbol_file(PROGRAM, $1->name);
-                  file_rewrite_args.init(cbl_file_of(e), $1);
-                  $$.file = cbl_file_of(e);
-                  $$.buffer = $1;
+                  cbl_field_t *field = $write_what;
+                  cbl_file_t *file = symbol_record_file(field);
+                  if( !file ) {
+                    error_msg(@1, "no FD record found for %qs", field->name);
+                    YYERROR;
+                  }
+                  file_rewrite_args.init(file, field);
+                  $$.file = file;
+                  $$.buffer = field;
                 }
                 ;
 end_rewrite:    %empty %prec REWRITE
@@ -10265,12 +10287,23 @@ filenames:      filename { $$ = new file_list_t($1); }
                 ;
 filename:       NAME
                 {
-                  struct symbol_elem_t *e = symbol_file(PROGRAM, $1);
-                  if( !(e && e->type == SymFile) ) {
-                    error_msg(@NAME, "invalid file name");
+                  struct symbol_elem_t *e = symbol_file(PROGRAM, $NAME);
+                  if(  e ) {
+                    $$ = cbl_file_of(e);
+                  } else  {
+                    $$ = nullptr;
+                    name_queue.qualify(@NAME, $NAME);
+                    auto namelocs( name_queue.pop() );
+                    auto names( name_queue.namelist_of(namelocs) );
+                    cbl_field_t *field = field_find(@NAME, names);
+                    if( field ) {
+                      $$ = symbol_record_file(field);
+                    }
+                  }                  
+                  if( ! $$ ) {
+                    error_msg(@NAME, "invalid file name %qs", $NAME);
                     YYERROR;
                   }
-                  $$ = cbl_file_of(e);
                 }
         |       device_name[dev]
                 {
@@ -10279,7 +10312,7 @@ filename:       NAME
                   YYERROR;
                   auto e = symbol_file(PROGRAM, dev->name);
                   if( ! e ) {
-                    error_msg(@dev, "no FD selected for device '%s'", dev->name);
+                    error_msg(@dev, "no FD selected for device %qs", dev->name);
                     YYERROR;
                   } 
                   $$ = cbl_file_of(e);

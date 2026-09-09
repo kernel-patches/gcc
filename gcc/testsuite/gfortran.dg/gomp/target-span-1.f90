@@ -30,6 +30,4 @@ end module m
 ! { dg-final { scan-tree-dump-times "= t->span;" 1 "original" } }
 ! { dg-final { scan-tree-dump "stride\.\[0-9\]+ = \[^;\]* != 8 \\? stride\.\[0-9\]+ \\* \[^;\]* : stride\.\[0-9\]+;" "original" { target natural_alignment_64 } } }
 ! { dg-final { scan-tree-dump "t\.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(offset\.\[0-9\]+ \\+ \[^)\]*stride\.\[0-9\]+\[^)\]*\\) \\* 8\\)" "original" { target natural_alignment_64 } } }
-! Elsewhere the reference uses that local span, not the descriptor.
-! { dg-final { scan-tree-dump "t\.\[0-9\]+ \\+ \\(sizetype\\) \\(\\(offset\.\[0-9\]+ \\+ \[^)\]*stride\.\[0-9\]+\[^)\]*\\) \\* span\.\[0-9\]+\\)" "original" { target { ! natural_alignment_64 } } } }
 ! { dg-final { scan-tree-dump-not "\\* t->span" "original" } }
