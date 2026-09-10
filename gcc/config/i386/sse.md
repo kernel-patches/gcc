@@ -12480,7 +12480,8 @@
 	  "  0, 0,Yv, 0,0, v,m, 0 , m")
 	  (match_operand:SF 2 "nonimm_or_0_operand"
 	  " Yr,*x,Yv, jm,jm, m,C,*ym, C")))]
-  "TARGET_SSE4_1 && !(MEM_P (operands[1]) && MEM_P (operands[2]))"
+  "TARGET_SSE4_1
+   && (operands[2] == CONST0_RTX (SFmode) || !MEM_P (operands[1]))"
   "@
    unpcklps\t{%2, %0|%0, %2}
    unpcklps\t{%2, %0|%0, %2}
@@ -12544,7 +12545,7 @@
 	(vec_concat:V2SF
 	  (match_operand:SF 1 "nonimmediate_operand" " 0,m, 0, m")
 	  (match_operand:SF 2 "reg_or_0_operand"     " x,C,*y, C")))]
-  "TARGET_SSE"
+  "TARGET_SSE && !TARGET_SSE4_1"
   "@
    unpcklps\t{%2, %0|%0, %2}
    movss\t{%1, %0|%0, %1}
@@ -13086,6 +13087,111 @@
    (set_attr "prefix_data16" "1")
    (set_attr "prefix" "orig")
    (set_attr "mode" "V4SF")])
+
+;; Use sse4_1_insertps_v4s[if] to permute to a one non-zero vector.
+(define_insn "*sse4_1_insertps_<mode>_perm"
+  [(set (match_operand:VI4F_128 0 "register_operand" "=x,v")
+	(vec_select:VI4F_128
+	  (vec_concat:<ssedoublevecmode>
+	    (match_operand:VI4F_128 1 "register_operand" "0,v")
+	    (match_operand:VI4F_128 2 "const0_operand"))
+	  (match_parallel 3 "insertps_parallel"
+	    [(match_operand 4 "const_int_operand")])))]
+  "TARGET_SSE4_1"
+{
+  rtx op3 = operands[3];
+  int src, dst;
+
+  for (dst = 0; dst < 4; dst++)
+    {
+      src = INTVAL (XVECEXP (op3, 0, dst));
+      if (src < 4)
+	break;
+    }
+
+  if (TARGET_AVX10_2 && src == 0 && dst == 0)
+    return "vmovd\t{%1, %0|%0, %1}";
+  operands[3] = GEN_INT ((src << 6) + (dst << 4) + (15 - (1 << dst)));
+  switch (which_alternative)
+    {
+    case 0:
+      return "insertps\t{%3, %1, %0|%0, %1, %3}";
+    case 1:
+      return "vinsertps\t{%3, %1, %1, %0|%0, %1, %1, %3}";
+    default:
+      gcc_unreachable ();
+    }
+}
+  [(set_attr "isa" "noavx,avx")
+   (set_attr "type" "sselog")
+   (set_attr "prefix_data16" "1,*")
+   (set_attr "prefix_extra" "1")
+   (set_attr "length_immediate" "1")
+   (set_attr "prefix" "orig,maybe_evex")
+   (set_attr "mode" "V4SF")])
+
+;; Emulate the above insn on SSE2 using two of pslldq, psrldq and pshufd.
+(define_insn_and_split "*sse2_insertps_<mode>_perm"
+  [(set (match_operand:VI4F_128 0 "register_operand")
+	(vec_select:VI4F_128
+	  (vec_concat:<ssedoublevecmode>
+	    (match_operand:VI4F_128 1 "register_operand")
+	    (match_operand:VI4F_128 2 "const0_operand"))
+	  (match_parallel 3 "insertps_parallel"
+	    [(match_operand 4 "const_int_operand")])))]
+  "TARGET_SSE2 && !TARGET_SSE4_1 && ix86_pre_reload_split ()"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx op3 = operands[3];
+  int src, dst;
+
+  for (dst = 0; dst < 4; dst++)
+    {
+      src = INTVAL (XVECEXP (op3, 0, dst));
+      if (src < 4)
+	break;
+    }
+
+  if (src == 0 && dst == 3)
+    emit_insn (gen_vec_shl_<mode> (operands[0], operands[1], GEN_INT (96)));
+  else if (src == 3 && dst == 0)
+    emit_insn (gen_vec_shr_<mode> (operands[0], operands[1], GEN_INT (96)));
+  else
+    {
+      rtx tmp1 = gen_reg_rtx (<MODE>mode);
+      if (src == 0 || dst == 0)
+	{
+	  emit_insn (gen_vec_shl_<mode> (tmp1, operands[1],
+					 GEN_INT ((3 - src) * 32)));
+	  emit_insn (gen_vec_shr_<mode> (operands[0], tmp1,
+					 GEN_INT ((3 - dst) * 32)));
+	}
+      else
+	{
+	  emit_insn (gen_vec_shr_<mode> (tmp1, operands[1],
+					 GEN_INT (src * 32)));
+	  if (src == 3 || dst == 3)
+	    emit_insn (gen_vec_shl_<mode> (operands[0], tmp1,
+					   GEN_INT (dst * 32)));
+	  else /* (src == 1 || src == 2) && (dst == 1 || dst == 2).  */
+	    {
+	      rtx tmp2 = gen_lowpart (V4SImode, tmp1);
+	      rtx tmp3 = <MODE>mode == V4SImode ? operands[0]
+						: gen_reg_rtx (V4SImode);
+	      emit_insn (gen_sse2_pshufd_1 (tmp3, tmp2,
+					    GEN_INT (3),
+					    GEN_INT (dst == 1 ? 0 : 3),
+					    GEN_INT (dst == 2 ? 0 : 3),
+					    GEN_INT (3)));
+	      if (<MODE>mode != V4SImode)
+		emit_move_insn (operands[0], gen_lowpart (<MODE>mode, tmp3));
+	    }
+	}
+    }
+  DONE;
+})
 
 (define_split
   [(set (match_operand:VI4F_128 0 "memory_operand")
@@ -22464,7 +22570,8 @@
 	  "  0, 0, x,Yv, 0, 0,Yv,rm,  0,rm")
 	  (match_operand:SI 2 "nonimm_or_0_operand"
 	  "jrjm,jrjm,rm,rm,Yr,*x,Yv, C,*ym, C")))]
-  "TARGET_SSE4_1 && !(MEM_P (operands[1]) && MEM_P (operands[2]))"
+  "TARGET_SSE4_1
+   && (operands[2] == CONST0_RTX (SImode) || !MEM_P (operands[1]))"
   "@
    pinsrd\t{$1, %2, %0|%0, %2, 1}
    pinsrd\t{$1, %2, %0|%0, %2, 1}
@@ -22512,7 +22619,7 @@
 ;; ??? In theory we can match memory for the MMX alternative, but allowing
 ;; nonimmediate_operand for operand 2 and *not* allowing memory for the SSE
 ;; alternatives pretty much forces the MMX alternative to be chosen.
-(define_insn "*vec_concatv2si"
+(define_insn "*vec_concatv2si_sse"
   [(set (match_operand:V2SI 0 "register_operand"     "=x,x ,x,x,*y,*y")
 	(vec_concat:V2SI
 	  (match_operand:SI 1 "nonimmediate_operand" " 0,rm,0,m, 0,rm")

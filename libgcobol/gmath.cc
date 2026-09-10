@@ -105,7 +105,29 @@ conditional_stash(  cblc_field_t *destination,
       }
     free(stash);
     }
+  if( retval )
+    {
+    exception_raise(ec_size_truncation_e);
+    }
   return retval;
+  }
+
+extern "C"
+int
+__gg__conditional_stash(  cblc_field_t *destination,
+                          size_t        destination_o,
+                          bool          on_error_flag,
+                          __int128      value,
+                          int           rdigits,
+                          cbl_round_t   rounded)
+  {
+  return conditional_stash(destination,
+                           destination_o,
+                           destination->capacity,
+                           on_error_flag,
+                           value,
+                           rdigits,
+                           rounded);
   }
 
 static int
@@ -149,6 +171,22 @@ conditional_stash(  cblc_field_t *destination,
     free(stash);
     }
   return retval;
+  }
+
+extern "C"
+int
+__gg__conditional_stash_float(  cblc_field_t *destination,
+                                size_t        destination_o,
+                                bool          on_error_flag,
+                                GCOB_FP128    value,
+                                cbl_round_t   rounded)
+  {
+  return conditional_stash(destination,
+                           destination_o,
+                           destination->capacity,
+                           on_error_flag,
+                           value,
+                           rounded);
   }
 
 static
@@ -540,14 +578,14 @@ squeeze_int256(int256 &val)
   // As long as there are some decimal places left, we hold our nose and
   // right-shift a too-large value rightward by decimal digits.  In other
   // words, we truncate the fractional part to make room for the integer part:
-  while(val.rdigits > 0 && int256_get_u128(val, 1) )
+  while(val.rdigits > 0 && (val.i64[2] || val.i64[3]) )
     {
     divide_int256_by_int64(val, 10UL);
     val.rdigits -= 1;
     }
 
   // At this point, to be useful, val has to have fewer than 128 bits:
-  if( int256_get_u128(val, 1) )
+  if( (val.i64[2] || val.i64[3]) )
     {
     overflow = compute_error_overflow;
     }
@@ -563,15 +601,15 @@ squeeze_int256(int256 &val)
 
     // Binary value of 10^38, written as two 64-bit limbs so that the value is
     // independent of the host byte order and does not require type punning.
-    static const uint128 biggest =
-        (static_cast<uint128>(0x4b3b4ca85a86c47aULL) << 64)
-    // cppcheck-suppress badBitmaskCheck
-      |  static_cast<uint128>(0x098a224000000000ULL);
+    static const uint64_t big_hi = 0x4b3b4ca85a86c47aULL;
+    static const uint64_t big_lo = 0x098a224000000000ULL;
 
     // If we still have some val.rdigits to throw away, we can keep shrinking
     // the value:
 
-    while(val.rdigits > 0 && int256_get_u128(val, 0) >= biggest  )
+    while(    val.rdigits > 0
+          && (   val.i64[1] > big_hi
+              || (val.i64[1] == big_hi && val.i64[0] >= big_lo)) )
       {
       divide_int256_by_int64(val, 10UL);
       val.rdigits -= 1;
@@ -585,7 +623,8 @@ squeeze_int256(int256 &val)
       val.rdigits -= 1;
       }
 
-    if( int256_get_u128(val, 0) >= biggest )
+    if( (    val.i64[1] > big_hi
+         || (val.i64[1] == big_hi && val.i64[0] >= big_lo)) )
       {
       overflow = compute_error_overflow;
       }
@@ -623,619 +662,6 @@ get_int256_from_qualified_field(int256 &var,
     // This value is positive
     var.i64[2] = 0;
     var.i64[3] = 0;
-    }
-  }
-
-static int256 phase1_result;
-
-static GCOB_FP128 phase1_result_float;
-
-extern "C"
-void
-__gg__add_fixed_phase1( cbl_arith_format_t ,
-                        size_t nA,
-                  const cblc_referlet_t *AA,
-                        size_t ,
-                        cblc_referlet_t *,
-                        size_t ,
-                        cblc_referlet_t *,
-                  const cbl_round_t  *,
-                        int           ,
-                        int          *compute_error
-                        )
-  {
-  // Our job is to add together the nA fixed-point values in the A[] array
-
-  // The result goes into the temporary phase1_result.
-
-  // Let us prime the pump with the first value of A[]
-  get_int256_from_qualified_field(phase1_result,
-                                  AA[0].field,
-                                  AA[0].offset,
-                                  AA[0].size);
-
-  // We now go into a loop adding each of the A[] values to phase1_result:
-
-  for( size_t i=1; i<nA; i++ )
-    {
-    int256 temp = {};
-    get_int256_from_qualified_field(temp,
-                                    AA[i].field,
-                                    AA[i].offset,
-                                    AA[i].size);
-
-    add_int256_to_int256(phase1_result, temp);
-    }
-
-  // phase1_result/phase1_result.rdigits now reflect the sum of all A[]
-
-  int overflow = squeeze_int256(phase1_result);
-  if( overflow )
-    {
-    *compute_error |= compute_error_overflow;
-    }
-  }
-
-extern "C"
-void
-__gg__addf1_fixed_phase2( cbl_arith_format_t ,
-                          size_t ,
-                          cblc_referlet_t *,
-                          size_t ,
-                          cblc_referlet_t *,
-                          size_t ,
-                    const cblc_referlet_t *C,
-                    const cbl_round_t  *rounded,
-                          int           on_error_flag,
-                          int          *compute_error
-                          )
-  {
-  // This is the assignment phase of an ADD Format 1
-
-  // We take phase1_result and accumulate it into C
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-
-  if( C[0].field->type == FldFloat)
-    {
-    // The target we need to accumulate into is a floating-point number, so we
-    // need to convert our fixed-point intermediate into floating point and
-    // proceed accordingly.
-
-    // Convert the intermediate
-    GCOB_FP128 value_a = (GCOB_FP128)int256_get_u128(phase1_result, 0);
-    value_a /= __gg__power_of_ten(phase1_result.rdigits);
-
-    // Pick up the target
-    GCOB_FP128 value_b = __gg__float128_from_qualified_field(C[0].field,
-                                                             C[0].offset,
-                                                             C[0].size);
-
-    value_a += value_b;
-
-    // At this point, we assign running_sum to *C.
-    *compute_error |= conditional_stash(C[0].field,
-                                        C[0].offset,
-                                        C[0].size,
-                                        on_size_error,
-                                        value_a,
-                                        *rounded++);
-    }
-  else
-    {
-    // We have a fixed-point intermediate, and we are accumulating into a
-    // fixed point target.
-    int256 value_a   = phase1_result;
-    int256 value_b = {};
-
-    value_a.rdigits = phase1_result.rdigits;
-
-    get_int256_from_qualified_field(value_b,
-                                    C[0].field,
-                                    C[0].offset,
-                                    C[0].size);
-    add_int256_to_int256(value_a, value_b);
-
-    int overflow = squeeze_int256(value_a);
-    if( overflow )
-      {
-      *compute_error |= compute_error_overflow;
-      }
-
-      // At this point, we assign running_sum to *C.
-    *compute_error |= conditional_stash(C[0].field,
-                                        C[0].offset,
-                                        C[0].size,
-                                        on_size_error,
-                                        int256_get_u128(value_a, 0),
-                                        value_a.rdigits,
-                                        *rounded++);
-    }
-  }
-
-extern "C"
-void
-__gg__fixed_phase2_assign_to_c( cbl_arith_format_t ,
-                                size_t ,
-                                cblc_referlet_t *,
-                                size_t ,
-                                cblc_referlet_t *,
-                                size_t ,
-                          const cblc_referlet_t *CC,
-                          const cbl_round_t  *rounded,
-                                int           on_error_flag,
-                                int          *compute_error
-                                )
-  {
-  // This is the assignment phase of an ADD or SUBTRACT Format 2
-
-  // We take phase1_result and put it into C
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-
-  if( CC[0].field->type == FldFloat)
-    {
-    // The target we need to accumulate into is a floating-point number, so we
-    // need to convert our fixed-point intermediate into floating point and
-    // proceed accordingly.
-
-    // Convert the intermediate
-    GCOB_FP128 value_a = (GCOB_FP128)int256_get_u128(phase1_result, 0);
-    value_a /= __gg__power_of_ten(phase1_result.rdigits);
-
-    *compute_error |= conditional_stash(CC[0].field, CC[0].offset, CC[0].size,
-                                        on_size_error,
-                                        value_a,
-                                       *rounded++);
-    }
-  else
-    {
-    // We have a fixed-point intermediate, and we are accumulating intoi a
-    // fixed point target.
-    int256 value_a   = phase1_result;
-    value_a.rdigits = phase1_result.rdigits;
-
-    int overflow = squeeze_int256(value_a);
-    if( overflow )
-      {
-      *compute_error |= compute_error_overflow;
-      }
-
-    if( CC[0].field->type == FldPointer )
-      {
-      // In case somebody does pointer arithmetic that goes negative, we need
-      // to make the top 64 bits positive.  Otherwise, the conditional stash
-      // will see that FldPointer is not signable, and force the value
-      // positive with a two's complement.
-      int256_set_u128(value_a,
-                      0,
-                      int256_get_u128(value_a, 0) & 0xFFFFFFFFFFFFFFFFULL);
-      }
-
-      // At this point, we assign that value to *C.
-    *compute_error |= conditional_stash(CC[0].field, CC[0].offset, CC[0].size,
-                                        on_size_error,
-                                        int256_get_u128(value_a, 0),
-                                        value_a.rdigits,
-                                       *rounded++);
-    }
-  }
-
-extern "C"
-void
-__gg__add_float_phase1( cbl_arith_format_t ,
-                        size_t nA,
-                  const cblc_referlet_t *A,
-                        size_t ,
-                        cblc_referlet_t *,
-                        size_t ,
-                        cblc_referlet_t *,
-                  const cbl_round_t  *,
-                        int           ,
-                        int          *compute_error
-                        )
-  {
-  // Our job is to add together the nA floating-point values in the A[] array
-
-  // The result goes into the temporary phase1_result_ffloat.
-
-  // Let us prime the pump with the first value of A[]
-  phase1_result_float = __gg__float128_from_qualified_field(A[0].field,
-                                                            A[0].offset,
-                                                            A[0].size);
-
-  // We now go into a loop adding each of the A[] values to phase1_result_flt:
-
-  for( size_t i=1; i<nA; i++ )
-    {
-    GCOB_FP128 temp = __gg__float128_from_qualified_field(A[i].field,
-                                                          A[i].offset,
-                                                          A[i].size);
-    phase1_result_float = addition_helper_float(phase1_result_float,
-                                                temp,
-                                                compute_error);
-    }
-  }
-
-extern "C"
-void
-__gg__addf1_float_phase2( cbl_arith_format_t ,
-                          size_t ,
-                          cblc_referlet_t *,
-                          size_t ,
-                          cblc_referlet_t *,
-                          size_t ,
-                    const cblc_referlet_t *C,
-                    const cbl_round_t  *rounded,
-                          int           on_error_flag,
-                          int          *compute_error
-                          )
-  {
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-  // This is the assignment phase of an ADD Format 2
-  // We take phase1_result and accumulate it into C
-
-  GCOB_FP128 temp = __gg__float128_from_qualified_field(C[0].field,
-                                                        C[0].offset,
-                                                        C[0].size);
-  temp = addition_helper_float(temp, phase1_result_float, compute_error);
-  *compute_error |= conditional_stash(C[0].field, C[0].offset, C[0].size,
-                                      on_size_error,
-                                      temp,
-                                     *rounded++);
-  }
-
-extern "C"
-void
-__gg__float_phase2_assign_to_c( cbl_arith_format_t ,
-                          size_t ,
-                          cblc_referlet_t *,
-                          size_t ,
-                          cblc_referlet_t *,
-                          size_t ,
-                    const cblc_referlet_t *C,
-                    const cbl_round_t  *rounded,
-                          int           on_error_flag,
-                          int          *compute_error
-                          )
-  {
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-  // This is the assignment phase of an ADD Format 2
-    // We take phase1_result and put it into C
-
-  *compute_error |= conditional_stash(C[0].field, C[0].offset, C[0].size,
-                                      on_size_error,
-                                      phase1_result_float,
-                                     *rounded++);
-  }
-
-extern "C"
-void
-__gg__addf3(cbl_arith_format_t ,
-            size_t nA,
-       const cblc_referlet_t *A,
-            size_t ,
-            cblc_referlet_t *,
-            size_t ,
-       const cblc_referlet_t *C,
-      const cbl_round_t  *rounded,
-            int           on_error_flag,
-            int          *compute_error
-            )
-  {
-  // This is an ADD Format 3.  Each A[i] gets accumulated into each C[i].  When
-  // both are fixed, we do fixed arithmetic.  When either is a FldFloat, we
-  // do floating-point arithmetic.
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-
-  for(size_t i=0; i<nA; i++)
-    {
-    if( A[i].field->type == FldFloat || C[i].field->type == FldFloat )
-      {
-      GCOB_FP128 value_a = __gg__float128_from_qualified_field(A[i].field,
-                                                               A[i].offset,
-                                                               A[i].size);
-      GCOB_FP128 value_b = __gg__float128_from_qualified_field(C[i].field,
-                                                               C[i].offset,
-                                                               C[i].size);
-
-      value_a = addition_helper_float(value_a, value_b, compute_error);
-
-        // At this point, we assign the sum to *C.
-      *compute_error |= conditional_stash(C[i].field, C[i].offset, C[i].size,
-                                          on_size_error,
-                                          value_a,
-                                          *rounded++);
-      }
-    else
-      {
-      // We have are doing fixed-point arithmetic.
-      int256 value_a;
-      int256 value_b;
-
-      get_int256_from_qualified_field(value_a,
-                                      A[i].field,
-                                      A[i].offset,
-                                      A[i].size);
-      get_int256_from_qualified_field(value_b,
-                                      C[i].field,
-                                      C[i].offset,
-                                      C[i].size);
-      add_int256_to_int256(value_a, value_b);
-
-      int overflow = squeeze_int256(value_a);
-      if( overflow )
-        {
-        *compute_error |= compute_error_overflow;
-        }
-
-        // At this point, we assign the sum to *C.
-      *compute_error |= conditional_stash(C[i].field, C[i].offset, C[i].size,
-                                          on_size_error,
-                                          int256_get_u128(value_a, 0),
-                                          value_a.rdigits,
-                                          *rounded++);
-      }
-    }
-  }
-
-extern "C"
-void
-__gg__subtractf1_fixed_phase2(cbl_arith_format_t ,
-                              size_t ,
-                              cblc_referlet_t *,
-                              size_t ,
-                              cblc_referlet_t *,
-                              size_t ,
-                        const cblc_referlet_t *C,
-                        const cbl_round_t  *rounded,
-                              int           on_error_flag,
-                              int          *compute_error
-                              )
-  {
-  // This is the assignment phase of an ADD Format 1
-
-  // We take phase1_result and subtrace it from C
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-
-  if( C[0].field->type == FldFloat)
-    {
-    // The target we need to accumulate into is a floating-point number, so we
-    // need to convert our fixed-point intermediate into floating point and
-    // proceed accordingly.
-
-    // Convert the intermediate
-    GCOB_FP128 value_a = (GCOB_FP128)int256_get_u128(phase1_result, 0);
-    value_a /= __gg__power_of_ten(phase1_result.rdigits);
-
-    // Pick up the target
-    GCOB_FP128 value_b = __gg__float128_from_qualified_field(C[0].field,
-                                                             C[0].offset,
-                                                             C[0].size);
-
-    value_b -= value_a;
-
-    // At this point, we assign the difference to *C.
-    *compute_error |= conditional_stash(C[0].field, C[0].offset, C[0].size,
-                                        on_size_error,
-                                        value_b,
-                                        *rounded++);
-    }
-  else
-    {
-    // We have a fixed-point intermediate, and we are accumulating intoi a
-    // fixed point target.
-    int256 value_a   = phase1_result;
-    value_a.rdigits = phase1_result.rdigits;
-
-    int256 value_b = {};
-
-    get_int256_from_qualified_field(value_b,
-                                    C[0].field,
-                                    C[0].offset,
-                                    C[0].size);
-
-    subtract_int256_from_int256(value_b, value_a);
-
-    int overflow = squeeze_int256(value_b);
-    if( overflow )
-      {
-      *compute_error |= compute_error_overflow;
-      }
-
-      // At this point, we assign running_sum to *C.
-    *compute_error |= conditional_stash(C[0].field, C[0].offset, C[0].size,
-                                        on_size_error,
-                                        int256_get_u128(value_b, 0),
-                                        value_b.rdigits,
-                                        *rounded++);
-    }
-  }
-
-extern "C"
-void
-__gg__subtractf2_fixed_phase1(cbl_arith_format_t ,
-                              size_t nA,
-                        const cblc_referlet_t *AA,
-                              size_t ,
-                        const cblc_referlet_t *BB,
-                              size_t ,
-                              cblc_referlet_t *,
-                        const cbl_round_t  *rounded,
-                              int           on_error_flag,
-                              int          *compute_error
-                              )
-  {
-  // This is the calculation phase of a fixed-point SUBTRACT Format 2
-
-  // Add up all the A values
-  __gg__add_fixed_phase1( not_expected_e ,
-                          nA,
-                          AA,
-                          0,
-                          NULL,
-                          0,
-                          NULL,
-                          rounded,
-                          on_error_flag,
-                          compute_error);
-
-  // Subtract the phase1_result from the B value:
-
-  int256 value_a   = phase1_result;
-  value_a.rdigits = phase1_result.rdigits;
-
-  int256 value_b = {};
-
-  get_int256_from_qualified_field(value_b,
-                                  BB[0].field,
-                                  BB[0].offset,
-                                  BB[0].size);
-
-  subtract_int256_from_int256(value_b, value_a);
-
-  int overflow = squeeze_int256(value_b);
-  if( overflow )
-    {
-    *compute_error |= compute_error_overflow;
-    }
-  phase1_result  = value_b;
-  phase1_result.rdigits = value_b.rdigits;
-  }
-
-extern "C"
-void
-__gg__subtractf1_float_phase2(cbl_arith_format_t ,
-                              size_t ,
-                              cblc_referlet_t *,
-                              size_t ,
-                              cblc_referlet_t *,
-                              size_t ,
-                        const cblc_referlet_t *C,
-                        const cbl_round_t  *rounded,
-                              int           on_error_flag,
-                              int          *compute_error
-                              )
-  {
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-  // This is the assignment phase of an SUBTRACT Format 2
-  // We take phase1_result and subtract it from C
-
-  GCOB_FP128 temp = __gg__float128_from_qualified_field(C[0].field,
-                                                        C[0].offset,
-                                                        C[0].size);
-  temp = subtraction_helper_float(temp, phase1_result_float, compute_error);
-  *compute_error |= conditional_stash(C[0].field, C[0].offset, C[0].size,
-                                      on_size_error,
-                                      temp,
-                                     *rounded++);
-  }
-
-extern "C"
-void
-__gg__subtractf2_float_phase1(cbl_arith_format_t ,
-                              size_t nA,
-                        const cblc_referlet_t *A,
-                              size_t ,
-                        const cblc_referlet_t *B,
-                              size_t ,
-                              cblc_referlet_t *,
-                        const cbl_round_t  *rounded,
-                              int           on_error_flag,
-                              int          *compute_error
-                              )
-  {
-  // This is the calculation phase of a fixed-point SUBTRACT Format 2
-
-  // Add up all the A values
-  __gg__add_float_phase1( not_expected_e ,
-                          nA,
-                          A,
-                          0,
-                          NULL,
-                          0,
-                          NULL,
-                          rounded,
-                          on_error_flag,
-                          compute_error
-                          );
-
-  // Subtract that subtotal from the B value:
-  GCOB_FP128 value_b = __gg__float128_from_qualified_field(B[0].field,
-                                                           B[0].offset,
-                                                           B[0].size);
-  phase1_result_float = subtraction_helper_float(value_b,
-                                                 phase1_result_float,
-                                                 compute_error);
-  }
-
-extern "C"
-void
-__gg__subtractf3( cbl_arith_format_t ,
-                  size_t nA,
-            const cblc_referlet_t *A,
-                  size_t ,
-                  cblc_referlet_t *,
-                  size_t ,
-            const cblc_referlet_t *C,
-            const cbl_round_t  *rounded,
-                  int           on_error_flag,
-                  int          *compute_error
-                  )
-  {
-  // This is an ADD Format 3.  Each A[i] gets accumulated into each C[i].  Each
-  // SUBTRACTION is treated separately.
-
-  bool on_size_error = !!(on_error_flag & ON_SIZE_ERROR);
-
-  for(size_t i=0; i<nA; i++)
-    {
-    if( A[i].field->type == FldFloat || C[i].field->type == FldFloat)
-      {
-      GCOB_FP128 value_a = __gg__float128_from_qualified_field(A[i].field,
-                                                               A[i].offset,
-                                                               A[i].size);
-      GCOB_FP128 value_b = __gg__float128_from_qualified_field(C[i].field,
-                                                               C[i].offset,
-                                                               C[i].size);
-
-      value_b = subtraction_helper_float(value_b, value_a, compute_error);
-
-        // At this point, we assign the sum to *C.
-      *compute_error |= conditional_stash(C[i].field, C[i].offset, C[i].size,
-                                          on_size_error,
-                                          value_b,
-                                          *rounded++);
-      }
-    else
-      {
-      // We are doing fixed-point subtraction.
-      int256 value_a;
-      int256 value_b;
-
-      get_int256_from_qualified_field(value_a,
-                                      A[i].field,
-                                      A[i].offset,
-                                      A[i].size);
-      get_int256_from_qualified_field(value_b,
-                                      C[i].field,
-                                      C[i].offset,
-                                      C[i].size);
-
-      subtract_int256_from_int256(value_b, value_a);
-
-      int overflow = squeeze_int256(value_b);
-
-      if( overflow )
-        {
-        *compute_error |= compute_error_overflow;
-        }
-
-        // At this point, we assign the sum to *C.
-      *compute_error |= conditional_stash(C[i].field, C[i].offset, C[i].size,
-                                          on_size_error,
-                                          int256_get_u128(value_b, 0),
-                                          value_b.rdigits,
-                                          *rounded++);
-      }
     }
   }
 
@@ -2582,7 +2008,7 @@ __gg__int128_to_int128_rounded( cbl_round_t rounded,
   switch(rounded)
     {
     case truncation_e:
-      // retval is already the truncateed result.
+      // retval is already the truncated result.
       break;
 
     case nearest_even_e:
