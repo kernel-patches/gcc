@@ -604,7 +604,7 @@ struct arith_t {
     : format(format), on_error(NULL), not_error(NULL)
   {}
   arith_t( const cbl_loc_t& loc,
-           cbl_arith_format_t format, refer_list_t * refers );
+           cbl_arith_format_t format, const refer_list_t& refers );
 
   bool corresponding() const { return format == corresponding_e; }
 
@@ -1207,8 +1207,8 @@ teed_up_names() {
 #define cdf_tokens cdf_current_tokens()
 
 int
-redefined_token( const cbl_name_t name ) {
-  return cdf_tokens.redefined_as(name);
+redefined_token( const cbl_name_t name, int token ) {
+  return cdf_tokens.redefined_as(name, token);
 }
 
 static bool
@@ -1308,9 +1308,8 @@ struct refer_list_t {
     }
   }
   // the source is not always to be deleted
-  explicit refer_list_t( const cbl_refer_t& refer ) {
-    refers.push_back(refer);
-  }
+  explicit refer_list_t( const cbl_refer_t& refer ) : refers(1, refer) {}
+  
   refer_list_t * push_back( cbl_refer_t *refer ) {
     refers.push_back(*refer);
     delete refer;
@@ -1333,10 +1332,9 @@ struct refer_list_t {
   }
   std::vector<cbl_refer_t>
   vectorize() {
-    std::vector<cbl_refer_t> tgt(refers.size());
-    std::copy(refers.begin(), refers.end(), tgt.begin());
+    std::vector<cbl_refer_t> output(refers.begin(), refers.end());
     refers.clear();
-    return tgt;
+    return output;
   }
 };
 

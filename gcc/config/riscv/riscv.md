@@ -2941,7 +2941,7 @@
 	      (use (match_operand:SI 3 "const_int_operand"))])]
   ""
 {
-  if (riscv_expand_block_move (operands[0], operands[1], operands[2]))
+  if (riscv_expand_block_move (operands[0], operands[1], operands[2], false))
     DONE;
   else
     FAIL;
@@ -2960,16 +2960,7 @@
 	      (use (match_operand:SI 3 "const_int_operand"))])]
  ""
 {
-  /* If TARGET_VECTOR is false, this routine will return false and we will
-     try scalar expansion.  */
-  if (riscv_vector::expand_vec_setmem (operands[0], operands[1], operands[2]))
-    DONE;
-
-  /* If value to set is not zero, use the library routine.  */
-  if (operands[2] != const0_rtx)
-    FAIL;
-
-  if (riscv_expand_block_clear (operands[0], operands[1]))
+  if (riscv_expand_setmem (operands[0], operands[1], operands[2], false))
     DONE;
   else
     FAIL;
@@ -2980,10 +2971,9 @@
    (match_operand:BLK 1 "general_operand"))
     (use (match_operand:P 2 "const_int_operand"))
     (use (match_operand:SI 3 "const_int_operand"))])]
-  "TARGET_VECTOR"
+  ""
 {
-  if (riscv_vector::expand_block_move (operands[0], operands[1], operands[2],
-				       true))
+  if (riscv_expand_block_move (operands[0], operands[1], operands[2], true))
     DONE;
   else
     FAIL;

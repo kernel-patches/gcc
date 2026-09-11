@@ -71,7 +71,14 @@ public:
   void debug ();
 protected:
   void debug_path (FILE *, int pathno);
+  void remove_path (unsigned pathno);
+  void remove_path (unsigned pathno, edge first);
+  void add_first_edge (edge);
+  void drop_first_edge (edge);
+  unsigned first_edge_count (edge);
   vec<vec<jump_thread_edge *> *> m_paths;
+  // How many registered paths start on a given edge.
+  hash_map<edge, unsigned> m_first_edge_counts;
   unsigned long m_num_threaded_edges;
 private:
   virtual bool update_cfg (bool peel_loop_headers) = 0;
@@ -119,6 +126,8 @@ private:
 			      unsigned n_region, unsigned current_path_no,
 			      const char **failure_reason);
   bool rewire_first_differing_edge (unsigned path_num, unsigned edge_num);
+  bool adjust_one_path (vec<jump_thread_edge *> *curr_path,
+			unsigned cand_path_num);
 };
 
 // Rather than search all the edges in jump thread paths each time DOM

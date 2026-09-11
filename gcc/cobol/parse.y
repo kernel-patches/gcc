@@ -6186,7 +6186,7 @@ end_add:        %empty %prec ADD
 
 add_body:       sum TO rnames
                 {
-                  $$ = new arith_t(@sum, no_giving_e, $sum);
+                  $$ = new arith_t(@sum, no_giving_e, *$sum);
                   std::copy( rhs.begin(),
                              rhs.end(), back_inserter($$->tgts) );
                   $$->locs.tgts = @rnames;
@@ -6194,7 +6194,7 @@ add_body:       sum TO rnames
                 }
         |       sum TO num_operand[value] GIVING rnames
                 {
-                  $$ = new arith_t(@$, giving_e, $sum);
+                  $$ = new arith_t(@$, giving_e, *$sum);
                   $$->A.push_back(*$value);
                   std::copy( rhs.begin(),
                              rhs.end(), back_inserter($$->tgts) );
@@ -6203,7 +6203,7 @@ add_body:       sum TO rnames
                 }
         |       sum GIVING rnames
                 { // implicit TO
-                  $$ = new arith_t(@sum, giving_e, $sum);
+                  $$ = new arith_t(@sum, giving_e, *$sum);
                   std::copy( rhs.begin(),
                              rhs.end(), back_inserter($$->tgts) );
                   $$->locs.tgts = @rnames;
@@ -6222,13 +6222,23 @@ add_body:       sum TO rnames
                     }
                   // First src/tgt elements are templates.
                   // Their subscripts apply to the correspondents.
-                  $$ = new arith_t(@sum, corresponding_e, $sum);
+                  $$ = new arith_t(@sum, corresponding_e, *$sum);
                   $$->tgts.push_front(rhs.front());
                   $$->locs.tgts = @rnames;
                   // use arith_t functor to populate A and tgts
                   *$$ = std::for_each( pairs.begin(), pairs.end(), *$$ );
                   $$->A.pop_front();
                   $$->tgts.pop_front();
+                  if( 1 < $sum->size() ) {
+                    unsigned long n = $sum->size();
+                    error_msg(@sum, "ADD CORRESPONDING accepts only 1 sending operand, "
+                              "%lu provided", n);
+                  }
+                  if( 1 < rhs.size() ) {
+                    unsigned long n = rhs.size();
+                    error_msg(@rnames, "ADD CORRESPONDING accepts only 1 TO operand, "
+                              "%lu provided", n);
+                  }
                   rhs.clear();
                 }
                 ;
@@ -8868,7 +8878,7 @@ end_subtract:   %empty %prec SUBTRACT
 
 subtract_body:  sum FROM rnames
                 {
-                  $$ = new arith_t(@sum, no_giving_e, $sum);
+                  $$ = new arith_t(@sum, no_giving_e, *$sum);
                   std::copy( rhs.begin(),
                              rhs.end(), back_inserter($$->tgts) );
                   $$->locs.tgts = @rnames;
@@ -8876,7 +8886,7 @@ subtract_body:  sum FROM rnames
                 }
         |       sum FROM num_operand[input] GIVING rnames
                 {
-                  $$ = new arith_t(@sum, giving_e, $sum);
+                  $$ = new arith_t(@sum, giving_e, *$sum);
                   $$->B.push_back(*$input);
                   $$->locs.B = @input;
                   std::copy( rhs.begin(),
@@ -8897,7 +8907,7 @@ subtract_body:  sum FROM rnames
                     }
                   // First src/tgt elements are templates.
                   // Their subscripts apply to the correspondents.
-                  $$ = new arith_t(@sum, corresponding_e, $sum);
+                  $$ = new arith_t(@sum, corresponding_e, *$sum);
                   $$->tgts.push_front(rhs.front());
                   $$->locs.tgts = @rnames;
                   // use arith_t functor to populate A and tgts
@@ -13845,13 +13855,13 @@ valid_pointer_relop( const cbl_loc_t& lloc,
 }
 
 arith_t::arith_t( const cbl_loc_t& loc,
-                  cbl_arith_format_t format, refer_list_t * refers )
-  : format(format), on_error(NULL), not_error(NULL)
+                  cbl_arith_format_t format, const refer_list_t& refers )
+  : format(format)
+  , A(refers.refers.begin(), refers.refers.end())
+  , on_error(NULL)
+  , not_error(NULL)
 {
-  std::copy( refers->refers.begin(), refers->refers.end(), back_inserter(A) );
-  refers->refers.clear();
   locs.A = loc;
-  delete refers;
 }
 
 cbl_key_t::cbl_key_t( sort_key_t that )
@@ -15062,6 +15072,39 @@ cbl_field_t::value_str() const {
     return data.etc_type_str();
 }
 
+/*
+ * Default keyword adjustments for -dialect {mf,gnu}
+ */
+static void
+dialect_words_set( cbl_dialect_t dialect ) {
+  const static auto dialect_mf_gnu = cbl_dialect_t(dialect_mf_e | dialect_gnu_e);
+  static unsigned int done;
+  
+  typedef bool (current_tokens_t::*wordop_func_t)(const cbl_loc_t& loc,
+                          const cbl_name_t keyword,
+                          const cbl_name_t alias);
+  struct wordop_t {
+    cbl_dialect_t dialect;
+    wordop_func_t op;
+    cbl_name_t keyword, alias;
+    bool match(cbl_dialect_t dialect) const { return this->dialect & dialect; }
+    
+  };
+  const static std::vector<wordop_t> wordops {
+    { dialect_mf_gnu, &current_tokens_t::equate, "BINARY-DOUBLE", "BINARY-C-LONG" },
+    { dialect_gnu_e,  &current_tokens_t::substitute, "CONCAT", "CONCATENATE" },
+  };
+
+  if( dialect != (done & dialect) ) { // if any part of dialect not done
+    for( const auto& w : wordops ) {
+      if( w.match(dialect) ) {
+        (cdf_tokens.*w.op)(cbl_loc_t(), w.keyword, w.alias);
+      }
+    }
+  }
+  done |= dialect;
+}
+  
 void
 cobol_dialect_set( cbl_dialect_t dialect ) {
   switch(dialect) {
@@ -15072,11 +15115,8 @@ cobol_dialect_set( cbl_dialect_t dialect ) {
     cobol_gcobol_feature_set(feature_embiggen_e);
     break;
   case dialect_mf_e:
-    break;
   case dialect_gnu_e:
-    if( 0 == (cbl_dialects & dialect) ) { // first time
-      cdf_tokens.equate(cbl_loc_t(), "BINARY-DOUBLE", "BINARY-C-LONG");
-    }
+    dialect_words_set(dialect);
     break;
   }    
   cbl_dialects |= dialect;
