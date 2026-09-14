@@ -600,8 +600,7 @@ gen_split (const md_rtx_info &info, FILE *file)
     if (*p == '/')
       fn = p + 1;
 
-  fprintf (file, "  if (dump_file)\n");
-  fprintf (file, "    fprintf (dump_file, \"Splitting with gen_%s_%d (%s:%d)\\n\");\n",
+  fprintf (file, "  note_split (\"gen_%s_%d (%s:%d)\");\n",
 	  name, info.index, fn, info.loc.lineno);
 
   fprintf (file, "  start_sequence ();\n");
@@ -971,9 +970,13 @@ main (int argc, const char **argv)
   output_add_clobbers (file);
   output_added_clobbers_hard_reg_p (file);
 
+  /* Spread these over the output files too.  Emitting them all into
+     whichever file happened to be current leaves that one much bigger than
+     the rest, which is the opposite of what splitting is for.  */
   for (overloaded_name *oname = rtx_reader_ptr->get_overloads ();
        oname; oname = oname->next)
     {
+      file = choose_output (output_files, file_idx);
       handle_overloaded_code_for (oname, file);
       handle_overloaded_gen (oname, file);
     }

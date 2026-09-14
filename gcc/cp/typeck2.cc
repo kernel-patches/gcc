@@ -456,7 +456,7 @@ cxx_incomplete_type_inform (const_tree type)
 		    else
 		      cand = TYPE_NAME (t);
 		  }
-		
+
 		if (!COMPLETE_TYPE_P (TREE_TYPE (cand)))
 		  continue;
 
@@ -1076,9 +1076,12 @@ store_init_value (tree decl, tree init, vec<tree, va_gc>** cleanups, int flags)
 	  || (DECL_IN_AGGR_P (decl)
 	      && DECL_INITIALIZED_IN_CLASS_P (decl)))
 	{
-	  value = fold_non_dependent_expr (value, tf_warning_or_error,
-					   /*manifestly_const_eval=*/true,
-					   decl);
+	  /* As in massage_init_elt, do not fold a CONSTRUCTOR in a template
+	     it has already been folded c++/126811.  */
+	  if (!(processing_template_decl && TREE_CODE (value) == CONSTRUCTOR))
+	    value = fold_non_dependent_expr (value, tf_warning_or_error,
+					     /*manifestly_const_eval=*/true,
+					     decl);
 	  if (value == error_mark_node)
 	    ;
 	  /* Diagnose a non-constant initializer for constexpr variable or
@@ -1135,6 +1138,42 @@ store_init_value (tree decl, tree init, vec<tree, va_gc>** cleanups, int flags)
 
   /* Handle aggregate NSDMI in non-constant initializers, too.  */
   value = replace_placeholders (value, decl);
+
+  /* Detect stuff like 'info r = ^^int;' outside a manifestly
+     constant-evaluated context.  */
+  if (flag_reflection
+      && !processing_template_decl
+      && !DECL_DECLARED_CONSTEXPR_P (decl))
+    {
+      const bool mce_p
+	= (decl_maybe_constant_var_p (decl)
+	   || (TREE_STATIC (decl)
+	       && DECL_INITIALIZED_BY_CONSTANT_EXPRESSION_P (decl)));
+      bool bad = check_out_of_consteval_use (value, /*complain=*/false);
+      /* A non-constexpr variable at namespace scope with a constant
+	 initializer has constant initialization, so we check the folded
+	 value not to wrongly reject "int e = (^^int, 42);".  For non-static
+	 local variables, there is no such rule, so we check the unfolded
+	 initializer.  But we should also reject
+
+	   consteval auto fn () { return ^^int; }
+	   void g() { auto r = fn (); }
+
+	 so we may have to check both.  Note that the first call could
+	 have escalated and so we may find ourselves in an immediate
+	 context now.  */
+      if (!bad && !mce_p && value != init)
+	bad = check_out_of_consteval_use (init, /*complain=*/false);
+      if (bad)
+	{
+	  auto_diagnostic_group d;
+	  error_at (DECL_SOURCE_LOCATION (decl),
+		    "%qD is initialized with a consteval-only value but is "
+		    "not declared %<constexpr%>", decl);
+	  inform (DECL_SOURCE_LOCATION (decl), "add %<constexpr%>");
+	  value = error_mark_node;
+	}
+    }
 
   /* A COMPOUND_LITERAL_P CONSTRUCTOR is the syntactic form; by the time we get
      here it should have been digested into an actual value for the type.  */

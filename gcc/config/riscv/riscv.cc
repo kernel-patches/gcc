@@ -10209,9 +10209,8 @@ riscv_v_adjust_scalable_frame (rtx target, poly_int64 offset, bool epilogue)
 	     very wrong) we tie the old and new stack pointer together.
 	     The tie will expand to nothing but the optimizers will not touch
 	     the instruction.  */
-	  insn = get_last_insn ();
 	  rtx stack_ptr_copy = gen_rtx_REG (Pmode, RISCV_STACK_CLASH_VECTOR_CFA_REGNUM);
-	  emit_move_insn (stack_ptr_copy, stack_pointer_rtx);
+	  insn = emit_move_insn (stack_ptr_copy, stack_pointer_rtx);
 	  riscv_emit_stack_tie (stack_ptr_copy);
 
 	  /* We want the CFA independent of the stack pointer for the
@@ -13434,8 +13433,9 @@ riscv_optab_supported_p (int op, machine_mode, machine_mode result_mode,
   /* The second CRC optab mode is the result mode.  The CLMUL expansion
      requires room for a quotient wider than the CRC value itself.  */
   if (op == crc_rev_optab && opt_type != OPTIMIZE_FOR_SPEED)
-    return ((TARGET_ZBKC || TARGET_ZBC || TARGET_ZVBC)
-	    && result_mode < word_mode);
+    return (((TARGET_ZBKC || TARGET_ZBC || TARGET_ZVBC)
+	     && result_mode < word_mode)
+	    || (!TARGET_64BIT && TARGET_ZBC && result_mode == word_mode));
 
   return true;
 }
@@ -15895,11 +15895,22 @@ expand_reversed_crc_using_clmul (scalar_mode crc_mode, scalar_mode data_mode,
   unsigned HOST_WIDE_INT
   ref_polynomial = reflect_hwi (UINTVAL (polynomial),
 				crc_size);
-  rtx t1 = gen_reg_rtx (word_mode);
-  riscv_emit_move (t1, gen_int_mode (ref_polynomial << 1, word_mode));
 
-  rtx crc = gen_rtx_ZERO_EXTEND (word_mode, operands[1]);
-  rtx data = gen_rtx_ZERO_EXTEND (word_mode, operands[2]);
+  bool use_clmulr = crc_size == BITS_PER_WORD;
+  gcc_assert (TARGET_ZBC || !use_clmulr);
+
+  rtx t1 = gen_reg_rtx (word_mode);
+  if (use_clmulr)
+    riscv_emit_move (t1, gen_int_mode (ref_polynomial, word_mode));
+  else
+    riscv_emit_move (t1, gen_int_mode (ref_polynomial << 1, word_mode));
+
+  rtx crc = operands[1];
+  if (crc_size != BITS_PER_WORD)
+    crc = gen_rtx_ZERO_EXTEND (word_mode, crc);
+  rtx data = operands[2];
+  if (data_size != BITS_PER_WORD)
+    data = gen_rtx_ZERO_EXTEND (word_mode, data);
   rtx a0 = gen_reg_rtx (word_mode);
   riscv_expand_op (XOR, word_mode, a0, crc, data);
 
@@ -15913,10 +15924,18 @@ expand_reversed_crc_using_clmul (scalar_mode crc_mode, scalar_mode data_mode,
       rtx num_shift = gen_int_mode (BITS_PER_WORD - data_size, word_mode);
       riscv_expand_op (ASHIFT, word_mode, a0, a0, num_shift);
 
-      if (TARGET_64BIT)
-	emit_insn (gen_riscv_clmulh_di (a0, a0, t1));
+      if (use_clmulr)
+	{
+	  gcc_assert (!TARGET_64BIT);
+	  emit_insn (gen_riscv_clmulr_si (a0, a0, t1));
+	}
       else
-	emit_insn (gen_riscv_clmulh_si (a0, a0, t1));
+	{
+	  if (TARGET_64BIT)
+	    emit_insn (gen_riscv_clmulh_di (a0, a0, t1));
+	  else
+	    emit_insn (gen_riscv_clmulh_si (a0, a0, t1));
+	}
     }
   else
     {

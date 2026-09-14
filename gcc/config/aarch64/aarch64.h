@@ -368,6 +368,9 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 
 #define TARGET_STREAMING_SME2p3 (TARGET_STREAMING && AARCH64_HAVE_ISA (SME2p3))
 
+#define TARGET_STREAMING_SME_TMOP \
+  (AARCH64_HAVE_ISA (SME_TMOP) && TARGET_STREAMING)
+
 #define TARGET_SME_B16B16 AARCH64_HAVE_ISA (SME_B16B16)
 
 /* ARMv8.3-A features.  */
@@ -518,6 +521,10 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 #define TARGET_SVE_PRED_CLOBBER (TARGET_SVE \
 				 && (aarch64_tune_params.extra_tuning_flags \
 				     & AARCH64_EXTRA_TUNE_AVOID_PRED_RMW))
+
+/* Set if we prefer SVE merging predicated mov immediate over zeroing.  */
+#define TARGET_SVE_PREFER_ZEROING_MOVIMM \
+  !(aarch64_tune_params.extra_tuning_flags & AARCH64_EXTRA_TUNE_AVOID_MOVIMM_Z)
 
 /* fp8 instructions are enabled through +fp8.  */
 #define TARGET_FP8 AARCH64_HAVE_ISA (FP8)

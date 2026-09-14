@@ -2482,6 +2482,15 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
  (if (!FIXED_POINT_TYPE_P (type))
  (plus @0 (negate @1))))
 
+/* A - MIN (B, C) -> A + MAX (-B, -C)
+   A - MAX (B, C) -> A + MIN (-B, -C)  if B and C are easily negatable.  */
+(for minmax (min max)
+     maxmin (max min)
+ (simplify
+  (minus @0 (minmax:s negate_expr_p@1 negate_expr_p@2))
+  (if (ANY_INTEGRAL_TYPE_P (type) && TYPE_OVERFLOW_UNDEFINED (type))
+   (plus @0 (maxmin (negate @1) (negate @2))))))
+
 /* 1 - a is a ^ 1 if a had a bool range. */
 /* This is only enabled for gimple as sometimes
    cfun is not set for the function which contains
@@ -5099,6 +5108,66 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
       (cmp (op:c @0 tree_expr_nonnegative_p@1) integer_zerop@2)
         (cmp @0 @2))))
 
+#if GIMPLE
+/* ((X + C1) | (C2 - X)) < 0 -> (unsigned) (X + C1) > C1 + C2, also spelled
+   (X | (C2 - X)) < 0, ((X + C1) | -X) < 0 and (X | -X) < 0, and with the
+   sign bit extracted by a shift rather than compared.  */
+(match (ior_range_test @0 @1 @2)
+ (bit_ior:c@3 (plus@0 @4 INTEGER_CST@1) (minus INTEGER_CST@2 @4))
+ (if (single_use (@3)
+      && !TYPE_OVERFLOW_SANITIZED (TREE_TYPE (@0))
+      && wi::ge_p (wi::to_wide (@1) + wi::to_wide (@2), 0, SIGNED))))
+(match (ior_range_test_1 @0 @1)
+ (bit_ior:c@2 @0 (minus INTEGER_CST@1 @0))
+ (if (single_use (@2)
+      && !TYPE_OVERFLOW_SANITIZED (TREE_TYPE (@0))
+      && wi::ge_p (wi::to_wide (@1), 0, SIGNED))))
+(match (ior_range_test_1 @0 @1)
+ (bit_ior:c@2 (plus@0 @3 INTEGER_CST@1) (negate @3))
+ (if (single_use (@2)
+      && !TYPE_OVERFLOW_SANITIZED (TREE_TYPE (@0))
+      && wi::ge_p (wi::to_wide (@1), 0, SIGNED))))
+(match (ior_range_test_0 @0)
+ (bit_ior:c@1 @0 (negate @0))
+ (if (INTEGRAL_TYPE_P (TREE_TYPE (@0))
+      && single_use (@1)
+      && !TYPE_OVERFLOW_SANITIZED (TREE_TYPE (@0)))))
+(for cmp (lt ge)
+     out (gt le)
+ (simplify
+  (cmp (nop_convert?@5 (ior_range_test @0 @1 @2)) integer_zerop)
+  (if (!TYPE_UNSIGNED (TREE_TYPE (@5)))
+   (with { tree utype = unsigned_type_for (TREE_TYPE (@0)); }
+    (out (convert:utype @0)
+	 { wide_int_to_tree (utype, wi::to_wide (@1) + wi::to_wide (@2)); }))))
+ (simplify
+  (cmp (nop_convert?@3 (ior_range_test_1 @0 @1)) integer_zerop)
+  (if (!TYPE_UNSIGNED (TREE_TYPE (@3)))
+   (with { tree utype = unsigned_type_for (TREE_TYPE (@0)); }
+    (out (convert:utype @0) (convert:utype @1)))))
+ (simplify
+  (cmp (nop_convert?@2 (ior_range_test_0 @0)) integer_zerop@3)
+  (if (!TYPE_UNSIGNED (TREE_TYPE (@2)))
+   (with { tree utype = unsigned_type_for (TREE_TYPE (@0)); }
+    (out (convert:utype @0) (convert:utype @3))))))
+(simplify
+ (rshift (nop_convert? (ior_range_test @0 @1 @2)) INTEGER_CST@5)
+ (if (TYPE_UNSIGNED (type)
+      && wi::to_wide (@5) == element_precision (type) - 1)
+  (convert (gt (convert:type @0)
+	       { wide_int_to_tree (type, wi::to_wide (@1) + wi::to_wide (@2)); }))))
+(simplify
+ (rshift (nop_convert? (ior_range_test_1 @0 @1)) INTEGER_CST@2)
+ (if (TYPE_UNSIGNED (type)
+      && wi::to_wide (@2) == element_precision (type) - 1)
+  (convert (gt (convert:type @0) (convert:type @1)))))
+(simplify
+ (rshift (nop_convert? (ior_range_test_0 @0)) INTEGER_CST@1)
+ (if (TYPE_UNSIGNED (type)
+      && wi::to_wide (@1) == element_precision (type) - 1)
+  (convert (ne @0 { build_zero_cst (TREE_TYPE (@0)); }))))
+#endif
+
 /* Undo fancy ways of writing max/min or other ?: expressions, like
    a - ((a - b) & -(a < b))  and  a - (a - b) * (a < b) into (a < b) ? b : a.
    People normally use ?: and that is what we actually try to optimize.  */
@@ -5555,6 +5624,30 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
        && wi::eq_p (wi::to_wide (@1), TYPE_PRECISION (type) - 1))
    (rresult @0 { build_int_cst (type, bitop == BIT_IOR_EXPR ? -1 : 0); }))))
 #endif
+
+/* Complete the branchless min and max the rules above leave half folded,
+   and the same identity with the addition inside the select:
+
+     Y + MIN (X - Y, 0) -> MIN (X, Y)    X - MIN (X - Y, 0) -> MAX (X, Y)
+     Y + MAX (X - Y, 0) -> MAX (X, Y)    X - MAX (X - Y, 0) -> MIN (X, Y)
+     MIN (X + Y, Y) - Y -> MIN (X, 0)    MAX (X + Y, Y) - Y -> MAX (X, 0)  */
+(for minmax (min max)
+     maxmin (max min)
+ (simplify
+  (plus:c (minmax (minus@3 @0 @1) integer_zerop) @1)
+  (if (ANY_INTEGRAL_TYPE_P (type)
+       && gimple_match_no_overflow_p (MINUS_EXPR, type, @0, @1, @3))
+   (minmax @0 @1)))
+ (simplify
+  (minus @0 (minmax (minus@3 @0 @1) integer_zerop))
+  (if (ANY_INTEGRAL_TYPE_P (type)
+       && gimple_match_no_overflow_p (MINUS_EXPR, type, @0, @1, @3))
+   (maxmin @0 @1)))
+ (simplify
+  (minus (minmax:c (plus:c@3 @0 @1) @1) @1)
+  (if (ANY_INTEGRAL_TYPE_P (type)
+       && gimple_match_no_overflow_p (PLUS_EXPR, type, @0, @1, @3))
+   (minmax @0 { build_zero_cst (type); }))))
 
 /* Fold `1 >> a` into `a == 0` for scalar integral types. */
 (simplify
@@ -8598,6 +8691,23 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
   (simplify
    (eqne (op @0) zerop@1)
    (eqne @0 { build_zero_cst (TREE_TYPE (@0)); }))))
+
+#if GIMPLE
+/* ABS_EXPR <X> > C -> (unsigned) (X + C) > 2 * C, and the same for <= and
+   for ABSU_EXPR.  */
+(for op (abs absu)
+ (for cmp (gt le)
+  (simplify
+   (cmp (op@2 @0) INTEGER_CST@1)
+   (if ((op == ABSU_EXPR || TYPE_OVERFLOW_UNDEFINED (TREE_TYPE (@0)))
+	&& !TYPE_OVERFLOW_SANITIZED (TREE_TYPE (@0))
+	&& single_use (@2)
+	&& wi::ge_p (wi::to_wide (@1), 0, SIGNED)
+	&& !tree_int_cst_equal (@1, TYPE_MAX_VALUE (TREE_TYPE (@0))))
+    (with { tree utype = unsigned_type_for (TREE_TYPE (@0)); }
+     (cmp (plus (convert:utype @0) (convert:utype @1))
+	  { wide_int_to_tree (utype, wi::to_wide (@1) * 2); }))))))
+#endif
 
 /* From fold_sign_changed_comparison and fold_widened_comparison.
    FIXME: the lack of symmetry is disturbing.  */
