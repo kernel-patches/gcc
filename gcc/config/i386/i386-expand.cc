@@ -162,8 +162,13 @@ split_double_mode (machine_mode mode, rtx operands[],
 					 GET_MODE (op) == VOIDmode
 					 ? mode : GET_MODE (op), byte);
 	  /* simplify_gen_subreg will return NULL RTX for the
-	     high half of the paradoxical subreg. */
-	  hi_half[num] = tmp ? tmp : gen_reg_rtx (half_mode);
+	     high half of the paradoxical subreg.  */
+	  if (tmp)
+	    hi_half[num] = tmp;
+	  else if (can_create_pseudo_p ())
+	    hi_half[num] = gen_reg_rtx (half_mode);
+	  else
+	    hi_half[num] = CONST0_RTX (half_mode);
 	}
     }
 }
@@ -4803,15 +4808,15 @@ ix86_fp_cmp_code_to_pcmp_immediate (enum rtx_code code)
     case LT:
       return 0x01;
     case UNLE:
-      return 0x0a;
+      return 0x1a;
     case UNLT:
-      return 0x09;
+      return 0x19;
     case UNGE:
-      return 0x05;
+      return 0x15;
     case UNGT:
-      return 0x06;
+      return 0x16;
     case UNEQ:
-      return 0x18;
+      return 0x08;
     case LTGT:
       return 0x0c;
     case ORDERED:
@@ -14773,19 +14778,16 @@ ix86_expand_ace_builtin (const struct builtin_description *d, tree exp,
 
       if (i == 0 || i == constant)
 	{
-	  if (i == 0 && !IN_RANGE (INTVAL (op), 0, 7))
+	  if (!insn_p->operand[i + arg_adjust].predicate (op, SImode))
 	    {
-	      /* This must be the tmm reg number constant.  */
-	      error ("the tmm register number argument must be between 0 to 7");
+	      if (i == 0)
+		/* This must be the tmm reg number constant.  */
+		error ("the tmm register number argument must be between 0 to 7");
+	      else
+		/* This must be the constant.  */
+		error ("the argument must be constant");
 	      return const0_rtx;
 	    }
-	  else if (!insn_p->operand[i + arg_adjust].predicate(op, SImode))
-	    {
-	      /* This must be the constant.  */
-	      error ("the argument must be constant");
-	      return const0_rtx;
-	    }
-
 	}
       else
 	{

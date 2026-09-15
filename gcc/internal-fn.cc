@@ -25,6 +25,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "target.h"
 #include "rtl.h"
 #include "tree.h"
+#include "tree-eh.h"
 #include "gimple.h"
 #include "predict.h"
 #include "stringpool.h"
@@ -3144,8 +3145,9 @@ expand_partial_load_optab_fn (internal_fn ifn, gcall *stmt, convert_optab optab)
     icode = convert_optab_handler (optab, TYPE_MODE (type),
 				   TYPE_MODE (TREE_TYPE (maskt)));
 
-  mem = expand_expr (rhs, NULL_RTX, VOIDmode, EXPAND_WRITE);
+  mem = expand_expr (rhs, NULL_RTX, VOIDmode, EXPAND_MEMORY);
   gcc_assert (MEM_P (mem));
+  MEM_NOTRAP_P (mem) = !tree_could_trap_p (rhs);
   /* The built MEM_REF does not accurately reflect that the load
      is only partial.  Clear it.  */
   set_mem_expr (mem, NULL_TREE);
@@ -3404,7 +3406,7 @@ expand_RAWMEMCHR (internal_fn, gcall *stmt)
   create_call_lhs_operand (&ops[0], lhs_rtx, lhs_mode);
 
   tree mem = gimple_call_arg (stmt, 0);
-  rtx mem_rtx = get_memory_rtx (mem, NULL);
+  rtx mem_rtx = get_memory_rtx (mem, NULL, false);
   create_fixed_operand (&ops[1], mem_rtx);
 
   tree pattern = gimple_call_arg (stmt, 1);

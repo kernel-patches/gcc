@@ -84,44 +84,12 @@ gfc_get_character_len_in_bytes (tree type)
 }
 
 
-/* Convert a scalar to an array descriptor. To be used for assumed-rank
-   arrays.  */
-
-static tree
-get_scalar_to_descriptor_type (tree scalar, symbol_attribute attr)
-{
-  enum gfc_array_kind akind;
-  tree *lbound = NULL, *ubound = NULL;
-  int codim = 0;
-
-  if (attr.pointer)
-    akind = GFC_ARRAY_POINTER_CONT;
-  else if (attr.allocatable)
-    akind = GFC_ARRAY_ALLOCATABLE;
-  else
-    akind = GFC_ARRAY_ASSUMED_SHAPE_CONT;
-
-  if (POINTER_TYPE_P (TREE_TYPE (scalar)))
-    scalar = TREE_TYPE (scalar);
-  if (TYPE_LANG_SPECIFIC (TREE_TYPE (scalar)))
-    {
-      struct lang_type *lang_specific = TYPE_LANG_SPECIFIC (TREE_TYPE (scalar));
-      codim = lang_specific->corank;
-      lbound = lang_specific->lbound;
-      ubound = lang_specific->ubound;
-    }
-  return gfc_get_array_type_bounds (TREE_TYPE (scalar), 0, codim, lbound,
-				    ubound, 1, akind,
-				    !(attr.pointer || attr.target));
-}
-
 tree
 gfc_conv_scalar_to_descriptor (gfc_se *se, tree scalar, symbol_attribute attr)
 {
-  tree desc, type, etype;
+  tree desc, type;
 
-  type = get_scalar_to_descriptor_type (scalar, attr);
-  etype = TREE_TYPE (scalar);
+  type = gfc_get_scalar_to_descriptor_type (TREE_TYPE (scalar), attr);
   desc = gfc_create_var (type, "desc");
   DECL_ARTIFICIAL (desc) = 1;
 
@@ -132,15 +100,8 @@ gfc_conv_scalar_to_descriptor (gfc_se *se, tree scalar, symbol_attribute attr)
       gfc_add_modify (&se->pre, tmp, scalar);
       scalar = tmp;
     }
-  if (!POINTER_TYPE_P (TREE_TYPE (scalar)))
-    scalar = gfc_build_addr_expr (NULL_TREE, scalar);
-  else if (TREE_TYPE (etype) && TREE_CODE (TREE_TYPE (etype)) == ARRAY_TYPE)
-    etype = TREE_TYPE (etype);
-  gfc_conv_descriptor_dtype_set (&se->pre, desc,
-				 gfc_get_dtype_rank_type (0, etype));
-  gfc_conv_descriptor_data_set (&se->pre, desc, scalar);
-  gfc_conv_descriptor_span_set (&se->pre, desc,
-				gfc_conv_descriptor_elem_len_get (desc));
+
+  gfc_set_descriptor_from_scalar (&se->pre, desc, scalar);
 
   /* Copy pointer address back - but only if it could have changed and
      if the actual argument is a pointer and not, e.g., NULL().  */
@@ -792,38 +753,6 @@ gfc_get_vptr_from_expr (tree expr)
   return NULL_TREE;
 }
 
-static void
-copy_coarray_desc_part (stmtblock_t *block, tree dest, tree src)
-{
-  tree src_type = TREE_TYPE (src);
-  if (TYPE_LANG_SPECIFIC (src_type) && TYPE_LANG_SPECIFIC (src_type)->corank)
-    {
-      struct lang_type *lang_specific = TYPE_LANG_SPECIFIC (src_type);
-      for (int c = 0; c < lang_specific->corank; ++c)
-	{
-	  int dim = lang_specific->rank + c;
-	  tree codim = gfc_rank_cst[dim];
-
-	  if (lang_specific->lbound[dim])
-	    gfc_conv_descriptor_lbound_set (block, dest, codim,
-					    lang_specific->lbound[dim]);
-	  else
-	    gfc_conv_descriptor_lbound_set (
-	      block, dest, codim, gfc_conv_descriptor_lbound_get (src, codim));
-	  if (dim + 1 < lang_specific->corank)
-	    {
-	      if (lang_specific->ubound[dim])
-		gfc_conv_descriptor_ubound_set (block, dest, codim,
-						lang_specific->ubound[dim]);
-	      else
-		gfc_conv_descriptor_ubound_set (
-		  block, dest, codim,
-		  gfc_conv_descriptor_ubound_get (src, codim));
-	    }
-	}
-    }
-}
-
 void
 gfc_class_array_data_assign (stmtblock_t *block, tree lhs_desc, tree rhs_desc,
 			     bool lhs_type)
@@ -852,7 +781,7 @@ gfc_class_array_data_assign (stmtblock_t *block, tree lhs_desc, tree rhs_desc,
   gfc_add_modify (block, lhs_dim, rhs_dim);
 
   /* The corank dimensions are not copied by the ARRAY_RANGE_REF.  */
-  copy_coarray_desc_part (block, lhs_desc, rhs_desc);
+  gfc_copy_coarray_desc_part (block, lhs_desc, rhs_desc);
 }
 
 /* Takes a derived type expression and returns the address of a temporary
@@ -962,21 +891,8 @@ gfc_conv_derived_to_class (gfc_se *parmse, gfc_expr *e, gfc_symbol *fsym,
 
 	  /* Scalar to an assumed-rank array.  */
 	  if (fsym->ts.u.derived->components->as)
-	    {
-	      tree type;
-	      type = get_scalar_to_descriptor_type (parmse->expr,
-						    gfc_expr_attr (e));
-	      gfc_conv_descriptor_dtype_set (&parmse->pre, ctree,
-					     gfc_get_dtype (type));
-	      copy_coarray_desc_part (&parmse->pre, ctree, parmse->expr);
-	      if (optional)
-		parmse->expr = build3_loc (input_location, COND_EXPR,
-					   TREE_TYPE (parmse->expr),
-					   cond_optional, parmse->expr,
-					   fold_convert (TREE_TYPE (parmse->expr),
-							 null_pointer_node));
-	      gfc_conv_descriptor_data_set (&parmse->pre, ctree, parmse->expr);
-	    }
+	    gfc_set_descriptor_from_scalar (&parmse->pre, ctree,
+					    parmse->expr, e, cond_optional);
           else
 	    {
 	      tmp = fold_convert (TREE_TYPE (ctree), parmse->expr);
@@ -1404,18 +1320,7 @@ gfc_conv_class_to_class (gfc_se *parmse, gfc_expr *e, gfc_typespec class_ts,
       && e->rank != class_ts.u.derived->components->as->rank)
     {
       if (e->rank == 0)
-	{
-	  tree type = get_scalar_to_descriptor_type (parmse->expr,
-						     gfc_expr_attr (e));
-	  gfc_conv_descriptor_dtype_set (&block, ctree,
-					 gfc_get_dtype (type));
-
-	  tmp = gfc_class_data_get (parmse->expr);
-	  if (!POINTER_TYPE_P (TREE_TYPE (tmp)))
-	    tmp = gfc_build_addr_expr (NULL_TREE, tmp);
-
-	  gfc_conv_descriptor_data_set (&block, ctree, tmp);
-	}
+	gfc_set_descriptor_from_scalar_class (&block, ctree, parmse->expr, e);
       else
 	gfc_class_array_data_assign (&block, ctree, parmse->expr, false);
     }
