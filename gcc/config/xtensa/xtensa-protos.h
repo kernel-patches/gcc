@@ -34,7 +34,6 @@ extern bool xtensa_mem_offset (unsigned, machine_mode);
 
 /* Functions within xtensa.cc that we reference.  */
 #ifdef RTX_CODE
-extern int xt_true_regnum (rtx);
 extern int xtensa_valid_move (machine_mode, rtx *);
 extern bool smalloffset_address_p (const_rtx);
 extern bool constantpool_address_p (const_rtx);
@@ -81,7 +80,6 @@ extern long compute_frame_size (poly_int64);
 extern void xtensa_expand_prologue (void);
 extern void xtensa_expand_epilogue (void);
 extern void xtensa_adjust_reg_alloc_order (void);
-extern enum reg_class xtensa_regno_to_class (int regno);
 extern HOST_WIDE_INT xtensa_initial_elimination_offset (int from, int to);
 extern const char **xtensa_get_config_strings (void);
 extern rtl_opt_pass *make_pass_xtensa_largeconst1 (gcc::context *);

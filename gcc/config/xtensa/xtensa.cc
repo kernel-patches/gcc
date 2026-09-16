@@ -112,6 +112,9 @@ struct GTY(()) machine_function
   bool postreload_completed;
 };
 
+/* Referenced by the REGNO_REG_CLASS() macro.  */
+enum reg_class xtensa_regno_to_class[FIRST_PSEUDO_REGISTER];
+
 static void xtensa_option_override (void);
 static void xtensa_option_override_after_change (void);
 static enum internal_test map_test_to_internal_test (enum rtx_code);
@@ -538,7 +541,7 @@ xtensa_fp_const (const REAL_VALUE_TYPE *rval)
 /* This is just like the standard true_regnum() function except that it
    works even when reg_renumber is not initialized.  */
 
-int
+static int
 xt_true_regnum (rtx x)
 {
   if (REG_P (x))
@@ -578,27 +581,17 @@ xtensa_valid_move (machine_mode mode, rtx *operands)
 
   if (register_operand (operands[0], mode))
     {
-      int dst_regnum = xt_true_regnum (operands[0]);
-
       if (xtensa_tls_referenced_p (operands[1]))
 	return FALSE;
 
-      /* The stack pointer can only be assigned with a MOVSP opcode.  */
-      if (dst_regnum == STACK_POINTER_REGNUM)
-	return !TARGET_WINDOWED_ABI
-	  || (mode == SImode
-	      && register_operand (operands[1], mode)
-	      && !ACC_REG_P (xt_true_regnum (operands[1])));
+      if (!ACC_REG_P (xt_true_regnum (operands[0])))
+	return TRUE;
+    }
 
-      if (!ACC_REG_P (dst_regnum))
-	return true;
-    }
-  if (register_operand (operands[1], mode))
-    {
-      int src_regnum = xt_true_regnum (operands[1]);
-      if (!ACC_REG_P (src_regnum))
-	return true;
-    }
+  if (register_operand (operands[1], mode)
+      && !ACC_REG_P (xt_true_regnum (operands[1])))
+    return TRUE;
+
   return FALSE;
 }
 
@@ -4471,11 +4464,9 @@ xtensa_adjust_reg_alloc_order (void)
 	REG_ALLOC_ORDER;
   static const int reg_call0_alloc_order[FIRST_PSEUDO_REGISTER] =
   {
-     9, 10, 11,  7,  6,  5,  4,  3,  2,  8,  0, 12, 13, 14, 15,
-    18,
+     9, 10, 11,  7,  6,  5,  4,  3,  2,  8,  0, 12, 13, 14, 15, 18,
     19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-     1, 16, 17,
-    35,
+     1, 16, 17, 35,
   };
 
   memcpy (reg_alloc_order, TARGET_WINDOWED_ABI ?
@@ -5367,7 +5358,7 @@ xtensa_reorg (void)
 static void
 xtensa_conditional_register_usage (void)
 {
-  unsigned i, c_mask;
+  unsigned int i, c_mask, cl;
 
   c_mask = TARGET_WINDOWED_ABI ? (1 << 1) : (1 << 2);
 
@@ -5379,40 +5370,34 @@ xtensa_conditional_register_usage (void)
 	call_used_regs[i] = !!(call_used_regs[i] & c_mask);
     }
 
-  /* Remove hard FP register from the preferred reload registers set.  */
-  CLEAR_HARD_REG_BIT (reg_class_contents[(int)RL_REGS],
+  /* Remove hard frame pointer from the preferred reload registers set.  */
+  CLEAR_HARD_REG_BIT (reg_class_contents[RL_REGS],
 		      HARD_FRAME_POINTER_REGNUM);
 
-  /* Register A0 holds the return address upon entry to a function
-     for the CALL0 ABI, but unlike the windowed register ABI, it is
-     not reserved for this purpose and may hold other values after
-     the return address has been saved.  */
+  /* Register A0 holds the return address upon entry to a function for
+     the CALL0 ABI, but unlike the windowed register ABI, it is not
+     reserved for this purpose and may hold other values after the return
+     address has been saved.  In a similar vein, register A0 should be
+     excluded from the preferred reload registers set when the windowed
+     register ABI is in effect.  */
   if (!TARGET_WINDOWED_ABI)
     fixed_regs[A0_REG] = 0;
-}
-
-/* Map hard register number to register class */
-
-enum reg_class xtensa_regno_to_class (int regno)
-{
-  static const enum reg_class regno_to_class[FIRST_PSEUDO_REGISTER] =
-    {
-      RL_REGS,	SP_REG,		RL_REGS,	RL_REGS,
-      RL_REGS,	RL_REGS,	RL_REGS,	RL_REGS,
-      RL_REGS,	RL_REGS,	RL_REGS,	RL_REGS,
-      RL_REGS,	RL_REGS,	RL_REGS,	RL_REGS,
-      AR_REGS,	AR_REGS,	BR_REGS,
-      FP_REGS,	FP_REGS,	FP_REGS,	FP_REGS,
-      FP_REGS,	FP_REGS,	FP_REGS,	FP_REGS,
-      FP_REGS,	FP_REGS,	FP_REGS,	FP_REGS,
-      FP_REGS,	FP_REGS,	FP_REGS,	FP_REGS,
-      ACC_REG,
-    };
-
-  if (regno == HARD_FRAME_POINTER_REGNUM)
-    return GR_REGS;
   else
-    return regno_to_class[regno];
+    CLEAR_HARD_REG_BIT (reg_class_contents[RL_REGS], A0_REG);
+
+  /* Generate the contents of the reverse-lookup array from the currently
+     active register class definitions.  */
+  for (i = 0; i < FIRST_PSEUDO_REGISTER; ++i)
+    for (cl = NO_REGS + 1; cl < ALL_REGS; ++cl)
+      if (TEST_HARD_REG_BIT (reg_class_contents[cl], i))
+	{
+	  xtensa_regno_to_class[i] = (enum reg_class)cl;
+	  break;
+	}
+
+  /* Verify the generated mapping for any omissions.  */
+  for (i = 0; i < FIRST_PSEUDO_REGISTER; ++i)
+    gcc_assert (xtensa_regno_to_class[i] != NO_REGS);
 }
 
 /* Implement TARGET_CONSTANT_ALIGNMENT.  Align string constants and
