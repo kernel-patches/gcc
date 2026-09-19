@@ -72,17 +72,19 @@ libgcobol_la_SOURCES =      \
     xmlparse.cc
 
 libgcobol_compat_gnu_la_SOURCES =		\
-	compat/gnu/udf/cobrt-file-status.cbl	\
-	compat/gnu/udf/stored-char-length.cbl	\
+	compat/gnu/lib/cobrt-file-status.cbl	\
+	compat/gnu/lib/stored-char-length.cbl	\
 	compat/gnu/lib/CBL_ALLOC_MEM.cbl	\
 	compat/gnu/lib/CBL_CHECK_FILE_EXIST.cbl	\
 	compat/gnu/lib/CBL_CLOSE_FILE.cbl	\
 	compat/gnu/lib/CBL_CREATE_FILE.cbl	\
 	compat/gnu/lib/CBL_DELETE_FILE.cbl	\
 	compat/gnu/lib/CBL_FREE_MEM.cbl		\
+	compat/gnu/lib/CBL_GET_PROGRAM_INFO.cbl	\
 	compat/gnu/lib/CBL_OPEN_FILE.cbl	\
 	compat/gnu/lib/CBL_READ_FILE.cbl	\
-	compat/gnu/lib/CBL_WRITE_FILE.cbl
+	compat/gnu/lib/CBL_WRITE_FILE.cbl	\
+	compat/gnu/lib/cbl_gpi.cc
 
 libgcobol_posix_la_SOURCES =			\
 	posix/udf/posix-close.cbl		\
@@ -168,6 +170,7 @@ LP_COPYBOOKS = \
 	$(LP_COPYDIR_BUILD)/posix-localtime.cpy \
 	$(LP_COPYDIR_BUILD)/posix-lseek.cpy \
 	$(LP_COPYDIR_BUILD)/posix-mkdir.cpy \
+	$(LP_COPYDIR_BUILD)/posix-close.cpy \
 	$(LP_COPYDIR_BUILD)/posix-open.cpy \
 	$(LP_COPYDIR_BUILD)/posix-read.cpy \
 	$(LP_COPYDIR_BUILD)/posix-stat.cpy \

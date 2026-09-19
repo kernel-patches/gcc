@@ -10802,6 +10802,7 @@ end_call:       %empty %prec CALL
 
 call_body:      ffi_name
                 { statement_begin(@1, CALL);
+                  $$.loc = @1;
                   $$.ffi_name = $ffi_name;
                   $$.using_params = NULL;
                   $$.ffi_returning = cbl_refer_t::empty();
@@ -10809,6 +10810,7 @@ call_body:      ffi_name
 
         |       ffi_name USING parameters
                 { statement_begin(@1, CALL);
+                  $$.loc = @1;
                   $$.ffi_name = $ffi_name;
                   $$.using_params = $parameters;
                   $$.ffi_returning = cbl_refer_t::empty();
@@ -10816,12 +10818,14 @@ call_body:      ffi_name
                 }
         |       ffi_name call_returning scalar[ret]
                 { statement_begin(@1, CALL);
+                  $$.loc = @1;
                   $$.ffi_name = $ffi_name;
                   $$.using_params = NULL;
                   $$.ffi_returning = $ret;
                 }
         |       ffi_name USING parameters call_returning scalar[ret]
                 { statement_begin(@1, CALL);
+                  $$.loc = @1;
                   $$.ffi_name = $ffi_name;
                   $$.using_params = $parameters;
                   $$.ffi_returning = $ret;
@@ -10907,8 +10911,10 @@ ffi_by_ref:     scalar_arg[refer]
         |       num_literal
                 {
                   cbl_message(@1, MfCallLiteral,
-                              "cannot pass %qs BY REFERENCE", $1->data.initial);
+                              "cannot pass %qs BY REFERENCE",
+                              $1->data.original());
                   cbl_refer_t *r = new_reference($1);
+                  r->loc = @1;
                   $$ = new cbl_ffi_arg_t(by_content_e, r);
                 }
         |       ADDRESS OF scalar_arg[refer]
@@ -10947,6 +10953,7 @@ ffi_by_val:     by_value_arg
                 {
                   const char *s = $1.s? $1.s : string_of($1.r);
                   auto r = new_reference(new_literal(@1, s));
+                  r->loc = @1;
                   $$ = new cbl_ffi_arg_t(by_value_e, r);
                 }
         |       ADDRESS OF scalar
@@ -12979,26 +12986,22 @@ cbl_ffi_arg_t::matches( const cbl_ffi_arg_t& that ) const {
   case by_reference_e:
     if( crv == by_reference_e ) {
       if( (formal->attr & mask) == (actual->attr & mask) ) {
-        if( capacity_ok(formal, actual) ) {
+        if( formal->data.capacity() == actual->data.capacity() ) {
           if( formal->type == actual->type ) { // captures USAGE except COMP-X
             return true;
           }
         }
-        else if (actual->attr & any_length_e)
+        else if (actual->attr & any_length_e || formal->attr & any_length_e)
           return true;
       }
     }
-    // If actual is by reference, so must the formal be.
-    dbgmsg("%s:%d: failed, reference feature mismatch", __func__, __LINE__);
+    // If actual is by reference, so must the formal be. 
     return false;
     break;
   case by_content_e:
     break;
   case by_value_e:
-    if( crv != by_value_e ) {
-      dbgmsg("%s:%d: failed, actual %s not by value", __func__, __LINE__, actual->name);
-      return false;
-    }
+    if( crv != by_value_e ) return false;
     if( formal->type == FldPointer && that.refer.is_pointer() ) return true;
     break;
   }
@@ -13015,7 +13018,6 @@ cbl_ffi_arg_t::matches( const cbl_ffi_arg_t& that ) const {
     return actual->data.capacity() == formal->data.capacity()
         && actual->codeset.encoding == formal->codeset.encoding;
   }          
-  dbgmsg("%s:%d: failed, for some reason", __func__, __LINE__);
   return false;
 }
 
@@ -13064,6 +13066,24 @@ bad_arg( const char name[],
   return ok;
 }  
 
+static const char *
+passby_str(int mask)
+{
+  switch( mask ) {
+  case by_default_e:
+  case by_reference_e:
+    return "BY REFERENCE";
+  case by_content_e:
+    return "BY CONTENT";
+  case by_value_e:
+    return "BY VALUE";
+  default:
+    break;
+  }
+
+  return "UNKNOWN PASSING METHOD";
+}
+
 // Verify provided actual parameters against formals.
 static void
 verify_args( const YYLTYPE& loc, 
@@ -13084,14 +13104,16 @@ verify_args( const YYLTYPE& loc,
      */
     if( ord < narg ) {
       if( ord < formals.size() ) {
-        error_msg( loc, "parameter %zu %qs (%s, capacity %u, %s) "
-                   "invalid for %qs parameter %qs (%s, capacity %u, %s)",
+        error_msg( parg->refer.loc, "parameter %zu BY %s %qs (%s, capacity %u, %s) "
+                   "invalid for %qs parameter BY %s %qs (%s, capacity %u, %s)",
                    1 + ord,
+                   cbl_ffi_crv_str(parg->crv),
                    nice_name_of(parg->field()),
                     cbl_field_type_name(parg->field()->type),
                     parg->field()->data.capacity(),
                     parg->field()->attr & signable_e ? "signed" : "unsigned",
                    name, 
+                   cbl_ffi_crv_str(formals[ord].crv),
                    nice_name_of(formals[ord].refer.field),
                    cbl_field_type_name(formals[ord].refer.field->type),
                    formals[ord].refer.field->data.capacity(),
