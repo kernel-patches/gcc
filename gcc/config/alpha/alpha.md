@@ -2855,6 +2855,50 @@
     FAIL;
 })
 
+;; Floating-point classification.  Defining these patterns also stops
+;; fold_builtin_interclass_mathfn from rewriting the built-ins into FP
+;; comparisons, which are unusable here; see alpha_expand_fp_classify.
+
+(define_expand "isfinite<mode>2"
+  [(match_operand:SI 0 "register_operand")
+   (match_operand:FMODE 1 "register_operand")]
+  "TARGET_FP && !TARGET_FLOAT_VAX
+   && (alpha_fptm < ALPHA_FPTM_SU || flag_signaling_nans)"
+{
+  alpha_expand_fp_classify (operands[0], operands[1], ALPHA_FPCLASS_FINITE);
+  DONE;
+})
+
+(define_expand "isinf<mode>2"
+  [(match_operand:SI 0 "register_operand")
+   (match_operand:FMODE 1 "register_operand")]
+  "TARGET_FP && !TARGET_FLOAT_VAX
+   && (alpha_fptm < ALPHA_FPTM_SU || flag_signaling_nans)"
+{
+  alpha_expand_fp_classify (operands[0], operands[1], ALPHA_FPCLASS_INF);
+  DONE;
+})
+
+(define_expand "isnan<mode>2"
+  [(match_operand:SI 0 "register_operand")
+   (match_operand:FMODE 1 "register_operand")]
+  "TARGET_FP && !TARGET_FLOAT_VAX
+   && (alpha_fptm < ALPHA_FPTM_SU || flag_signaling_nans)"
+{
+  alpha_expand_fp_classify (operands[0], operands[1], ALPHA_FPCLASS_NAN);
+  DONE;
+})
+
+(define_expand "isnormal<mode>2"
+  [(match_operand:SI 0 "register_operand")
+   (match_operand:FMODE 1 "register_operand")]
+  "TARGET_FP && !TARGET_FLOAT_VAX
+   && (alpha_fptm < ALPHA_FPTM_SU || flag_signaling_nans)"
+{
+  alpha_expand_fp_classify (operands[0], operands[1], ALPHA_FPCLASS_NORMAL);
+  DONE;
+})
+
 (define_expand "cstoretf4"
   [(use (match_operator:DI 1 "alpha_cbranch_operator"
          [(match_operand:TF 2 "general_operand")
@@ -4674,9 +4718,15 @@
 })
 
 
+; Modes for which we implement misaligned accesses with the ldq_u/stq_u
+; and extract/insert/mask instruction sequences.  QImode is excluded as
+; a byte can never be misaligned.
+
+(define_mode_iterator MISALIGN [HI SI DI V8QI V4HI V2SI])
+
 (define_expand "movmisalign<mode>"
-  [(set (match_operand:VEC 0 "nonimmediate_operand")
-        (match_operand:VEC 1 "general_operand"))]
+  [(set (match_operand:MISALIGN 0 "nonimmediate_operand")
+        (match_operand:MISALIGN 1 "general_operand"))]
   ""
 {
   alpha_expand_movmisalign (<MODE>mode, operands);

@@ -172,13 +172,12 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
  (if (tree_nop_conversion_p (type, TREE_TYPE (@0)))))
 (match (bit_xor_cst @0 @1)
  (bit_xor @0 uniform_integer_cst_p@1))
-(for cmp (tcc_comparison)
- (match (maybe_cmp @0)
-  (cmp@0 @1 @2))
- (match (maybe_cmp @0)
-  (convert (cmp@0 @1 @2))
-   (if (tree_nop_conversion_p (type, TREE_TYPE (@0)))))
-)
+(match (maybe_cmp @0)
+ (tcc_comparison@0 @1 @2))
+(match (maybe_cmp @0)
+ (convert (tcc_comparison@0 @1 @2))
+  (if (tree_nop_conversion_p (type, TREE_TYPE (@0)))))
+
 /* `a ^ b` is another form of `a != b` when the type
     is a 1bit precision integer.  */
 (match (maybe_cmp @0)
@@ -1527,6 +1526,28 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
    (with
     { tree utype = unsigned_type_for (type); }
     (convert (rshift (lshift (convert:utype @0) @2) @3))))))
+
+/* Fold (((X >> C1) & C2) << C3) into (X >>/<< |C1 - C3|) & (C2' << C3),
+   where C2' is obtained from C2 by clearing all but the rightmost C1 bits.  */
+(simplify
+ (lshift (bit_and (rshift @0 INTEGER_CST@1) INTEGER_CST@2) INTEGER_CST@3)
+  (if (TYPE_UNSIGNED (TREE_TYPE (@0))
+       && type_has_mode_precision_p (TREE_TYPE (@0)))
+   (with { int prec = TYPE_PRECISION (TREE_TYPE (@0)); }
+    (if (wi::ltu_p (wi::to_wide (@1), prec)
+	 && wi::ltu_p (wi::to_wide (@3), prec))
+     (with
+      {
+	/* Clear the first PREC - @1 bits of the mask, then shift it.  */
+	wide_int mask_lz = wi::mask (prec - tree_to_uhwi (@1), false, prec);
+	tree mask = fold_build2 (BIT_AND_EXPR, TREE_TYPE (@0),
+			@2, wide_int_to_tree (TREE_TYPE (@0), mask_lz));
+	tree mask_shifted = fold_build2 (LSHIFT_EXPR, TREE_TYPE (@0),
+					 mask, @3);
+      }
+      (if (wi::leu_p (wi::to_wide (@1), wi::to_wide (@3)))
+       (bit_and (lshift @0 (minus @3 @1)) { mask_shifted; })
+       (bit_and (rshift @0 (minus @1 @3)) { mask_shifted; })))))))
 
 /* Fold ((type)(a<0)) << SIGNBITOFA into ((type)a) & signbit. */
 (simplify
@@ -3036,19 +3057,17 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 
 /* (m1 CMP m2) * d -> (m1 CMP m2) ? d : 0  */
 (if (fold_before_rtl_expansion_p ())
- (for cmp (tcc_comparison)
-  (simplify
-   (mult:c (convert (cmp@0 @1 @2)) @3)
-   (if (INTEGRAL_TYPE_P (type)
-	&& INTEGRAL_TYPE_P (TREE_TYPE (@0)))
-     (cond @0 @3 { build_zero_cst (type); })))
+ (simplify
+  (mult:c (convert (tcc_comparison@0 @1 @2)) @3)
+  (if (INTEGRAL_TYPE_P (type)
+       && INTEGRAL_TYPE_P (TREE_TYPE (@0)))
+   (cond @0 @3 { build_zero_cst (type); })))
 /* (-(m1 CMP m2)) & d -> (m1 CMP m2) ? d : 0  */
-  (simplify
-   (bit_and:c (negate (convert (cmp@0 @1 @2))) @3)
-   (if (INTEGRAL_TYPE_P (type)
-	&& INTEGRAL_TYPE_P (TREE_TYPE (@0)))
-     (cond @0 @3 { build_zero_cst (type); })))
- )
+ (simplify
+  (bit_and:c (negate (convert (tcc_comparison@0 @1 @2))) @3)
+  (if (INTEGRAL_TYPE_P (type)
+       && INTEGRAL_TYPE_P (TREE_TYPE (@0)))
+   (cond @0 @3 { build_zero_cst (type); })))
 )
 
 /* Canonicalize `(type) (a CMP b)` to `(a CMP b) ? (type) true : (type) false`
@@ -6213,12 +6232,15 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 
     /* If we are converting an integer to a floating-point that can
        represent it exactly and back to an integer, we can skip the
-       floating-point conversion.  */
-    (if (GIMPLE /* PR66211 */
+       floating-point conversion.  PR66211, PR98984.  */
+    (if (GIMPLE
 	 && inside_int && inter_float && final_int
 	 && ! is_vec
-	 && ((unsigned) significand_size (TYPE_MODE (inter_type))
-	     >= inside_prec - !inside_unsignedp))
+	 && (((unsigned) significand_size (TYPE_MODE (inter_type))
+	      >= inside_prec - !inside_unsignedp)
+	     || (! flag_trapping_math
+		 && ((unsigned) significand_size (TYPE_MODE (inter_type))
+		     >= final_prec))))
      (convert @0)))))))
 
 /* (float_type)(integer_type) x -> trunc (x) if the type of x matches
@@ -6853,27 +6875,23 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
  (if (optimize_vectors_before_lowering_p () && types_match (@0, @3))
   (vec_cond (bit_and @0 (bit_not @3)) @2 @1)))
 
-/*  ((VCE (a cmp b ? -1 : 0)) < 0) ? c : d is just
-    (VCE ((a cmp b) ? (VCE c) : (VCE d))) when TYPE_PRECISION of the
+/*  ((VCE (a ? -1 : 0)) < 0) ? c : d is just
+    (VCE (a ? (VCE c) : (VCE d))) when TYPE_PRECISION of the
     component type of the outer vec_cond is greater equal the inner one.  */
-(for cmp (simple_comparison)
- (simplify
-  (vec_cond
-    (lt (view_convert@5 (vec_cond@6 (cmp@4 @0 @1)
-				    integer_all_onesp
-				    integer_zerop))
-	  integer_zerop) @2 @3)
-  (if (VECTOR_INTEGER_TYPE_P (TREE_TYPE (@0))
-       && VECTOR_INTEGER_TYPE_P (TREE_TYPE (@5))
-       && !TYPE_UNSIGNED (TREE_TYPE (@5))
-       && VECTOR_TYPE_P (TREE_TYPE (@6))
-       && VECTOR_TYPE_P (type)
-       && tree_int_cst_le (TYPE_SIZE (TREE_TYPE (type)),
-			   TYPE_SIZE (TREE_TYPE (TREE_TYPE (@6))))
-       && TYPE_SIZE (type) == TYPE_SIZE (TREE_TYPE (@6)))
-   (with { tree vtype = TREE_TYPE (@6);}
-     (view_convert:type
-       (vec_cond @4 (view_convert:vtype @2) (view_convert:vtype @3)))))))
+(simplify
+ (vec_cond
+  (lt (view_convert@5 (vec_cond@6 @4 integer_all_onesp integer_zerop))
+       integer_zerop) @2 @3)
+ (if (VECTOR_INTEGER_TYPE_P (TREE_TYPE (@5))
+      && !TYPE_UNSIGNED (TREE_TYPE (@5))
+      && VECTOR_TYPE_P (TREE_TYPE (@6))
+      && VECTOR_TYPE_P (type)
+      && tree_int_cst_le (TYPE_SIZE (TREE_TYPE (type)),
+			  TYPE_SIZE (TREE_TYPE (TREE_TYPE (@6))))
+      && TYPE_SIZE (type) == TYPE_SIZE (TREE_TYPE (@6)))
+  (with { tree vtype = TREE_TYPE (@6);}
+   (view_convert:type
+    (vec_cond @4 (view_convert:vtype @2) (view_convert:vtype @3))))))
 
 /* c1 ? c2 ? a : b : b  -->  (c1 & c2) ? a : b  */
 (simplify
@@ -13596,3 +13614,28 @@ and,
  (if (INTEGRAL_TYPE_P (type))
    (with { tree itype = TREE_TYPE (@2); }
     (convert (minus @2 (convert:itype @1))))))
+
+#if GIMPLE
+/* Replace (x == C) ? y : MIN (x, y) -> MIN (x, y) when C >= upper_bound (y),
+   and (x == C) ? y : MAX (x, y) -> MAX (x, y) when C <= lower_bound (y),
+   because in both cases the guarded arm equals the min/max expression.  */
+(for minmax (min max)
+ (simplify
+  (cond (eq @0 INTEGER_CST@1) @2 (minmax:c@3 @0 @2))
+  (if (INTEGRAL_TYPE_P (type))
+   (with {
+     int_range_max r;
+     if (!gimple_match_range_of_expr (r, @2, @2))
+       r.set_varying (TREE_TYPE (@2));
+     wide_int bound;
+     if (minmax == MIN_EXPR)
+       bound = r.upper_bound ();
+     else
+       bound = r.lower_bound ();
+    }
+   (if ((minmax == MIN_EXPR
+	 && wi::ge_p (wi::to_wide (@1), bound, TYPE_SIGN (type)))
+	|| (minmax == MAX_EXPR
+	    && wi::le_p (wi::to_wide (@1), bound, TYPE_SIGN (type))))
+    @3)))))
+#endif
