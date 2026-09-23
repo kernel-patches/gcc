@@ -914,20 +914,23 @@ package body Sem_Attr is
               ("prefix of % attribute cannot be enumeration literal");
          end if;
 
-         --  Preserve relevant elaboration-related attributes of the context
-         --  which are no longer available or very expensive to recompute once
-         --  analysis, resolution, and expansion are over.
+         if Nkind (N) not in N_Raise_xxx_Error then
 
-         Mark_Elaboration_Attributes
-           (N_Id     => N,
-            Checks   => True,
-            Modes    => True,
-            Warnings => True);
+            --  Preserve relevant elaboration-related attributes of the context
+            --  which are no longer available or very expensive to recompute
+            --  once analysis, resolution, and expansion are over.
 
-         --  Save the scenario for later examination by the ABE Processing
-         --  phase.
+            Mark_Elaboration_Attributes
+              (N_Id     => N,
+               Checks   => True,
+               Modes    => True,
+               Warnings => True);
 
-         Record_Elaboration_Scenario (N);
+            --  Save the scenario for later examination by the ABE Processing
+            --  phase.
+
+            Record_Elaboration_Scenario (N);
+         end if;
 
          --  Case of access to subprogram
 
@@ -12208,11 +12211,12 @@ package body Sem_Attr is
                     and then
                       (Ekind (Btyp) = E_Access_Subprogram_Type
                         or else Is_Local_Anonymous_Access (Btyp))
-                    and then Subprogram_Access_Level (Entity (P)) >
-                               Type_Access_Level (Btyp)
+                    and then Static_Subprogram_Access_Level (Entity (P))
+                               > Static_Type_Access_Level (Btyp)
                   then
                      Error_Msg_F
-                       ("subprogram must not be deeper than access type", P);
+                       ("nonlocal access value cannot designate local"
+                        & " subprogram (RM 3.10.2(32))", P);
 
                   --  Check the restriction of 3.10.2(32) that disallows the
                   --  access attribute within a generic body when the ultimate
@@ -12266,8 +12270,8 @@ package body Sem_Attr is
                     and then Enclosing_Generic_Body (N) /=
                                Enclosing_Generic_Body
                                  (Enclosing_Generic_Unit (Entity (P)))
-                    and then Subprogram_Access_Level (Entity (P)) =
-                               Type_Access_Level (Btyp)
+                    and then Static_Subprogram_Access_Level (Entity (P)) =
+                               Static_Type_Access_Level (Btyp)
                     and then Ekind (Btyp) /=
                                E_Anonymous_Access_Subprogram_Type
                     and then Ekind (Btyp) /=
@@ -12667,8 +12671,8 @@ package body Sem_Attr is
                           or else No_Dynamic_Acc_Checks)
 
                        and then
-                         Static_Accessibility_Level (P, Zero_On_Dynamic_Level)
-                           > Deepest_Type_Access_Level (Btyp)
+                         Static_Accessibility_Level (P)
+                           > Static_Type_Access_Level (Btyp, Deepest => True)
                      then
                         Accessibility_Message (N, Typ);
                      end if;
@@ -12688,8 +12692,8 @@ package body Sem_Attr is
                --  anonymous_access_to_protected, there are no accessibility
                --  checks either. Omit check entirely for Unrestricted_Access.
 
-               elsif Static_Accessibility_Level (P, Zero_On_Dynamic_Level)
-                       > Deepest_Type_Access_Level (Btyp)
+               elsif Static_Accessibility_Level (P)
+                       > Static_Type_Access_Level (Btyp, Deepest => True)
                  and then Comes_From_Source (N)
                  and then Ekind (Btyp) = E_Access_Protected_Subprogram_Type
                  and then Attr_Id /= Attribute_Unrestricted_Access

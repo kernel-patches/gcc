@@ -1276,8 +1276,16 @@ public:
   }
   void put_value (tree t, tree v)
   {
-    bool already_in_map = values.put (t, v);
-    if (!already_in_map && modifiable)
+    /* If modifiable is not null, any key that was not previously in the
+       map, or that has been destroyed and freed (as indicated by
+       void_list_node), is tracked in modifiable.  If the object is there,
+       or its storage remains (as indicated by void_node), then we don't
+       track it as modifiable.  */
+    bool already_in_map;
+    tree &slot = values.get_or_insert (t, &already_in_map);
+    bool newval = !already_in_map || slot == void_list_node;
+    slot = v;
+    if (newval && modifiable)
       modifiable->add (t);
   }
   void destroy_value (tree t, bool past_storage_end = true)
@@ -2657,6 +2665,8 @@ is_within_lifetime (location_t loc, const constexpr_ctx *ctx, tree t, tree fun,
 	      }
 	    else if (val == val_uninit)
 	      return boolean_false_node;
+	    else if (val == error_mark_node)
+	      return val;
 	    else
 	      {
 		gcc_assert (TREE_CODE (val) == CONSTRUCTOR);
@@ -2685,6 +2695,8 @@ is_within_lifetime (location_t loc, const constexpr_ctx *ctx, tree t, tree fun,
 	  }
 	if (val == val_zero_init || val == val_uninit)
 	  continue;
+	if (val == error_mark_node)
+	  return val;
 	gcc_assert (TREE_CODE (val) == CONSTRUCTOR);
 	unsigned int j;
 	tree field, value;
@@ -2718,6 +2730,8 @@ is_within_lifetime (location_t loc, const constexpr_ctx *ctx, tree t, tree fun,
 	  return t;
 	if (val == val_zero_init || val == val_uninit)
 	  continue;
+	if (val == error_mark_node)
+	  return val;
 	if (TREE_CODE (val) == STRING_CST)
 	  return boolean_true_node;
 	gcc_assert (TREE_CODE (val) == CONSTRUCTOR);
