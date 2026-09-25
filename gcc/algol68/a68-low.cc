@@ -628,7 +628,7 @@ a68_make_variable_declaration_decl (NODE_T *identifier,
 
    If ADDRP is true then it is the address of the external symbol we are
    interested in.  In that case the mode of P shall be a ref.
-   
+
    Note that this function is not used for formal holes with proc modes, called
    from a68_wrap_formal_var_hole.  See a68_wrap_formal_proc_hole.  */
 
@@ -916,13 +916,13 @@ a68_low_dup (tree expr, bool use_heap)
 	  a68_add_decl (continue_label_decl);
 
 	  a68_add_stmt (fold_build2 (TRUTH_ORIF_EXPR,
-				     integer_type_node,
+				     a68_int_type,
 				     fold_build2 (EQ_EXPR,
-						  integer_type_node,
+						  a68_int_type,
 						  a68_union_overhead (dup),
 						  size_int (a68_united_mode_index (union_mode, MOID (pack)))),
 				     fold_build2 (COMPOUND_EXPR,
-						  integer_type_node,
+						  a68_int_type,
 						  build1 (GOTO_EXPR, void_type_node, continue_label_decl),
 						  integer_zero_node)));
 	  a68_add_stmt (fold_build2 (MODIFY_EXPR, type,
@@ -993,6 +993,11 @@ a68_low_assignation (NODE_T *p,
   tree assignation = NULL_TREE;
   tree orig_rhs = rhs;
 
+  /* The lhs might be a selection that has been "ref_consolidated".  */
+  if (TREE_CODE (lhs) == ADDR_EXPR
+      && TREE_CODE (TREE_OPERAND (lhs, 0)) == COMPONENT_REF)
+    lhs = TREE_OPERAND (lhs, 0);
+
   if (IS_FLEXETY_ROW (mode_rhs))
     {
       /* Make a deep copy of the rhs.  Note that we have to use the heap
@@ -1011,7 +1016,8 @@ a68_low_assignation (NODE_T *p,
 	     is performed.  XXX but bound checking in contained values may be
 	     necessary, ghost elements.  */
 	  if (POINTER_TYPE_P (TREE_TYPE (lhs))
-	      && TREE_TYPE (TREE_TYPE (lhs)) == TREE_TYPE (rhs))
+	      && (TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (lhs)))
+		  == TYPE_MAIN_VARIANT (TREE_TYPE (rhs))))
 	    {
 	      /* Make sure to not evaluate the expression yielding the pointer
 		 more than once.  */
@@ -1091,7 +1097,8 @@ a68_low_assignation (NODE_T *p,
 	rhs = a68_low_dup (rhs, true /* use_heap */);
 
       if (POINTER_TYPE_P (TREE_TYPE (lhs))
-	  && TREE_TYPE (TREE_TYPE (lhs)) == TREE_TYPE (rhs))
+	  && (TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (lhs)))
+	      == TYPE_MAIN_VARIANT (TREE_TYPE (rhs))))
 	{
 	  /* If the left hand side is a pointer, deref it, but return the
 	     pointer.  Make sure to not evaluate the expression yielding the

@@ -20081,6 +20081,15 @@ aarch64_override_options_after_change_1 (struct gcc_options *opts)
      intermediary step for the former.  */
   if (flag_mlow_precision_sqrt)
     flag_mrecip_low_precision_sqrt = true;
+
+  /* Turn off outline atomics with -mcmodel=large.  */
+  if (aarch64_cmodel == AARCH64_CMODEL_LARGE)
+    {
+      if (!TARGET_LSE && opts->x_aarch64_flag_outline_atomics == 1)
+	warning (OPT_moutline_atomics,
+		 "%<-mcmodel=large%> implies %<-mno-outline-atomics%>");
+      opts->x_aarch64_flag_outline_atomics = 0;
+    }
 }
 
 /* 'Unpack' up the internal tuning structs and update the options
@@ -28509,11 +28518,11 @@ aarch64_evpc_rev64_ext (struct expand_vec_perm_d *d)
   if (!d->perm.series_p (0, 1, nelt - 1, -1))
     return false;
 
-  if (is_bb_in_loop (gimple_bb (currently_expanding_gimple_stmt)))
-    return false;
-
   if (d->testing_p)
     return true;
+
+  if (is_bb_in_loop (gimple_bb (currently_expanding_gimple_stmt)))
+    return false;
 
   rtx tmp1 = gen_reg_rtx (d->vmode);
   rtx tmp2 = gen_reg_rtx (V16QImode);

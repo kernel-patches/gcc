@@ -1750,7 +1750,7 @@ expand_mul_overflow (location_t loc, tree lhs, tree arg0, tree arg1,
 		     tree *datap)
 {
   rtx res, op0, op1;
-  tree fn, type;
+  tree fn, type, orig_arg0 = arg0, orig_arg1 = arg1;
   rtx_code_label *done_label, *do_error;
   rtx target = NULL_RTX;
   signop sign;
@@ -1764,10 +1764,26 @@ expand_mul_overflow (location_t loc, tree lhs, tree arg0, tree arg1,
   do_error = gen_label_rtx ();
 
   do_pending_stack_adjust ();
+
+  scalar_int_mode mode = SCALAR_INT_TYPE_MODE (TREE_TYPE (arg0));
+  /* If the operand types don't have mode precision, extend them
+     to mode precision.  */
+  if (TYPE_PRECISION (TREE_TYPE (arg0)) < GET_MODE_PRECISION (mode))
+    {
+      tree type = build_nonstandard_integer_type (GET_MODE_PRECISION (mode),
+						  uns0_p);
+      arg0 = fold_convert_loc (loc, type, arg0);
+    }
+  if (TYPE_PRECISION (TREE_TYPE (arg1)) < GET_MODE_PRECISION (mode))
+    {
+      tree type = build_nonstandard_integer_type (GET_MODE_PRECISION (mode),
+						  uns1_p);
+      arg1 = fold_convert_loc (loc, type, arg1);
+    }
+
   op0 = expand_normal (arg0);
   op1 = expand_normal (arg1);
 
-  scalar_int_mode mode = SCALAR_INT_TYPE_MODE (TREE_TYPE (arg0));
   bool uns = unsr_p;
   if (lhs)
     {
@@ -1829,12 +1845,6 @@ expand_mul_overflow (location_t loc, tree lhs, tree arg0, tree arg1,
 
   int pos_neg0 = get_range_pos_neg (arg0, currently_expanding_gimple_stmt);
   int pos_neg1 = get_range_pos_neg (arg1, currently_expanding_gimple_stmt);
-  /* Unsigned types with smaller than mode precision, even if they have most
-     significant bit set, are still zero-extended.  */
-  if (uns0_p && TYPE_PRECISION (TREE_TYPE (arg0)) < GET_MODE_PRECISION (mode))
-    pos_neg0 = 1;
-  if (uns1_p && TYPE_PRECISION (TREE_TYPE (arg1)) < GET_MODE_PRECISION (mode))
-    pos_neg1 = 1;
 
   /* s1 * u2 -> ur  */
   if (!uns0_p && uns1_p && unsr_p)
@@ -2559,8 +2569,8 @@ expand_mul_overflow (location_t loc, tree lhs, tree arg0, tree arg1,
     {
       /* Expand the ubsan builtin call.  */
       push_temp_slots ();
-      fn = ubsan_build_overflow_builtin (MULT_EXPR, loc, TREE_TYPE (arg0),
-					 arg0, arg1, datap);
+      fn = ubsan_build_overflow_builtin (MULT_EXPR, loc, TREE_TYPE (orig_arg0),
+					 orig_arg0, orig_arg1, datap);
       expand_normal (fn);
       pop_temp_slots ();
       do_pending_stack_adjust ();
@@ -3527,7 +3537,7 @@ expand_DEFERRED_INIT (internal_fn, gcall *stmt)
       mark_addressable (lhs);
       tree var_addr = build_fold_addr_expr (lhs);
 
-      tree value = (init_type == AUTO_INIT_PATTERN)
+      tree value = ((init_type & ~AUTO_INIT_CXX26) == AUTO_INIT_PATTERN)
 		    ? build_int_cst (integer_type_node,
 				     INIT_PATTERN_VALUE)
 		    : integer_zero_node;
@@ -3544,7 +3554,7 @@ expand_DEFERRED_INIT (internal_fn, gcall *stmt)
       scalar_int_mode var_mode;
       if (TREE_CODE (TREE_TYPE (lhs)) != BOOLEAN_TYPE
 	  && tree_fits_uhwi_p (var_size)
-	  && (init_type == AUTO_INIT_PATTERN
+	  && ((init_type & ~AUTO_INIT_CXX26) == AUTO_INIT_PATTERN
 	      || !is_gimple_reg_type (var_type))
 	  && int_mode_for_size (tree_to_uhwi (var_size) * BITS_PER_UNIT,
 				0).exists (&var_mode)
@@ -3552,10 +3562,10 @@ expand_DEFERRED_INIT (internal_fn, gcall *stmt)
 	{
 	  unsigned HOST_WIDE_INT total_bytes = tree_to_uhwi (var_size);
 	  unsigned char *buf = XALLOCAVEC (unsigned char, total_bytes);
-	  memset (buf, (init_type == AUTO_INIT_PATTERN
+	  memset (buf, ((init_type & ~AUTO_INIT_CXX26) == AUTO_INIT_PATTERN
 			? INIT_PATTERN_VALUE : 0), total_bytes);
-	  tree itype = build_nonstandard_integer_type
-			 (total_bytes * BITS_PER_UNIT, 1);
+	  tree itype
+	    = build_nonstandard_integer_type (total_bytes * BITS_PER_UNIT, 1);
 	  wide_int w = wi::from_buffer (buf, total_bytes);
 	  init = wide_int_to_tree (itype, w);
 	  /* Pun the LHS to make sure its type has constant size
