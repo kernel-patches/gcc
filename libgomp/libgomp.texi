@@ -483,7 +483,8 @@ to address of matching mapped list item per 5.1, Sect. 2.21.7.2 @tab N @tab
 @item The OpenMP directive syntax was extended to include C23 attribute
       specifiers @tab Y @tab
 @item Support for pure directives in Fortran's @code{do concurrent} @tab N @tab
-@item All inarguable clauses take now an optional Boolean argument @tab N @tab
+@item All inarguable clauses take now an optional Boolean argument @tab P @tab
+      Only Fortran
 @item The @code{adjust_args} clause was extended to specify the argument by position
       and supports variadic arguments @tab N @tab
 @item For Fortran, @emph{locator list} can be also function reference with
@@ -533,7 +534,8 @@ to address of matching mapped list item per 5.1, Sect. 2.21.7.2 @tab N @tab
 @item @code{delete} as delete-modifier not as map type @tab N @tab
 @item For Fortran, the @code{automap} modifier to the @code{enter} clause
       of @code{declare_target} @tab N @tab
-@item @code{groupprivate} directive @tab N @tab
+@item @code{groupprivate} directive @tab P @tab
+      Only Fortran with @code{device_type(nohost)} with only nvptx GPUs
 @item @code{local} clause to @code{declare_target} directive @tab N @tab
 @item @code{part_size} allocator trait for @code{interleaved} allocator
       partitions @tab N @tab
