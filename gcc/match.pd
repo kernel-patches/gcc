@@ -11508,6 +11508,19 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
       (cmp (popcount @0) integer_zerop)
       (rep @0 { build_zero_cst (TREE_TYPE (@0)); }))))
 
+/* (a != 0) | (popcount (a) == n)  ->  (a != 0) | (n == 0)
+   (a == 0) & (popcount (a) != n)  ->  (a == 0) & (n != 0)  */
+(for popcount (POPCOUNT)
+ (for bop (bit_ior bit_and)
+      popcmp (eq ne)
+      zerocmp (ne      eq)
+  (simplify
+   (bop:c (zerocmp@2 @0 integer_zerop)
+	  (popcmp:cs (popcount (convert?@3 @0)) @1))
+   (if (INTEGRAL_TYPE_P (TREE_TYPE (@0))
+	&& INTEGRAL_TYPE_P (TREE_TYPE (@3)))
+    (bop @2 (popcmp @1 { build_zero_cst (TREE_TYPE (@1)); }))))))
+
 /* popcount(bswap(x)) is popcount(x).  */
 (for popcount (POPCOUNT)
   (for bswap (BSWAP BITREVERSE)
@@ -13579,8 +13592,7 @@ and,
    (if (type_has_mode_precision_p (type)
 	&& tree_fits_uhwi_p (@1)
 	&& tree_fits_uhwi_p (@3)
-	&& tree_fits_uhwi_p (@4)
-	&& ((~((HOST_WIDE_INT_1U << tree_to_uhwi (@1)) - 1)) & tree_to_uhwi (@4)) == 0
+	&& (wi::mask (tree_to_uhwi (@1), true, TYPE_PRECISION (type)) & wi::to_wide (@4)) == 0
         && (tree_to_uhwi (@1) + tree_to_uhwi (@3)) == TYPE_PRECISION (type)
         && TYPE_UNSIGNED (type)
         && @0 == @2)
@@ -13593,9 +13605,8 @@ and,
 	     (rshift @3 INTEGER_CST@4))
    (if (type_has_mode_precision_p (type)
 	&& tree_fits_uhwi_p (@1)
-	&& tree_fits_uhwi_p (@2)
 	&& tree_fits_uhwi_p (@4)
-	&& (((((HOST_WIDE_INT_1U << tree_to_uhwi (@1)) - 1)) & tree_to_uhwi (@2)) == 0)
+	&& ((wi::mask (tree_to_uhwi (@1), false, TYPE_PRECISION (type)) & wi::to_wide (@2)) == 0)
         && (tree_to_uhwi (@1) + tree_to_uhwi (@4)) == TYPE_PRECISION (type)
         && TYPE_UNSIGNED (type)
         && @0 == @3)

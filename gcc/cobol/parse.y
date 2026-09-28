@@ -54,6 +54,9 @@
 
   class ast_op_t;
 
+  struct cbl_field_data_t;
+#include "semantic_token.h"
+
   struct coll_alphanat_t {
     const char *alpha, *national; 
   };
@@ -401,6 +404,7 @@ class locale_tgt_t {
 			NUMED     "NUMERIC-EDITED picture"
 			NUMED_CR  "NUMERIC-EDITED CR picture"
 			NUMED_DB  "NUMERIC-EDITED DB picture"
+%token  <lex_picture>       PICTURE
 %token  <number>        NINEDOT NINES NINEV PIC_P "PICTURE P symbol" ONES
 %token  <string>        SPACES _EQ "EQUAL"
 %token  <literal>       LITERAL
@@ -631,7 +635,7 @@ class locale_tgt_t {
 
 			PACKED_DECIMAL PADDING PAGE
 			PAGE_COUNTER "PAGE-COUNTER"
-			PF PH PI PIC PICTURE
+			PF PH PI PIC 
 			PLUS PRESENT_VALUE PRINT_SWITCH
 			PROCEDURES PROCEED PROCESSING
 			PROGRAM_ID "PROGRAM-ID"
@@ -1007,6 +1011,7 @@ class locale_tgt_t {
     struct cbl_field_t *field;
     struct { bool tf; cbl_field_t *field; } bool_field;
     struct { int token; cbl_field_t *cond; } cond_field;
+           lex_picture_t lex_picture;
     struct cbl_refer_t *refer;
            ast_op_t *ast_op;
     struct rel_term_type { bool invert; cbl_refer_t *term; } rel_term_t;
@@ -4459,7 +4464,9 @@ data_descr1:    level_name
                                 "NUMERIC DISPLAY or NUMERIC-EDITED, not %s",
                                 $field->name, cbl_field_type_str($field->type) );
                     }
-                    $field->data.picture = original_picture();
+                    if( ! $field->data.picture ) // began as numeric
+                      $field->data.picture = original_picture();
+                    gcc_assert($field->data.picture);
                   }
 
                   // SIGN clause valid only with "S" in picture
@@ -4920,6 +4927,25 @@ picture_clause: PIC signed PIC_P[fore] nines
 			     field->name, MAX_FIXED_POINT_DIGITS, field->char_capacity());
                   }
                 } 
+
+        |       PICTURE
+                {
+                  cbl_field_t *field = current_field();
+                  const lex_picture_t& picture($1);
+                  field->codeset.set( picture.encoding );
+                  if( !field_type_update(field, picture.type, @PICTURE) ) {
+		    dbgmsg("new picture: %s", field_str(field));
+                    YYERROR;
+                  }
+                  field->set_attr(cbl_field_attr_t($PICTURE.attr));
+                  field->data.apply_picture(*picture.data);
+                  /* The following odd construction effectively multiplies the
+                     current capacity, which doesn't take stride() into
+                     account, by stride().  */
+                  field->set_capacity( field->data.capacity());
+                  field->blank_initial(field->data.capacity());
+                }
+        |       NO_CONDITION { YYERROR; }
 
         |       PIC alphanum_pic[nchar]
                 {
@@ -6882,13 +6908,13 @@ simple_cond:    kind_of_name
                   $$ = new_reference(new_temporary(FldConditional));
                   // symbol_find does not find FldClass symbols
                   struct symbol_elem_t *e = symbol_field(PROGRAM, 0, $domain);
-                  parser_setop($$->cond(), $1->field, is_op, cbl_field_of(e));
+                  parser_setop($$->cond(), *$1, is_op, cbl_field_of(e));
                 }
         |       cexpr NOT CLASS_NAME[domain] {
                   $$ = new_reference(new_temporary(FldConditional));
                   // symbol_find does not find FldClass symbols
                   struct symbol_elem_t *e = symbol_field(PROGRAM, 0, $domain);
-                  parser_setop($$->cond(), $1->field, is_op, cbl_field_of(e));
+                  parser_setop($$->cond(), *$1, is_op, cbl_field_of(e));
                   parser_logop($$->cond(), NULL, not_op, $$->cond());
                 }
         |       cexpr is OMITTED
@@ -13299,9 +13325,33 @@ current_tokens_t::tokenset_t::find( const cbl_name_t name, bool include_intrinsi
   return token;
 }
 
+/*
+ * Search the token strings, possibly including intrinsic functions.  Normally
+ * we're not interested in CDF names, unless the CDF is active.
+ */
 int
-keyword_tok( const char * text, bool include_intrinsics ) {
-  return cdf_tokens.find(text, include_intrinsics);
+keyword_tok( const char * name, bool include_intrinsics ) {
+  static const std::vector<tok_name_t> cdf_words
+#include "words/cdf.h"
+  static const std::vector<tok_name_t> intrinsic_words
+#include "words/intrinsic.h"
+  static std::vector<tok_name_t> cdf_only;
+  if( cdf_only.empty() ) {
+    std::set_difference(
+        cdf_words.begin(), cdf_words.end(),
+        intrinsic_words.begin(), intrinsic_words.end(),
+        std::back_inserter(cdf_only)
+    );
+  }
+    
+  std::array<char, 64> uname{};
+  std::transform(name, name + strlen(name) + 1, uname.begin(), ftoupper);
+
+  if( std::binary_search(cdf_only.begin(), cdf_only.end(), uname) ) {
+    return 0;
+  }
+  
+  return cdf_tokens.find(name, include_intrinsics);
 }
 
 static inline size_t
@@ -15094,6 +15144,7 @@ dialect_words_set( cbl_dialect_t dialect ) {
   typedef bool (current_tokens_t::*wordop_func_t)(const cbl_loc_t& loc,
                           const cbl_name_t keyword,
                           const cbl_name_t alias);
+
   struct wordop_t {
     cbl_dialect_t dialect;
     wordop_func_t op;
