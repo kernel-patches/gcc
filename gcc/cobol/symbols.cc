@@ -2185,6 +2185,25 @@ symbol_parent( const struct symbol_elem_t *e ) {
   return p;
 }
 
+void
+update_prior_invalid_field( const cbl_field_t *field) {
+  symbol_elem_t *e = field? symbol_at(field->our_index) :  symbols_end();
+  e--;
+  if( e->type == SymDataSection ) e--;
+  if( (e)->type == SymField ) {
+    auto f = cbl_field_of(e);
+    if( ! field ) field = f; // fake it
+    if( field->level <= f->level ) {
+      if( f->type == FldInvalid && f->data.has_initial_value() ) {
+        if( f->has_attr(quoted_e) || is_figconst(f) ) {
+          f->type = FldAlphanumeric;
+          assert(0 < f->char_capacity());
+        }
+      }
+    }
+  }
+}
+
 static bool
 had_picture( const cbl_field_t *field ) {
   if( is_elementary(field->type) ) {
@@ -2211,7 +2230,7 @@ had_picture( const cbl_field_t *field ) {
 
 void
 name_queue_t::dump( const char tag[] ) const {
-  if( ! (yydebug ) ) return;
+  if( yydebug ) {
     int i=0;
     for( const auto& namelocs : this->c ) {
       static char line[256];
@@ -2227,6 +2246,7 @@ name_queue_t::dump( const char tag[] ) const {
       dbgmsg("name_queue: %s: is empty", tag);
     }
   }
+}
 
 #if 0
 /*
@@ -4367,18 +4387,35 @@ cbl_field_t::encode( size_t srclen, cbl_loc_t loc ) {
         gcc_assert(0 < inbytesleft);
         if( loc.first_line == 0 )
           loc = symbol_field_location(field_index(this));
-        if( type == FldNumericEdited ) {
+        switch( type ) {
+        case FldNumericEdited:
           // Tolerate trailing zeros for P-values
           if( data.rdigits < 0 ) {
             if( inbytesleft <= size_t(data.rdigits * -1) ) {
-             bool all_zeros = std::all_of(reinterpret_cast<const char*>(inbuf),
-                                          data.original() + srclen,
-                                          [](char ch) {
-                                            return '0' == ch;
-                                          });
+              bool all_zeros = std::all_of(reinterpret_cast<const char*>(inbuf),
+                                           data.original() + srclen,
+                                           [](char ch) {
+                                             return '0' == ch;
+                                           });
               if( all_zeros ) return nullptr;
             }
           }
+          break;
+        default:
+          if( ! is_numeric(this) ) {
+            bool all_blank = std::all_of(reinterpret_cast<const char*>(inbuf),
+                                         data.original() + srclen,
+                                         [](char ch) {
+                                           return 0x20 == ch;
+                                         });
+            if( all_blank ) {
+              cbl_message(loc, MfValueClause,
+                          "VALUE %qs is too long to initialize %qs, discarded %qs",
+                          data.original(), name, inbuf);
+              return nullptr;
+            }
+          }
+          break;
         }
         error_msg( loc,
                    "VALUE %qs is too long to initialize %qs, discarded %qs",
@@ -4921,14 +4958,6 @@ expand_picture(const char *picture)
     {
     memmove(pV, pV+1, strlen(pV));
     }
-
-  // AD HOC FIX for an improper trailing space
-  char *pspace = strchr(retval, ascii_space);
-  if( pspace )
-    {
-    *pspace = NULLCH;
-    }
-
   return retval;
   }
 

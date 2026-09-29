@@ -343,7 +343,8 @@ void
 cdf_field_add( const cbl_loc_t& loc, const std::string& name, const cdfval_t& value ) {
   if( symbols_begin() < symbols_end() ) {
     cbl_field_t field = cdf_literalize(loc, name, value);
-    symbol_field_add(current_program_index(), &field);
+    auto e = symbol_field_add(current_program_index(), &field);
+    update_prior_invalid_field( cbl_field_of(e) );
   }
 }
 
@@ -1963,9 +1964,6 @@ cbl_field_t::encode_numeric( const char input[], cbl_loc_t loc ) {
 
             // __gg__string_to_numeric_edited operates in ASCII space:
             char *expanded = expand_picture(data.picture);
-            // By the time you read this, this next statement ought to be
-            // obsolete.  See RT issue 3682.
-            expanded[char_capacity()] = '\0';
             if( type == FldNumericEdited )
               {
               expand_expanded(expanded);
