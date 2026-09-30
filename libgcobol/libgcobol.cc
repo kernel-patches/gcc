@@ -9949,6 +9949,20 @@ void open_syslog(int option, int facility)
   }
 }
 
+static int
+ec_priority( ec_disposition_t disposition ) {
+  switch( disposition ) {
+  case ec_category_none_e:
+    break;
+  case ec_category_fatal_e:
+    return LOG_ERR;
+  case ec_category_nonfatal_e:
+  case ec_category_implementor_e:
+    return LOG_WARNING;
+  }
+  return LOG_INFO;
+}
+
 /*
  * The default exception handler is called if:
  *   1.  The EC is enabled and was not handled by a Declarative, or
@@ -9976,6 +9990,8 @@ default_exception_handler( ec_type_t ec )
     } else {
       warnx("logic error: unknown exception %x", ec );
     }
+    const int priority = ec_priority(disposition);
+
     /*
      * An enabled, unhandled fatal EC normally results in termination. But
      * EC-I-O is a special case becase a SELECT statement with FILE STATUS
@@ -11520,6 +11536,28 @@ __gg__function_handle_from_name(int                 program_id,
     }
 
   return retval;
+  }
+
+extern "C"
+void
+__gg__propagate_linkage_offsets(void * const fields[],
+                               unsigned char * const *base_address,
+                               size_t count)
+  {
+  for( size_t i = 0; i < count; ++i )
+    {
+    cblc_field_t *field = static_cast<cblc_field_t *>(fields[i]);
+    unsigned char *base = *base_address;
+    if( base )
+      {
+      field->data = base + field->offset;
+      }
+    else
+      {
+      // Do not read offset, or perform pointer arithmetic, for a null base.
+      field->data = nullptr;
+      }
+    }
   }
 
 extern "C"

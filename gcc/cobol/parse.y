@@ -4090,6 +4090,11 @@ level_name:     LEVEL ctx_name
                                          @ctx_name.first_line };
                   if( !namcpy(@ctx_name, field.name, $2) ) YYERROR;
 
+                  if( 0 == strcasecmp(field.name, "errno") ) {
+                    warn_msg(@ctx_name, "%<errno%> does not refer to the C variable, "
+                             "see posix-errno function");
+                  }
+
                   $$ = field_add(@$, &field);
                   if( !$$ ) {
                     YYERROR;
@@ -13105,13 +13110,11 @@ possible_ec() {
  */
 static void
 statement_epilog( int token ) {
-  cbl_enabled_exceptions_t& enabled_exceptions( cdf_enabled_exceptions() );
   if( possible_ec() && token != CONTINUE ) {
-    if( enabled_exceptions.size() ) {
-      current.declaratives_evaluate();
-    }
+    current.declaratives_evaluate();
+  } else {
+    parser_check_fatal_exception();
   }
-  parser_check_fatal_exception();
 }
 
 static inline void

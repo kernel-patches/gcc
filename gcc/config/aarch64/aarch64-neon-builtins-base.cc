@@ -158,6 +158,15 @@ class gimple_function_base : public function_base
   gimple *fold (gimple_folder &) const override { gcc_unreachable (); }
 };
 
+template <insn_code insn> struct gimple_exact_insn : gimple_function_base
+{
+  gimple *fold (gimple_folder &) const override { return nullptr; }
+  rtx expand (function_expander &e) const override
+  {
+    return e.use_exact_insn (insn);
+  }
+};
+
 /* For intrinsics that map to a single GIMPLE expression with no argument
    preparation necessary.  */
 class gimple_expr : public gimple_function_base
@@ -782,4 +791,43 @@ NEON_FUNCTION (vuzp,  vuzpq,  gimple_permute_pair, (uzp_mask<false>, uzp_mask<tr
 NEON_FUNCTION (vzip1, vzip1q, gimple_permute,      (zip_mask<false>))
 NEON_FUNCTION (vzip2, vzip2q, gimple_permute,      (zip_mask<true>))
 NEON_FUNCTION (vzip,  vzipq,  gimple_permute_pair, (zip_mask<false>, zip_mask<true>))
+
+// AES
+NEON_FUNCTION (vaeseq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_aesev16qi>,)
+NEON_FUNCTION (vaesdq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_aesdv16qi>,)
+NEON_FUNCTION (vaesmcq,  gimple_exact_insn<CODE_FOR_aarch64_crypto_aesmcv16qi>,)
+NEON_FUNCTION (vaesimcq, gimple_exact_insn<CODE_FOR_aarch64_crypto_aesimcv16qi>,)
+
+// SHA1
+NEON_FUNCTION (vsha1cq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_sha1cv4si>,)
+NEON_FUNCTION (vsha1mq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_sha1mv4si>,)
+NEON_FUNCTION (vsha1pq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_sha1pv4si>,)
+NEON_FUNCTION (vsha1h,    gimple_exact_insn<CODE_FOR_aarch64_crypto_sha1hsi>,)
+NEON_FUNCTION (vsha1su0q, gimple_exact_insn<CODE_FOR_aarch64_crypto_sha1su0v4si>,)
+NEON_FUNCTION (vsha1su1q, gimple_exact_insn<CODE_FOR_aarch64_crypto_sha1su1v4si>,)
+
+// SHA256
+NEON_FUNCTION (vsha256hq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_sha256hv4si>,)
+NEON_FUNCTION (vsha256h2q,  gimple_exact_insn<CODE_FOR_aarch64_crypto_sha256h2v4si>,)
+NEON_FUNCTION (vsha256su0q, gimple_exact_insn<CODE_FOR_aarch64_crypto_sha256su0v4si>,)
+NEON_FUNCTION (vsha256su1q, gimple_exact_insn<CODE_FOR_aarch64_crypto_sha256su1v4si>,)
+
+// SHA512
+NEON_FUNCTION (vsha512hq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_sha512hqv2di>,)
+NEON_FUNCTION (vsha512h2q,  gimple_exact_insn<CODE_FOR_aarch64_crypto_sha512h2qv2di>,)
+NEON_FUNCTION (vsha512su0q, gimple_exact_insn<CODE_FOR_aarch64_crypto_sha512su0qv2di>,)
+NEON_FUNCTION (vsha512su1q, gimple_exact_insn<CODE_FOR_aarch64_crypto_sha512su1qv2di>,)
+
+// SM3
+NEON_FUNCTION (vsm3ss1q,    gimple_exact_insn<CODE_FOR_aarch64_sm3ss1qv4si>,)
+NEON_FUNCTION (vsm3tt1aq,   gimple_exact_insn<CODE_FOR_aarch64_sm3tt1aqv4si>,)
+NEON_FUNCTION (vsm3tt1bq,   gimple_exact_insn<CODE_FOR_aarch64_sm3tt1bqv4si>,)
+NEON_FUNCTION (vsm3tt2aq,   gimple_exact_insn<CODE_FOR_aarch64_sm3tt2aqv4si>,)
+NEON_FUNCTION (vsm3tt2bq,   gimple_exact_insn<CODE_FOR_aarch64_sm3tt2bqv4si>,)
+NEON_FUNCTION (vsm3partw1q, gimple_exact_insn<CODE_FOR_aarch64_sm3partw1qv4si>,)
+NEON_FUNCTION (vsm3partw2q, gimple_exact_insn<CODE_FOR_aarch64_sm3partw2qv4si>,)
+
+// SM4
+NEON_FUNCTION (vsm4eq,    gimple_exact_insn<CODE_FOR_aarch64_sm4eqv4si>,)
+NEON_FUNCTION (vsm4ekeyq, gimple_exact_insn<CODE_FOR_aarch64_sm4ekeyqv4si>,)
 }
