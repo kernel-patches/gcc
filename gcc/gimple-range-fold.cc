@@ -687,7 +687,7 @@ fold_using_range::fold_stmt (vrange &r, gimple *s, fur_source &src, tree name)
     name = gimple_get_lhs (s);
 
   // Process addresses and loads from static constructors.
-  if (gimple_code (s) == GIMPLE_ASSIGN && range_from_readonly_var (r, s))
+  if (gimple_code (s) == GIMPLE_ASSIGN && range_from_readonly_var (r, s, src))
     return true;
 
   // Save the current range query and restore it before returning.
@@ -992,6 +992,16 @@ fold_using_range::range_of_address (prange &r, gimple *stmt, fur_source &src)
   return true;
 }
 
+// Does R contain anything in [LO, HI]?
+
+static bool
+intersects_p (const irange &r, const wide_int &lo, const wide_int &hi)
+{
+  int_range_max tmp (r);
+  tmp.intersect (int_range<1> (r.type (), lo, hi));
+  return !tmp.undefined_p ();
+}
+
 // The range of a load from a read-only aggregate: walk its initializer along
 // the component path of the reference, COMPONENT_PATH, from the aggregate out,
 // unioning into R the constants the load can reach.  For example:
@@ -1006,8 +1016,10 @@ fold_using_range::range_of_address (prange &r, gimple *stmt, fur_source &src)
 class ctor_ref_range
 {
 public:
-  ctor_ref_range (vrange &r, tree type, const vec<tree> &component_path)
-    : m_r (r), m_type (type), m_component_path (component_path) { }
+  ctor_ref_range (vrange &r, tree type, const vec<tree> &component_path,
+		  fur_source &src)
+    : m_r (r), m_type (type), m_component_path (component_path),
+      m_src (src) { }
   bool accumulate_range (tree init, unsigned i);
 private:
   bool accumulate_range_from_scalar (tree init);
@@ -1018,6 +1030,7 @@ private:
   vrange &m_r;
   tree m_type;
   const vec<tree> &m_component_path;
+  fur_source &m_src;
 };
 
 // Accumulate the range of the load from INIT, the initializer reached after
@@ -1124,53 +1137,83 @@ ctor_ref_range::accumulate_range_from_component_ref (tree init, unsigned i,
 //   static const int t[2] = { 4, 5 };
 //
 // INIT is { 4, 5 } and I is 1, the end of the path.  For t[1] the range is
-// [5, 5] and for t[n] it is [4, 5].
+// [5, 5] and for t[n] it is [4, 5].  When every element is loaded, whatever
+// the initializer leaves out reads as zero: take each element's indices out
+// of the domain to see if anything is left.
 
 bool
 ctor_ref_range::accumulate_range_from_array_ref (tree init, unsigned i,
 						 tree idx)
 {
-  if (TREE_CODE (idx) == INTEGER_CST)
-    {
-      unsigned ctor_idx;
-      tree val = get_array_ctor_element_at_index (init, wi::to_offset (idx),
-						  &ctor_idx);
-      if (!val)
-	{
-	  // An index the initializer skips over, like t[1] of
-	  //   static const int t[4] = { [2] = 5 };
-	  // is not read as zero, unlike one past its end.
-	  if (ctor_idx < CONSTRUCTOR_NELTS (init))
-	    return false;
-	  accumulate_range_from_missing_constructor_elt ();
-	  return true;
-	}
-      return accumulate_range (val, i);
-    }
-
   tree domain = TYPE_DOMAIN (TREE_TYPE (init));
   if (!TYPE_MIN_VALUE (domain)
       || !TYPE_MAX_VALUE (domain)
       || !tree_fits_uhwi_p (TYPE_MIN_VALUE (domain))
       || !tree_fits_uhwi_p (TYPE_MAX_VALUE (domain)))
     return false;
-  unsigned HOST_WIDE_INT needed_count
-    = (tree_to_uhwi (TYPE_MAX_VALUE (domain))
-       - tree_to_uhwi (TYPE_MIN_VALUE (domain)) + 1);
-  if (CONSTRUCTOR_NELTS (init) < needed_count)
-    accumulate_range_from_missing_constructor_elt ();
 
+  // Unsigned bounds that look reversed are signed, as they are for
+  // get_array_ctor_element_at_index: Ada's -1 .. 5 has a lower bound of
+  // SIZE_MAX.
+  tree type = TREE_TYPE (TYPE_MIN_VALUE (domain));
+  if (TYPE_UNSIGNED (type)
+      && tree_int_cst_lt (TYPE_MAX_VALUE (domain), TYPE_MIN_VALUE (domain)))
+    type = signed_type_for (type);
+  wide_int min = wi::to_wide (TYPE_MIN_VALUE (domain));
+  wide_int max = wi::to_wide (TYPE_MAX_VALUE (domain));
+
+  // Ada represents an empty array with reversed bounds.
+  if (wi::gt_p (min, max, TYPE_SIGN (type)))
+    return true;
+
+  unsigned prec = TYPE_PRECISION (type);
+  int_range<1> domain_r (type, min, max);
+
+  // Narrow IDX to the ranges it can actually take.
+  int_range_max idx_r;
+  m_src.get_operand (idx_r, idx);
+  range_cast (idx_r, type);
+  idx_r.intersect (domain_r);
+  if (idx_r.undefined_p ())
+    return false;
+
+  int_range_max missing (idx_r);
+  wide_int next = domain_r.lower_bound ();
   unsigned ix;
-  tree val;
-  FOR_EACH_CONSTRUCTOR_VALUE (CONSTRUCTOR_ELTS (init), ix, val)
+  tree index, val;
+
+  // Build a range with the entire domain, and take out any elements which are
+  // initialized.  If there's anything left in that range, it means there are
+  // missing elements and we should add a [0, 0] to the final range.
+  FOR_EACH_CONSTRUCTOR_ELT (CONSTRUCTOR_ELTS (init), ix, index, val)
     {
-      /* TODO: If the array index in the expr is an SSA_NAME with a known
-	 range, we could use just values loaded from the corresponding array
-	 elements.  */
-      if (!accumulate_range (val, i))
+      wide_int lo, hi;
+
+      // A null index means the element follows the previous one.
+      if (!index)
+	lo = hi = next;
+      else if (TREE_CODE (index) == RANGE_EXPR)
+	{
+	  lo = wi::to_wide (TREE_OPERAND (index, 0), prec);
+	  hi = wi::to_wide (TREE_OPERAND (index, 1), prec);
+	}
+      else
+	{
+	  gcc_checking_assert (TREE_CODE (index) == INTEGER_CST);
+	  lo = hi = wi::to_wide (index, prec);
+	}
+      // A RAW_DATA_CST holds one element per byte.
+      if (TREE_CODE (val) == RAW_DATA_CST)
+	hi = wi::add (hi, RAW_DATA_LENGTH (val) - 1);
+      missing.intersect (int_range<2> (type, lo, hi, VR_ANTI_RANGE));
+      next = wi::add (hi, 1);
+
+      if (intersects_p (idx_r, lo, hi) && !accumulate_range (val, i))
 	return false;
     }
 
+  if (!missing.undefined_p ())
+    accumulate_range_from_missing_constructor_elt ();
   return true;
 }
 
@@ -1193,7 +1236,8 @@ ctor_ref_range::accumulate_range_from_missing_constructor_elt ()
 // false and leave R untouched.
 
 bool
-fold_using_range::range_from_readonly_var (vrange &r, gimple *stmt)
+fold_using_range::range_from_readonly_var (vrange &r, gimple *stmt,
+					   fur_source &src)
 {
   gcc_checking_assert (gimple_code (stmt) == GIMPLE_ASSIGN);
   tree type = TREE_TYPE (gimple_assign_lhs (stmt));
@@ -1238,7 +1282,7 @@ fold_using_range::range_from_readonly_var (vrange &r, gimple *stmt)
     return false;
 
   value_range tmp (type);
-  ctor_ref_range load (tmp, type, component_path);
+  ctor_ref_range load (tmp, type, component_path, src);
   bool res = load.accumulate_range (ctor, 0) && !tmp.varying_p ();
   if (res)
     r = tmp;
