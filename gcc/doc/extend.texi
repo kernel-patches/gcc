@@ -9895,7 +9895,7 @@ does not distinguish between types with different attributes.  Support
 for attributes in C++ may be restricted in future to attributes on
 declarations only, but not on nested declarators.
 
-@xref{Attributes}, for details of the semantics of attributes.
+@xref{Attributes}, for details of the semantics of attributes
 applying to functions.
 
 An @dfn{attribute specifier} is of the form
@@ -18606,7 +18606,7 @@ of the function, control never reaches the end of the function
 body.  The @code{__builtin_unreachable} is in fact unreachable and
 communicates this fact to the compiler.
 
-Another use for @code{__builtin_unreachable} is following a call a
+Another use for @code{__builtin_unreachable} is following a call to a
 function that never returns but that is not declared
 @code{__attribute__((noreturn))}, as in this example:
 
