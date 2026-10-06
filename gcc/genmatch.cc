@@ -2273,7 +2273,20 @@ contains_id (operand *o, user_id *id)
 	    || (ife->falseexpr && contains_id (ife->falseexpr, id)));
 
   if (c_expr *ce = dyn_cast<c_expr *> (o))
-    return ce->capture_ids && ce->capture_ids->get (id->id);
+    {
+      /* Check whether any CPP_NAME token in the inline C code spells id->id.
+	 gen_transform looks up CPP_NAME tokens in the id substitution table,
+	 so the same check here determines whether the table needs an entry.  */
+      for (unsigned i = 0; i < ce->code.length (); ++i)
+	{
+	  const cpp_token *t = &ce->code[i];
+	  if (t->type == CPP_NAME
+	      && strcmp ((const char *) NODE_NAME (t->val.node.node),
+			 id->id) == 0)
+	    return true;
+	}
+      return false;
+    }
 
   return false;
 }
@@ -2454,8 +2467,8 @@ lower_for (simplify *sin, vec<simplify *>& simplifiers)
 		  if (sin->kind == simplify::SIMPLIFY
 		      || !can_delay_subst)
 		    match_op = replace_id (match_op, id, oper);
-		  if (result_op
-		      && !can_delay_subst)
+		  if (result_op && !can_delay_subst
+		      && contains_id (result_op, id))
 		    result_op = replace_id (result_op, id, oper);
 		}
 	      if (skip)
@@ -2826,8 +2839,29 @@ nodes_overlap_p (dt_node *n1, dt_node *n2)
   if (n1->type == dt_node::DT_MATCH || n2->type == dt_node::DT_MATCH)
     return true;
 
-  return operand_cases_overlap_p (as_a <dt_operand *> (n1)->op,
-				  as_a <dt_operand *> (n2)->op);
+  operand *op1 = as_a <dt_operand *> (n1)->op;
+  operand *op2 = as_a <dt_operand *> (n2)->op;
+  /* A GIMPLE expression and a GENERIC expression are dispatched through
+     separate paths (SSA_NAME case vs. operand TREE_CODE) and cannot
+     match the same input.  */
+  expr *e1 = op1 ? dyn_cast <expr *> (op1) : NULL;
+  expr *e2 = op2 ? dyn_cast <expr *> (op2) : NULL;
+  if (e1 && e2 && e1->is_generic != e2->is_generic)
+    return false;
+  return operand_cases_overlap_p (op1, op2);
+}
+
+/* Return true if N or any node in its subtree has type DT_MATCH.  */
+
+static bool
+subtree_has_match_p (dt_node *n)
+{
+  if (n->type == dt_node::DT_MATCH)
+    return true;
+  for (auto kid : n->kids)
+    if (subtree_has_match_p (kid))
+      return true;
+  return false;
 }
 
 /* Search OPS for a decision tree node like P and return it if found.  */
@@ -2857,10 +2891,28 @@ decision_tree::find_node (vec<dt_node *>& ops, dt_node *p)
 	{
 	  /* Unless we are processing the same pattern or the blocking
 	     pattern is before the one we are going to merge with.  */
-	  if ((true_node
-	       && true_node->for_id != current_id
-	       && true_node->for_id > as_a <dt_operand *> (ops[i])->for_id)
-	      || overlap_node)
+	  bool refused = overlap_node != NULL;
+	  if (!refused
+	      && true_node
+	      && true_node->for_id != current_id
+	      && true_node->for_id > as_a <dt_operand *> (ops[i])->for_id)
+	    {
+	      /* Refuse only when an intermediate sibling has a DT_MATCH
+		 descendant.  Such a sibling can match any input, and its
+		 ordering relative to p must be preserved.  When no
+		 intermediate sibling has a DT_MATCH descendant, every
+		 sibling matches a disjoint set of inputs, so the ordering
+		 of p's subtree with respect to those siblings does not
+		 affect which pattern fires.  */
+	      for (int k = i + 1; k < (int) ops.length (); ++k)
+		if (ops[k]->type != dt_node::DT_TRUE
+		    && subtree_has_match_p (ops[k]))
+		  {
+		    refused = true;
+		    break;
+		  }
+	    }
+	  if (refused)
 	    {
 	      if (verbose >= 1)
 		{
@@ -3864,11 +3916,12 @@ capture::gen_transform (FILE *f, int indent, const char *dest, bool gimple,
       /* If substituting elsewhere we might need to decompose it.  */
       else if (cond_handling == 2)
 	{
-	  /* ???  Returning false here will also not allow any other patterns
-	     to match unless this generator was split out.  */
+	  /* Without a sequence the comparison cannot be built, so give up on
+	     this pattern and go on to the next one.  */
+	  gcc_assert (fail_label);
 	  fprintf_indent (f, indent, "if (COMPARISON_CLASS_P (%s))\n", dest);
 	  fprintf_indent (f, indent, "  {\n");
-	  fprintf_indent (f, indent, "    if (!seq) return false;\n");
+	  fprintf_indent (f, indent, "    if (!seq) goto %s;\n", fail_label);
 	  fprintf_indent (f, indent, "    %s = gimple_build (seq,"
 			  " TREE_CODE (%s),"
 			  " TREE_TYPE (%s), TREE_OPERAND (%s, 0),"
