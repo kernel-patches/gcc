@@ -237,16 +237,10 @@ edge_info::derive_equivalences (tree name, tree value, int recursion_limit)
 	    tree rhs1 = gimple_assign_rhs1 (def_stmt);
 	    tree rhs2 = gimple_assign_rhs2 (def_stmt);
 
-	    /* If either argument is a constant, then we can compute
-	       a constant value for the nonconstant argument.  */
-	    if (TREE_CODE (rhs1) == INTEGER_CST
-		&& TREE_CODE (rhs2) == SSA_NAME)
-	      derive_equivalences (rhs2,
-				   fold_binary (MINUS_EXPR, TREE_TYPE (rhs1),
-						value, rhs1),
-				   recursion_limit - 1);
-	    else if (TREE_CODE (rhs2) == INTEGER_CST
-		     && TREE_CODE (rhs1) == SSA_NAME)
+	    /* If the second argument is a constant, then we can compute
+	       a constant value for the first one.  */
+	    if (TREE_CODE (rhs2) == INTEGER_CST
+		&& TREE_CODE (rhs1) == SSA_NAME)
 	      derive_equivalences (rhs1,
 				   fold_binary (MINUS_EXPR, TREE_TYPE (rhs1),
 						value, rhs2),
@@ -296,14 +290,12 @@ edge_info::derive_equivalences (tree name, tree value, int recursion_limit)
 		tree rhs1 = gimple_assign_rhs1 (def_stmt);
 		tree rhs2 = gimple_assign_rhs2 (def_stmt);
 
-		/* If either argument is a constant, then record the
-		   other argument as being the same as that constant.
+		/* If the second argument is a constant, then record the
+		   first argument as being the same as that constant.
 
 		   If neither operand is a constant, then we have a
 		   conditional name == name equivalence.  */
-		if (TREE_CODE (rhs1) == INTEGER_CST)
-		  derive_equivalences (rhs2, rhs1, recursion_limit - 1);
-		else if (TREE_CODE (rhs2) == INTEGER_CST)
+		if (TREE_CODE (rhs2) == INTEGER_CST)
 		  derive_equivalences (rhs1, rhs2, recursion_limit - 1);
 	      }
 	    else
@@ -538,32 +530,6 @@ record_edge_info (basic_block bb)
 						   ? false_val : true_val));
                 }
             }
-	  /* This can show up in the IL as a result of copy propagation
-	     it will eventually be canonicalized, but we have to cope
-	     with this case within the pass.  */
-          else if (is_gimple_min_invariant (op0)
-                   && TREE_CODE (op1) == SSA_NAME)
-            {
-              tree cond = build2 (code, boolean_type_node, op0, op1);
-              tree inverted = invert_truthvalue_loc (loc, cond);
-	      bool can_infer_simple_equiv
-		= !(HONOR_SIGNED_ZEROS (op0) && real_maybe_zerop (op0))
-		  && !DECIMAL_FLOAT_MODE_P (element_mode (TREE_TYPE (op0)));
-	      class edge_info *edge_info;
-
-	      edge_info = new class edge_info (true_edge);
-              record_conditions (&edge_info->cond_equivalences, cond, inverted);
-
-              if (can_infer_simple_equiv && code == EQ_EXPR)
-		edge_info->record_simple_equiv (op1, op0);
-
-	      edge_info = new class edge_info (false_edge);
-              record_conditions (&edge_info->cond_equivalences, inverted, cond);
-
-              if (can_infer_simple_equiv && TREE_CODE (inverted) == EQ_EXPR)
-		edge_info->record_simple_equiv (op1, op0);
-            }
-
           else if (TREE_CODE (op0) == SSA_NAME
                    && (TREE_CODE (op1) == SSA_NAME
                        || is_gimple_min_invariant (op1)))
@@ -694,7 +660,7 @@ private:
 
   void set_global_ranges_from_unreachable_edges (basic_block);
 
-  void simplify_stmt (gimple_stmt_iterator *);
+  void fold_cond (gimple *);
   void record_equivalences_from_incoming_edge (basic_block);
   void eliminate_redundant_computations (gimple_stmt_iterator *);
   void record_equivalences_from_stmt (gimple *, int);
@@ -1983,32 +1949,18 @@ cprop_operand (gimple *stmt, use_operand_p op_p, range_query *query)
     }
 }
 
-/* Attempt to simplify the statement in GSI with range info.  */
+/* Fold the conditional STMT with range info.  */
 
 void
-dom_opt_dom_walker::simplify_stmt (gimple_stmt_iterator *gsi)
+dom_opt_dom_walker::fold_cond (gimple *stmt)
 {
-  gimple *stmt = gsi_stmt (*gsi);
-
-  /* Avoid switches as touching those could remove edges mid-walk.  */
-  if (gimple_code (stmt) == GIMPLE_SWITCH)
+  gcond *cond = dyn_cast <gcond *> (stmt);
+  if (!cond)
     return;
 
-  gimple_stmt_iterator i = *gsi;
-  gsi_prev (&i);
-  gimple *before = gsi_end_p (i) ? NULL : gsi_stmt (i);
   simplify_using_ranges simplify (m_ranger);
-  if (!simplify.simplify (gsi))
-    return;
-
-  stmt = gsi_stmt (*gsi);
-  gimple_set_modified (stmt, true);
-
-  /* Our main loop will go back over the statements inserted in front of STMT,
-     so mark those as visited to avoid looking at them again.  */
-  i = *gsi;
-  for (gsi_prev (&i); !gsi_end_p (i) && gsi_stmt (i) != before; gsi_prev (&i))
-    gimple_set_visited (gsi_stmt (i), true);
+  if (simplify.fold_cond (cond))
+    gimple_set_modified (cond, true);
 }
 
 /* CONST_AND_COPIES is a table which maps an SSA_NAME to the current
@@ -2269,8 +2221,7 @@ dom_opt_dom_walker::optimize_stmt (basic_block bb, gimple_stmt_iterator *si,
 	 it, which may in turn allow other part of DOM or other passes to do
 	 a better job.  */
       if (!gimple_modified_p (stmt))
-	simplify_stmt (si);
-      stmt = gsi_stmt (*si);
+	fold_cond (stmt);
     }
 
   /* Record any additional equivalences created by this statement.  */
