@@ -58,6 +58,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "optabs-libfuncs.h"
 #include "tree-dfa.h"
+#include "hierarchical_discriminator.h"
 
 /* For lang_hooks.types.type_for_mode.  */
 #include "langhooks.h"
@@ -1653,10 +1654,15 @@ vect_truncate_gather_scatter_offset (stmt_vec_info stmt_info, tree vectype,
      Start with the maximum vectorization factor.  */
   unsigned HOST_WIDE_INT count = vect_max_vf (loop_vinfo) - 1;
 
-  /* Try lowering COUNT to the number of scalar latch iterations.  */
+  /* Try lowering COUNT to the number of scalar latch iterations.  Peeling
+     for alignment by masking shifts the active lanes up, and we cannot tell
+     yet whether peeling will be done by masking, or whether masks will be
+     needed at all, so be conservative and do not lower COUNT when peeling
+     for alignment.  */
   class loop *loop = LOOP_VINFO_LOOP (loop_vinfo);
   widest_int max_iters;
-  if (max_loop_iterations (loop, &max_iters)
+  if (!LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo)
+      && max_loop_iterations (loop, &max_iters)
       && max_iters < count)
     count = max_iters.to_shwi ();
 
@@ -9702,6 +9708,8 @@ hoist_defs_of_uses (gimple *stmt, class loop *loop, bool hoist_p)
     {
       gimple *def_stmt = SSA_NAME_DEF_STMT (USE_FROM_PTR (use_p));
       gimple *copy = gimple_copy (def_stmt);
+      assign_discriminators_to_stmt
+	(copy, 0, allocate_copyid_base (gimple_location (copy), 1));
       gimple_set_uid (copy, 0);
       def_operand_p def_p = single_ssa_def_operand (def_stmt, SSA_OP_DEF);
       tree new_def = duplicate_ssa_name (DEF_FROM_PTR (def_p), copy);
