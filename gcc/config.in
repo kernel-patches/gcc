@@ -1871,18 +1871,6 @@
 #endif
 
 
-/* Define to 1 if you have the <limits.h> header file. */
-#ifndef USED_FOR_TARGET
-#undef HAVE_LIMITS_H
-#endif
-
-
-/* Define to 1 if you have the <locale.h> header file. */
-#ifndef USED_FOR_TARGET
-#undef HAVE_LOCALE_H
-#endif
-
-
 /* Define to 1 if the system has the type `long long'. */
 #ifndef USED_FOR_TARGET
 #undef HAVE_LONG_LONG
@@ -2756,12 +2744,6 @@
 #undef caddr_t
 #endif
 
-
-/* Define to `__inline__' or `__inline' if that's what the C compiler
-   calls it, or to nothing if 'inline' is not supported under any name.  */
-#ifndef __cplusplus
-#undef inline
-#endif
 
 /* Define to the type of a signed integer type of width exactly 16 bits if
    such a type exists and the standard includes do not define it. */

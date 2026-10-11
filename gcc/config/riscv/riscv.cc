@@ -3705,7 +3705,7 @@ riscv_move_integer (rtx temp, rtx dest, HOST_WIDE_INT value)
 		  rtx t2 = codes[i].code == VEC_MERGE ? old_value : x;
 		  gcc_assert (t2);
 		  t2 = gen_lowpart (SImode, t2);
-		  emit_insn (gen_riscv_xpack_di_si_2 (t, x, GEN_INT (32), t2));
+		  emit_insn (gen_riscv_xpack_plus_di_si_2 (t, x, GEN_INT (32), t2));
 		  x = t;
 		}
 	    }
@@ -5056,6 +5056,28 @@ riscv_rtx_costs (rtx x, machine_mode mode, int outer_code, int opno ATTRIBUTE_UN
 	  *total = COSTS_N_INSNS (3);
 	  return true;
 	}
+
+      /* packh for zbkb.  Alternate forms haven't shown up as a
+	 costing problem.  Obviously we can add the additional
+	 variants if needed. We tend to canonicalize to this form
+	 after the any-or-plus changes.  */
+      if (TARGET_ZBKB
+	  && GET_CODE (x) == PLUS
+	  && GET_CODE (XEXP (x, 0)) == AND
+	  && GET_CODE (XEXP (XEXP (x, 0), 0)) == ASHIFT
+	  && register_operand (XEXP (XEXP (XEXP (x, 0), 0), 0), word_mode)
+	  && CONST_INT_P (XEXP (XEXP (XEXP (x, 0), 0), 1))
+	  && INTVAL (XEXP (XEXP (XEXP (x, 0), 0), 1)) == 8
+	  && CONST_INT_P (XEXP (XEXP (x, 0), 1))
+	  && INTVAL (XEXP (XEXP (x, 0), 1)) == 0xff00
+	  && GET_CODE (XEXP (x, 1)) == ZERO_EXTEND
+	  && GET_MODE (XEXP (x, 1)) == word_mode
+	  && GET_MODE (XEXP (XEXP (x, 1), 0)) == QImode)
+	{
+	  *total = COSTS_N_INSNS (1);
+	  return true;
+	}
+
 
       if (float_mode_p)
 	*total = tune_param->fp_add[mode == DFmode];

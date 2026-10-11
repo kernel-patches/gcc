@@ -201,11 +201,8 @@ a68_build_a68_type_nodes (void)
     a68_long_long_bits_type = a68_long_bits_type;
 
   /* WORD BITS */
-  /* WORD INT */
   a68_word_bits_type
     = build_nonstandard_integer_type (POINTER_SIZE, 1);
-
-  a68_word_bits_type = long_unsigned_type_node;
 
   /* BYTES
      LONG BYTES */

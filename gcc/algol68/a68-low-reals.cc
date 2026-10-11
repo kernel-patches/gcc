@@ -387,7 +387,7 @@ a68_real_entier (tree val, MOID_T *to_mode, MOID_T *from_mode)
   const int int_prec = TYPE_PRECISION (integer_type_node);
   const int long_int_prec = TYPE_PRECISION (long_integer_type_node);
   const int long_long_int_prec = TYPE_PRECISION (long_long_integer_type_node);
-  
+
   if (from_mode_prec == TYPE_PRECISION (CTYPE (M_REAL)))
     {
       if (to_mode_prec == int_prec)
@@ -441,7 +441,7 @@ a68_real_round (tree val, MOID_T *to_mode, MOID_T *from_mode)
   const int int_prec = TYPE_PRECISION (integer_type_node);
   const int long_int_prec = TYPE_PRECISION (long_integer_type_node);
   const int long_long_int_prec = TYPE_PRECISION (long_long_integer_type_node);
-  
+
   if (from_mode_prec == TYPE_PRECISION (CTYPE (M_REAL)))
     {
       if (to_mode_prec == int_prec)
@@ -587,30 +587,26 @@ a68_real_pow (MOID_T *m, MOID_T *a_mode, MOID_T *b_mode,
 {
   int m_prec = TYPE_PRECISION (CTYPE (m));
   int a_mode_prec = TYPE_PRECISION (CTYPE (a_mode));
-  int b_mode_prec = TYPE_PRECISION (CTYPE (b_mode));
 
-  const int real_prec = TYPE_PRECISION (CTYPE (M_REAL));
-  const int long_real_prec = TYPE_PRECISION (CTYPE (M_LONG_REAL));
-  const int long_long_real_prec = TYPE_PRECISION (CTYPE (M_LONG_LONG_REAL));
-  
+  const int float_prec = TYPE_PRECISION (float_type_node);
+  const int double_prec = TYPE_PRECISION (double_type_node);
+  const int long_double_prec = TYPE_PRECISION (long_double_type_node);
+
   enum built_in_function built_in;
-  if (m_prec == real_prec)
+  if (m_prec == float_prec)
     {
-      gcc_assert (a_mode_prec == real_prec);
-      built_in
-	= (b_mode_prec == real_prec) ? BUILT_IN_POWF : BUILT_IN_POWIF;
+      gcc_assert (a_mode_prec == float_prec);
+      built_in = IS_REAL (b_mode) ? BUILT_IN_POWF : BUILT_IN_POWIF;
     }
-  else if (m_prec == long_real_prec)
+  else if (m_prec == double_prec)
     {
-      gcc_assert (a_mode_prec == long_real_prec);
-      built_in =
-	(b_mode_prec == long_real_prec) ? BUILT_IN_POW : BUILT_IN_POWI;
+      gcc_assert (a_mode_prec == double_prec);
+      built_in = IS_REAL (b_mode) ? BUILT_IN_POW : BUILT_IN_POWI;
     }
-  else if (m_prec == long_long_real_prec)
+  else if (m_prec == long_double_prec)
     {
-      gcc_assert (a_mode_prec == long_long_real_prec);
-      built_in
-	= (b_mode_prec == long_long_real_prec) ? BUILT_IN_POWL : BUILT_IN_POWIL;
+      gcc_assert (a_mode_prec == long_double_prec);
+      built_in = IS_REAL (b_mode) ? BUILT_IN_POWL : BUILT_IN_POWIL;
     }
   else
     gcc_unreachable ();

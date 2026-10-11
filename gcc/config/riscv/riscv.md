@@ -5503,6 +5503,35 @@
   [(set_attr "type" "slt")
    (set_attr "mode" "<X:MODE>")])
 
+;; If the input operands are registers then we want to steer towards
+;; ADD, otherwise steer towards IOR.
+(define_expand "aop<mode>3"
+  [(set (match_operand:GPR 0 "register_operand")
+        (ior:GPR (match_operand:GPR 1 "register_operand")
+                 (match_operand:GPR 2 "arith_operand")))]
+  ""          
+  {
+    /* If we have shift-add insns and arguments are all registers, steer
+       towards PLUS, otherwise steer towards IOR.  */
+    if (TARGET_ZBA && REG_P (operands[2]))
+      emit_insn (gen_add<mode>3 (operands[0], operands[1], operands[2]));
+    else
+      {
+	/* We accept GPRs, so we need to do the right thing for SI on rv64.  */
+	if (GET_MODE (operands[0]) != word_mode)
+	  {
+	    operands[0] = gen_lowpart (word_mode, operands[0]);
+	    operands[1] = gen_lowpart (word_mode, operands[1]);
+	    operands[2] = gen_lowpart (word_mode, operands[2]);
+	    emit_insn (gen_iordi3 (operands[0], operands[1], operands[2]));
+	  }
+	else
+	  emit_insn (gen_ior<mode>3 (operands[0], operands[1], operands[2]));
+      }
+    DONE;
+  }
+) 
+
 (include "bitmanip.md")
 (include "crypto.md")
 (include "sync.md")
