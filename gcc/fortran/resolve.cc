@@ -20025,9 +20025,14 @@ resolve_data_variables (gfc_data_variable *d)
 static void
 resolve_data (gfc_data *d)
 {
+  gfc_data_value *v;
 
   if (!resolve_data_variables (d->var))
     return;
+
+  for (v = d->value; v; v = v->next)
+    if (v->expr && !gfc_resolve_expr (v->expr))
+      return;
 
   values.vnode = d->value;
   if (d->value == NULL)
