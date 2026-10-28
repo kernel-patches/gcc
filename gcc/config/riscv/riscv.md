@@ -496,6 +496,11 @@
 ;; sf_vfnrclip     vector fp32 to int8 ranged clip instructions
 ;; sf_vc vector coprocessor interface without side effect
 ;; sf_vc_se vector coprocessor interface with side effect
+;; XuanTie custom extension instructions
+;; xt_vgmulxor  vector Galois-field multiply-XOR instruction
+;; xt_vcrcfold  vector CRC folding instructions
+;; xt_vile      vector even interleave instruction
+;; xt_vilo      vector odd interleave instruction
 (define_attr "type"
   "unknown,branch,jump,jalr,ret,call,load,fpload,store,fpstore,
    mtc,mfc,const,arith,logical,shift,slt,imul,idiv,move,fmove,fadd,fmul,
@@ -518,7 +523,7 @@
    vgather,vcompress,vmov,vector,vandn,vbrev,vbrev8,vrev8,vclz,vctz,vcpop,vrol,vror,vwsll,
    vclmul,vclmulh,vghsh,vgmul,vaesef,vaesem,vaesdf,vaesdm,vaeskf1,vaeskf2,vaesz,
    vsha2ms,vsha2ch,vsha2cl,vsm4k,vsm4r,vsm3me,vsm3c,vfncvtbf16,vfwcvtbf16,vfwmaccbf16,
-   sf_vc,sf_vc_se"
+   sf_vc,sf_vc_se,xt_vgmulxor,xt_vcrcfold,xt_vile,xt_vilo"
   (cond [(eq_attr "got" "load") (const_string "load")
 
 	 ;; If a doubleword move uses these expensive instructions,
@@ -811,6 +816,8 @@
       rtx t3 = gen_reg_rtx (<MODE>mode);
       rtx t4 = gen_reg_rtx (<MODE>mode);
 
+      operands[1] = make_safe_from (operands[1], operands[0]);
+      operands[2] = make_safe_from (operands[2], operands[0]);
       emit_insn (gen_add3_insn (operands[0], operands[1], operands[2]));
       rtx cmp1 = gen_rtx_LT (<MODE>mode, operands[2], const0_rtx);
       emit_insn (gen_cstore<mode>4 (t3, cmp1, operands[2], const0_rtx));
@@ -845,6 +852,7 @@
     }
   else
     {
+      operands[1] = make_safe_from (operands[1], operands[0]);
       emit_insn (gen_add3_insn (operands[0], operands[1], operands[2]));
       riscv_expand_conditional_branch (operands[3], LTU, operands[0],
 				       operands[1]);
@@ -993,6 +1001,8 @@
       rtx t3 = gen_reg_rtx (<MODE>mode);
       rtx t4 = gen_reg_rtx (<MODE>mode);
 
+      operands[1] = make_safe_from (operands[1], operands[0]);
+      operands[2] = make_safe_from (operands[2], operands[0]);
       emit_insn (gen_sub3_insn (operands[0], operands[1], operands[2]));
 
       rtx cmp1 = gen_rtx_LT (<MODE>mode, operands[2], const0_rtx);
@@ -1030,6 +1040,7 @@
     }
   else
     {
+      operands[1] = make_safe_from (operands[1], operands[0]);
       emit_insn (gen_sub3_insn (operands[0], operands[1], operands[2]));
       riscv_expand_conditional_branch (operands[3], LTU, operands[1],
 				       operands[0]);
@@ -1451,6 +1462,8 @@
   "TARGET_DIV && riscv_use_divmod_expander ()"
   {
       rtx tmp = gen_reg_rtx (<MODE>mode);
+      operands[1] = make_safe_from (operands[1], operands[0]);
+      operands[2] = make_safe_from (operands[2], operands[0]);
       emit_insn (gen_<u>div<GPR:mode>3 (operands[0], operands[1], operands[2]));
       emit_insn (gen_mul<GPR:mode>3 (tmp, operands[0], operands[2]));
       emit_insn (gen_sub<GPR:mode>3 (operands[3], operands[1], tmp));
@@ -1903,7 +1916,8 @@
   /* If the source is a suitably extended subreg, then this is just
      a simple move.  */
   if (SUBREG_P (operands[1]) && SUBREG_PROMOTED_VAR_P (operands[1])
-      && SUBREG_PROMOTED_UNSIGNED_P (operands[1]))
+      && SUBREG_PROMOTED_UNSIGNED_P (operands[1])
+      && GET_MODE (SUBREG_REG (operands[1])) == <GPR:MODE>mode)
     {
       emit_insn (gen_mov<GPR:mode> (operands[0], SUBREG_REG (operands[1])));
       DONE;
@@ -4961,7 +4975,7 @@
 		   (match_operand:SI 4 "register_operand" "r"))))
    (clobber (match_scratch:DI 5 "=&r"))]
   "TARGET_64BIT
-   && (INTVAL (operands[3]) | ((1 << INTVAL (operands[2])) - 1)) == 0xffffffff"
+   && (INTVAL (operands[3]) | ((HOST_WIDE_INT_1U << INTVAL (operands[2])) - 1)) == 0xffffffff"
   "#"
   "&& reload_completed"
   [(set (match_dup 5) (ashift:DI (match_dup 1) (match_dup 2)))
