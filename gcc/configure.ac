@@ -552,15 +552,6 @@ struct X<long long> { typedef long long t; };
 ]], [[X<int64_t>::t x;]])],[],[AC_MSG_ERROR([error verifying int64_t uses long long])])
 fi
 
-AC_CACHE_CHECK(for std::swap in <utility>, ac_cv_std_swap_in_utility, [
-AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-#include <utility>
-]], [[int a, b; std::swap(a,b);]])],[ac_cv_std_swap_in_utility=yes],[ac_cv_std_swap_in_utility=no])])
-if test $ac_cv_std_swap_in_utility = yes; then
-  AC_DEFINE(HAVE_SWAP_IN_UTILITY, 1,
-  [Define if <utility> defines std::swap.])
-fi
-
 # ---------------------
 # Warnings and checking
 # ---------------------
@@ -1492,9 +1483,6 @@ if test "$zstd_enabled" = yes; then
   AC_DEFINE(HAVE_ZSTD_H, 1,
 	[Define if you have a working <zstd.h> header file.])
 fi
-
-dnl Disabled until we have a complete test for buggy enum bitfields.
-dnl gcc_AC_C_ENUM_BF_UNSIGNED
 
 define(gcc_UNLOCKED_FUNCS, clearerr_unlocked feof_unlocked dnl
   ferror_unlocked fflush_unlocked fgetc_unlocked fgets_unlocked dnl

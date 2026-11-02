@@ -14264,7 +14264,7 @@
 	(vec_select:<ssescalarmode>
 	  (match_operand:VHFBF 1 "nonimmediate_operand" "vm,v,m")
 	  (parallel [(const_int 0)])))]
-  "TARGET_AVX512F && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+  "TARGET_AVX512BW && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
   "#"
   "&& reload_completed"
   [(set (match_dup 0) (match_dup 1))]
@@ -14273,7 +14273,7 @@
 (define_insn "*vec_extract<mode>"
   [(set (match_operand:HFBF 0 "register_sse4nonimm_operand" "=?r,jm,m,x,Yw")
 	(vec_select:HFBF
-	  (match_operand:<ssevecmode> 1 "register_operand" "v,x,v,0,YW")
+	  (match_operand:<ssevecmode> 1 "register_operand" "YW,x,YW,0,YW")
 	  (parallel
 	    [(match_operand:SI 2 "const_0_to_7_operand")])))]
   "TARGET_SSE2"
@@ -15117,10 +15117,16 @@
   if (byte_offset % 16 == 0)
     {
       operands[2] = GEN_INT (byte_offset / 16);
-      if (byte_offset / 16 == 1)
-	return "vextract<shuffletype><extract_suf>\t{%2, %t1, %x0|%x0, %t1, %2}";
-      else
-	return "vextract<shuffletype><extract_suf>\t{%2, %1, %x0|%x0, %1, %2}";
+      /* The 256-bit source form needs AVX512VL and the 64x2 forms need
+	 AVX512DQ.  An unmasked 32x4 extract gives the same result.  */
+      bool ymm_p = (byte_offset / 16 == 1) && TARGET_AVX512VL;
+      if (GET_MODE_UNIT_SIZE (<MODE>mode) == 8 && !TARGET_AVX512DQ)
+	return (ymm_p
+		? "vextract<shuffletype>32x4\t{%2, %t1, %x0|%x0, %t1, %2}"
+		: "vextract<shuffletype>32x4\t{%2, %1, %x0|%x0, %1, %2}");
+      return (ymm_p
+	      ? "vextract<shuffletype><extract_suf>\t{%2, %t1, %x0|%x0, %t1, %2}"
+	      : "vextract<shuffletype><extract_suf>\t{%2, %1, %x0|%x0, %1, %2}");
     }
   else
     return "valign<ternlogsuffix>\t{%2, %1, %1, %<xtg_mode>0|%<xtg_mode>0, %1, %1, %2}";
