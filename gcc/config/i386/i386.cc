@@ -7847,7 +7847,7 @@ ix86_add_cfa_restore_note (rtx_insn *insn, rtx reg, HOST_WIDE_INT cfa_offset)
 /* Add queued REG_CFA_RESTORE notes if any to INSN.  */
 
 static void
-ix86_add_queued_cfa_restore_notes (rtx insn)
+ix86_add_queued_cfa_restore_notes (rtx_insn *insn)
 {
   rtx last;
   if (!queued_cfa_restores)
@@ -7866,7 +7866,7 @@ ix86_add_queued_cfa_restore_notes (rtx insn)
    zero if %r11 register is live and cannot be freely used and positive
    otherwise.  */
 
-static rtx
+static rtx_insn *
 pro_epilogue_adjust_stack (rtx dest, rtx src, rtx offset,
 			   int style, bool set_cfa)
 {
@@ -8368,7 +8368,7 @@ ix86_adjust_stack_and_probe (HOST_WIDE_INT size,
       for (i = probe_interval; i <= size; i += probe_interval)
 	{
 	  /* Allocate PROBE_INTERVAL bytes.  */
-	  rtx insn
+	  rtx_insn *insn
 	    = pro_epilogue_adjust_stack (stack_pointer_rtx, stack_pointer_rtx,
 					 GEN_INT (-probe_interval), -1,
 					 m->fs.cfa_reg == stack_pointer_rtx);
@@ -17526,7 +17526,7 @@ ix86_output_indirect_branch_via_reg (rtx call_op, bool sibcall_p)
     {
       if (thunk_name != NULL)
 	{
-	  if ((REX_INT_REGNO_P (regno) || REX_INT_REGNO_P (regno))
+	  if ((REX_INT_REGNO_P (regno) || REX2_INT_REGNO_P (regno))
 	      && ix86_indirect_branch_cs_prefix)
 	    fprintf (asm_out_file, "\tcs\n");
 	  fprintf (asm_out_file, "\tcall\t");
@@ -22901,6 +22901,43 @@ ix86_division_cost (const struct processor_costs *cost,
     return cost->divide[MODE_INDEX (mode)];
 }
 
+/* Return a rough cost of the scalar integer TRUNC_DIV_EXPR, TRUNC_MOD_EXPR
+   or EXACT_DIV_EXPR CODE in MODE by the nonzero constant DIVISOR,
+   approximating expand_divmod in expmed.cc.  UNS is true for unsigned
+   operations.  */
+
+static int
+ix86_const_divmod_cost (const struct processor_costs *cost,
+			enum tree_code code, machine_mode mode,
+			tree divisor, bool uns)
+{
+  bool mod_p = code == TRUNC_MOD_EXPR;
+  if (tree_int_cst_sgn (divisor) == 1 && integer_pow2p (divisor))
+    {
+      /* Unsigned or exact division/modulo is a single shift or mask.  */
+      if (uns || code == EXACT_DIV_EXPR)
+	return mod_p ? cost->add : cost->shift_const;
+
+      /* Signed division/modulo adjusts negative dividends first.  */
+      return cost->shift_const + 2 * cost->add + (mod_p ? cost->add : 0);
+    }
+
+  int mult = ix86_multiplication_cost (cost, mode);
+
+  /* Exact division multiplies by the modular inverse.  */
+  if (code == EXACT_DIV_EXPR)
+    return mult;
+
+  /* Truncating division uses high-part multiply, shift and add.  */
+  int c = mult + cost->shift_const + cost->add;
+
+  /* Modulo computes X - (X / D) * D.  */
+  if (mod_p)
+    c += mult + cost->add;
+
+  return c;
+}
+
 /* Return cost of shift in MODE.
    If CONSTANT_OP1 is true, the op1 value is known and set in OP1_VAL.
    AND_IN_OP1 specify in op1 is result of AND and SHIFT_AND_TRUNCATE
@@ -27028,15 +27065,30 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 	    stmt_cost = ix86_cost->add;
 	  break;
 	case TRUNC_DIV_EXPR:
+	case TRUNC_MOD_EXPR:
+	case EXACT_DIV_EXPR:
+	  {
+	    tree op2 = gimple_assign_rhs2 (stmt_info->stmt);
+	    if (kind == scalar_stmt
+		&& SCALAR_INT_MODE_P (mode)
+		&& GET_MODE_SIZE (mode) <= UNITS_PER_WORD
+		&& TREE_CODE (op2) == INTEGER_CST
+		&& !integer_zerop (op2))
+	      {
+		stmt_cost = ix86_const_divmod_cost
+			      (ix86_cost, subcode, mode, op2,
+			       TYPE_UNSIGNED (TREE_TYPE (op2)));
+		break;
+	      }
+	  }
+	  /* FALLTHRU */
 	case CEIL_DIV_EXPR:
 	case FLOOR_DIV_EXPR:
 	case ROUND_DIV_EXPR:
-	case TRUNC_MOD_EXPR:
 	case CEIL_MOD_EXPR:
 	case FLOOR_MOD_EXPR:
 	case RDIV_EXPR:
 	case ROUND_MOD_EXPR:
-	case EXACT_DIV_EXPR:
 	  stmt_cost = ix86_division_cost (ix86_cost, mode);
 	  break;
 
@@ -27380,8 +27432,8 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 			/* vpdpbssd.  */
 			native_vnni_p
 			  = (GET_MODE_SIZE (mode) == 64
-			     ? TARGET_AVX10_2
-			     : (TARGET_AVXVNNIINT8 || TARGET_AVX10_2));
+			     ? TARGET_AVX10V1AUX
+			     : (TARGET_AVXVNNIINT8 || TARGET_AVX10V1AUX));
 		    }
 		  m_num_reduc[X86_REDUC_DOT_PROD] += count * scale;
 

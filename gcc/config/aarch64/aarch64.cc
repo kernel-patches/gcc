@@ -3809,7 +3809,7 @@ aarch64_load_symref_appropriately (rtx dest, rtx imm,
    important because, unlike emit_move_insn, the move expanders know
    how to force Pmode objects into the constant pool even when the
    constant pool address is not itself legitimate.  */
-static rtx
+static rtx_insn *
 aarch64_emit_move (rtx dest, rtx src)
 {
   return (can_create_pseudo_p ()
@@ -5907,7 +5907,7 @@ aarch64_sub_sp (rtx temp1, rtx temp2, poly_int64 delta,
    Emit instructions to branch around the mode switch if PSTATE.SM already
    matches LOCAL_MODE.  Return the label that the branch jumps to.  */
 
-static rtx_insn *
+static rtx_code_label *
 aarch64_guard_switch_pstate_sm (rtx old_svcr, aarch64_isa_mode local_mode)
 {
   local_mode &= AARCH64_ISA_MODE_SM_STATE;
@@ -9410,14 +9410,14 @@ aarch64_pushwb_single_reg (machine_mode mode, unsigned regno,
 			   HOST_WIDE_INT adjustment)
  {
   rtx base_rtx = stack_pointer_rtx;
-  rtx insn, reg, mem;
+  rtx reg, mem;
 
   reg = gen_rtx_REG (mode, regno);
   mem = gen_rtx_PRE_MODIFY (Pmode, base_rtx,
 			    plus_constant (Pmode, base_rtx, -adjustment));
   mem = gen_frame_mem (mode, mem);
 
-  insn = emit_move_insn (mem, reg);
+  rtx_insn *insn = emit_move_insn (mem, reg);
   RTX_FRAME_RELATED_P (insn) = 1;
 }
 
@@ -9643,7 +9643,7 @@ aarch64_gcs_enabled (void)
 
 /* Check if X (or any sub-rtx of X) is a PACIASP/PACIBSP instruction.  */
 bool
-aarch_pac_insn_p (rtx x)
+aarch_pac_insn_p (rtx_insn *x)
 {
   if (!INSN_P (x))
     return false;
@@ -10717,7 +10717,7 @@ aarch64_read_old_svcr (unsigned int regno)
    load the incoming value of SVCR from its save slot into temporary
    register REGNO.  */
 
-static rtx_insn *
+static rtx_code_label *
 aarch64_guard_switch_pstate_sm (unsigned int regno,
 				aarch64_isa_mode local_mode)
 {
@@ -11023,7 +11023,7 @@ aarch64_expand_prologue (void)
   /* Enable PSTATE.SM, if required.  */
   if (aarch64_cfun_enables_pstate_sm ())
     {
-      rtx_insn *guard_label = nullptr;
+      rtx_code_label *guard_label = nullptr;
       if (known_ge (cfun->machine->frame.old_svcr_offset, 0))
 	{
 	  /* The current function is streaming-compatible.  Save the
@@ -11137,7 +11137,7 @@ aarch64_expand_epilogue (rtx_call_insn *sibcall)
   /* Reset PSTATE.SM, if required.  */
   if (aarch64_cfun_enables_pstate_sm ())
     {
-      rtx_insn *guard_label = nullptr;
+      rtx_code_label *guard_label = nullptr;
       if (known_ge (cfun->machine->frame.old_svcr_offset, 0))
 	guard_label = aarch64_guard_switch_pstate_sm (IP0_REGNUM,
 						      AARCH64_ISA_MODE);
@@ -11255,7 +11255,7 @@ aarch64_expand_epilogue (rtx_call_insn *sibcall)
       rtx_code_label *label = gen_label_rtx ();
       rtx x = aarch64_gen_compare_zero_and_branch (EQ, EH_RETURN_TAKEN_RTX,
 						   label);
-      rtx jump = emit_jump_insn (x);
+      rtx_insn *jump = emit_jump_insn (x);
       JUMP_LABEL (jump) = label;
       LABEL_NUSES (label)++;
       emit_insn (gen_add2_insn (stack_pointer_rtx,
@@ -29640,8 +29640,8 @@ aarch64_expand_cpymem (rtx *operands, bool is_memmove)
 	mode = V4SImode;
 
       rtx reg = gen_reg_rtx (mode);
-      rtx load = gen_move_insn (reg, adjust_address (src, mode, offset));
-      rtx store = gen_move_insn (adjust_address (dst, mode, offset), reg);
+      rtx_insn *load = gen_move_insn (reg, adjust_address (src, mode, offset));
+      rtx_insn *store = gen_move_insn (adjust_address (dst, mode, offset), reg);
       ops.safe_push ({ load, store });
       size -= mode_bytes;
       offset += mode_bytes;
@@ -33572,7 +33572,7 @@ aarch64_switch_pstate_sm_for_landing_pad (basic_block bb)
     return false;
 
   start_sequence ();
-  rtx_insn *guard_label = nullptr;
+  rtx_code_label *guard_label = nullptr;
   if (TARGET_STREAMING_COMPATIBLE)
     guard_label = aarch64_guard_switch_pstate_sm (IP0_REGNUM,
 						  AARCH64_ISA_MODE_SM_OFF);
@@ -33599,7 +33599,7 @@ aarch64_switch_pstate_sm_for_jump (rtx_insn *jump)
     return false;
 
   start_sequence ();
-  rtx_insn *guard_label = nullptr;
+  rtx_code_label *guard_label = nullptr;
   if (TARGET_STREAMING_COMPATIBLE)
     guard_label = aarch64_guard_switch_pstate_sm (IP0_REGNUM,
 						  AARCH64_ISA_MODE_SM_OFF);
@@ -33629,7 +33629,7 @@ aarch64_switch_pstate_sm_for_call (rtx_call_insn *call)
   /* Switch mode before the call, preserving any argument registers
      across the switch.  */
   start_sequence ();
-  rtx_insn *args_guard_label = nullptr;
+  rtx_code_label *args_guard_label = nullptr;
   if (TARGET_STREAMING_COMPATIBLE)
     args_guard_label = aarch64_guard_switch_pstate_sm (IP0_REGNUM,
 						       callee_isa_mode);
@@ -33649,7 +33649,7 @@ aarch64_switch_pstate_sm_for_call (rtx_call_insn *call)
   /* Switch mode after the call, preserving any return registers across
      the switch.  */
   start_sequence ();
-  rtx_insn *return_guard_label = nullptr;
+  rtx_code_label *return_guard_label = nullptr;
   if (TARGET_STREAMING_COMPATIBLE)
     return_guard_label = aarch64_guard_switch_pstate_sm (IP0_REGNUM,
 							 callee_isa_mode);
@@ -34059,10 +34059,10 @@ aarch64_expand_fp_spaceship (rtx dest, rtx op0, rtx op1, rtx hint)
 
   if (hint == const0_rtx)
     {
-      rtx un_label = gen_label_rtx ();
-      rtx lt_label = gen_label_rtx ();
-      rtx gt_label = gen_label_rtx ();
-      rtx end_label = gen_label_rtx ();
+      rtx_code_label *un_label = gen_label_rtx ();
+      rtx_code_label *lt_label = gen_label_rtx ();
+      rtx_code_label *gt_label = gen_label_rtx ();
+      rtx_code_label *end_label = gen_label_rtx ();
 
       rtx temp = gen_rtx_IF_THEN_ELSE (VOIDmode, cc_un,
 			gen_rtx_LABEL_REF (Pmode, un_label), pc_rtx);

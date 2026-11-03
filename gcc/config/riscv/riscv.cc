@@ -3149,7 +3149,7 @@ riscv_load_store_insns (rtx mem, rtx_insn *insn)
    how to force Pmode objects into the constant pool even when the
    constant pool address is not itself legitimate.  */
 
-rtx
+rtx_insn *
 riscv_emit_move (rtx dest, rtx src)
 {
   return (can_create_pseudo_p ()
@@ -9296,13 +9296,9 @@ riscv_elf_select_rtx_section (machine_mode mode, rtx x,
 static void
 riscv_set_frame_expr (rtx frame_pattern)
 {
-  rtx insn;
-
-  insn = get_last_insn ();
+  rtx_insn *insn = get_last_insn ();
   RTX_FRAME_RELATED_P (insn) = 1;
-  REG_NOTES (insn) = alloc_EXPR_LIST (REG_FRAME_RELATED_EXPR,
-				      frame_pattern,
-				      REG_NOTES (insn));
+  add_reg_note (insn, REG_FRAME_RELATED_EXPR, frame_pattern);
 }
 
 /* Return a frame-related rtx that stores REG at MEM.
@@ -9883,7 +9879,7 @@ riscv_save_reg (rtx reg, rtx mem)
 static void
 riscv_restore_reg (rtx reg, rtx mem)
 {
-  rtx insn = riscv_emit_move (reg, mem);
+  rtx_insn *insn = riscv_emit_move (reg, mem);
   rtx dwarf = NULL_RTX;
   dwarf = alloc_reg_note (REG_CFA_RESTORE, reg, dwarf);
 
@@ -10098,7 +10094,7 @@ riscv_for_each_saved_v_reg (poly_int64 &remaining_size,
       else
 	{
 	  vlen = RISCV_PROLOGUE_TEMP (Pmode);
-	  rtx insn
+	  rtx_insn *insn
 	    = emit_move_insn (vlen, gen_int_mode (UNITS_PER_V_REG, Pmode));
 	  RTX_FRAME_RELATED_P (insn) = 1;
 	}
@@ -10117,7 +10113,7 @@ riscv_for_each_saved_v_reg (poly_int64 &remaining_size,
 	    bool handle_reg = !cfun->machine->reg_is_wrapped_separately[regno];
 	    if (handle_reg)
 	      {
-		rtx insn = NULL_RTX;
+		rtx_insn *insn = nullptr;
 		if (CONST_INT_P (vlen))
 		  {
 		    gcc_assert (SMALL_OPERAND (-INTVAL (vlen)));
@@ -10146,7 +10142,7 @@ riscv_for_each_saved_v_reg (poly_int64 &remaining_size,
 	    if (handle_reg)
 	      {
 		riscv_save_restore_reg (m1_mode, regno, 0, fn);
-		rtx insn = emit_insn (
+		rtx_insn *insn = emit_insn (
 		  gen_add3_insn (stack_pointer_rtx, stack_pointer_rtx, vlen));
 		gcc_assert (insn != NULL_RTX);
 		RTX_FRAME_RELATED_P (insn) = 1;
@@ -10346,7 +10342,7 @@ riscv_allocate_and_probe_stack_loop (rtx tmp, enum rtx_code code,
   tmp = riscv_force_temporary (tmp, gen_int_mode (offset, Pmode));
 
   /* Loop.  */
-  rtx label = gen_label_rtx ();
+  rtx_code_label *label = gen_label_rtx ();
   emit_label (label);
 
   /* Allocate and probe stack.  */
@@ -10373,7 +10369,8 @@ riscv_v_adjust_scalable_frame (rtx target, poly_int64 offset, bool epilogue)
 {
   rtx tmp = RISCV_PROLOGUE_TEMP (Pmode);
   rtx adjust_size = RISCV_PROLOGUE_TEMP2 (Pmode);
-  rtx insn, dwarf, adjust_frame_rtx;
+  rtx dwarf, adjust_frame_rtx;
+  rtx_insn *insn;
 
   riscv_legitimize_poly_move (Pmode, adjust_size, tmp,
 			      gen_int_mode (offset, Pmode));
@@ -10434,12 +10431,13 @@ riscv_v_adjust_scalable_frame (rtx target, poly_int64 offset, bool epilogue)
       return;
     }
 
+  rtx pat;
   if (epilogue)
-    insn = gen_add3_insn (target, target, adjust_size);
+    pat = gen_add3_insn (target, target, adjust_size);
   else
-    insn = gen_sub3_insn (target, target, adjust_size);
+    pat = gen_sub3_insn (target, target, adjust_size);
 
-  insn = emit_insn (insn);
+  insn = emit_insn (pat);
 
   RTX_FRAME_RELATED_P (insn) = 1;
 
@@ -10583,7 +10581,8 @@ riscv_allocate_and_probe_stack_space (rtx temp1, HOST_WIDE_INT size)
       /* Compute the ending address.  */
       rtx temp2 = gen_rtx_REG (Pmode, RISCV_PROLOGUE_TEMP2_REGNUM);
       temp2 = riscv_force_temporary (temp2, gen_int_mode (rounded_size, Pmode));
-      insn = emit_insn (gen_sub3_insn (temp2, stack_pointer_rtx, temp2));
+      rtx_insn *insn
+	= emit_insn (gen_sub3_insn (temp2, stack_pointer_rtx, temp2));
 
       /* The size does not represent actual stack pointer address shift
 	 from the top of the frame, as it might be lowered before.
@@ -10884,7 +10883,7 @@ static void
 riscv_gen_multi_pop_insn (bool use_popret, unsigned mask,
 			  unsigned multipop_size)
 {
-  rtx insn;
+  rtx_insn *insn;
   unsigned regs_count = riscv_multi_push_regs_count (mask);
 
   if (!use_popret)
@@ -10931,7 +10930,7 @@ riscv_expand_epilogue (int style)
   rtx ra = gen_rtx_REG (Pmode, RETURN_ADDR_REGNUM);
   rtx t0 = gen_rtx_REG (Pmode, RISCV_PROLOGUE_TEMP_REGNUM);
   unsigned th_int_mask = 0;
-  rtx insn;
+  rtx_insn *insn;
 
   /* Avoid referencing an unused frame pointer.  */
   rtx stack_tie_reg = frame_pointer_needed
@@ -15112,23 +15111,39 @@ riscv_expand_ustrunc (rtx dest, rtx src)
   gcc_assert (precision < 64);
 
   uint64_t max = ((uint64_t)1u << precision) - 1u;
-  rtx xmode_src = riscv_extend_to_xmode_reg (src, GET_MODE (src), ZERO_EXTEND);
   rtx xmode_dest = gen_reg_rtx (Xmode);
-  rtx xmode_lt = gen_reg_rtx (Xmode);
 
   /* Step-1: max = half truncated max  */
   emit_move_insn (xmode_max, gen_int_mode (max, Xmode));
 
-  /* Step-2: lt = src < max  */
-  riscv_emit_binary (LTU, xmode_lt, xmode_src, xmode_max);
+  /* When possible, emit UMIN based sequence.  It's inherently smaller and more
+     and by being smaller may allow combine to work better as a bonus.  */
+  if (TARGET_ZBB)
+    {
+      machine_mode smode = GET_MODE (src);
+      rtx xmode_src
+	= riscv_extend_to_xmode_reg (src, smode,
+				     (smode == SImode
+				      ? SIGN_EXTEND
+				      : ZERO_EXTEND));
+      riscv_emit_binary (UMIN, xmode_dest, xmode_src, xmode_max);
+    }
+  else
+    {
+      rtx xmode_src = riscv_extend_to_xmode_reg (src, GET_MODE (src), ZERO_EXTEND);
+      rtx xmode_lt = gen_reg_rtx (Xmode);
 
-  /* Step-3: lt = lt - 1  */
-  riscv_emit_binary (PLUS, xmode_lt, xmode_lt, CONSTM1_RTX (Xmode));
+      /* Step-2: lt = src < max  */
+      riscv_emit_binary (LTU, xmode_lt, xmode_src, xmode_max);
 
-  /* Step-4: xmode_dest = lt | src  */
-  riscv_emit_binary (IOR, xmode_dest, xmode_lt, xmode_src);
+      /* Step-3: lt = lt - 1  */
+      riscv_emit_binary (PLUS, xmode_lt, xmode_lt, CONSTM1_RTX (Xmode));
 
-  /* Step-5: dest = xmode_dest  */
+      /* Step-4: xmode_dest = lt | src  */
+      riscv_emit_binary (IOR, xmode_dest, xmode_lt, xmode_src);
+    }
+
+  /* Final: dest = xmode_dest  */
   emit_move_insn (dest, gen_lowpart (mode, xmode_dest));
 }
 

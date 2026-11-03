@@ -3459,7 +3459,7 @@ extern rtx_insn *emit_clobber (rtx);
 extern rtx_insn *gen_use (rtx);
 extern rtx_insn *emit_use (rtx);
 extern rtx_insn *make_insn_raw (rtx);
-extern void add_function_usage_to (rtx, rtx);
+extern void add_function_usage_to (rtx_insn *, rtx);
 extern rtx_call_insn *last_call_insn (void);
 extern rtx_insn *previous_insn (rtx_insn *);
 extern rtx_insn *next_insn (rtx_insn *);
@@ -3762,14 +3762,14 @@ extern void note_stores (const rtx_insn *,
 extern void note_uses (rtx *, void (*) (rtx *, void *), void *);
 extern bool dead_or_set_p (const rtx_insn *, const_rtx);
 extern bool dead_or_set_regno_p (const rtx_insn *, unsigned int);
-extern rtx find_reg_note (const_rtx, enum reg_note, const_rtx);
-extern rtx find_regno_note (const_rtx, enum reg_note, unsigned int);
-extern rtx find_reg_equal_equiv_note (const_rtx);
+extern rtx find_reg_note (const rtx_insn *, enum reg_note, const_rtx);
+extern rtx find_regno_note (const rtx_insn *, enum reg_note, unsigned int);
+extern rtx find_reg_equal_equiv_note (const rtx_insn *);
 extern rtx find_constant_src (const rtx_insn *);
-extern bool find_reg_fusage (const_rtx, enum rtx_code, const_rtx);
-extern bool find_regno_fusage (const_rtx, enum rtx_code, unsigned int);
+extern bool find_reg_fusage (const rtx_insn *, enum rtx_code, const_rtx);
+extern bool find_regno_fusage (const rtx_insn *, enum rtx_code, unsigned int);
 extern rtx alloc_reg_note (enum reg_note, rtx, rtx);
-extern void add_reg_note (rtx, enum reg_note, rtx);
+extern void add_reg_note (rtx_insn *, enum reg_note, rtx);
 extern void add_int_reg_note (rtx_insn *, enum reg_note, int);
 extern void add_args_size_note (rtx_insn *, poly_int64);
 extern void add_shallow_copy_of_reg_note (rtx_insn *, rtx);
@@ -3783,13 +3783,13 @@ extern bool volatile_insn_p (const_rtx);
 extern bool may_trap_p_1 (const_rtx, unsigned);
 extern bool may_trap_p (const_rtx);
 extern bool may_trap_or_fault_p (const_rtx);
-extern bool can_throw_internal (const_rtx);
-extern bool can_throw_external (const_rtx);
-extern bool insn_could_throw_p (const_rtx);
-extern bool insn_nothrow_p (const_rtx);
+extern bool can_throw_internal (const rtx_insn *);
+extern bool can_throw_external (const rtx_insn *);
+extern bool insn_could_throw_p (const rtx_insn *);
+extern bool insn_nothrow_p (const rtx_insn *);
 extern bool can_nonlocal_goto (const rtx_insn *);
-extern void copy_reg_eh_region_note_forward (rtx, rtx_insn *, rtx);
-extern void copy_reg_eh_region_note_backward (rtx, rtx_insn *, rtx);
+extern void copy_reg_eh_region_note_forward (rtx, rtx_insn *, rtx_insn *);
+extern void copy_reg_eh_region_note_backward (rtx, rtx_insn *, rtx_insn *);
 extern rtx replace_rtx (rtx, rtx, rtx, bool = false);
 extern void replace_label (rtx *, rtx_insn *, rtx_insn *, bool);
 extern void replace_label_in_insn (rtx_insn *, rtx_insn *, rtx_insn *, bool);
@@ -4708,7 +4708,8 @@ extern location_t curr_insn_location (void);
 extern void set_insn_locations (rtx_insn *, location_t);
 
 /* rtl-error.cc */
-extern void _fatal_insn_not_found (const_rtx, const char *, int, const char *)
+extern void _fatal_insn_not_found (const rtx_insn *, const char *, int,
+				   const char *)
      ATTRIBUTE_NORETURN ATTRIBUTE_COLD;
 extern void _fatal_insn (const char *, const_rtx, const char *, int, const char *)
      ATTRIBUTE_NORETURN ATTRIBUTE_COLD;

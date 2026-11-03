@@ -491,7 +491,7 @@ static int min_labelno, max_labelno;
 /* For the benefit of port specific code do this also as a function.  */
 
 align_flags
-label_to_alignment (rtx label)
+label_to_alignment (rtx_insn *label)
 {
   if (CODE_LABEL_NUMBER (label) <= max_labelno)
     return LABEL_TO_ALIGNMENT (label);
@@ -948,7 +948,8 @@ shorten_branches (rtx_insn *first)
 
       for (insn = first; insn != 0; insn = NEXT_INSN (insn))
 	{
-	  rtx min_lab = NULL_RTX, max_lab = NULL_RTX, pat;
+	  rtx_insn *min_lab = nullptr, *max_lab = nullptr;
+	  rtx pat;
 	  int len, i, min, max, insn_shuid;
 	  int min_align;
 	  addr_diff_vec_flags flags;
@@ -962,7 +963,7 @@ shorten_branches (rtx_insn *first)
 	  min_align = MAX_CODE_ALIGN;
 	  for (min = max_shuid, max = min_shuid, i = len - 1; i >= 0; i--)
 	    {
-	      rtx lab = XEXP (XVECEXP (pat, 1, i), 0);
+	      rtx_insn *lab = label_ref_label (XVECEXP (pat, 1, i));
 	      int shuid = INSN_SHUID (lab);
 	      if (shuid < min)
 		{
@@ -982,7 +983,7 @@ shorten_branches (rtx_insn *first)
 	  XEXP (pat, 2) = gen_rtx_LABEL_REF (Pmode, min_lab);
 	  XEXP (pat, 3) = gen_rtx_LABEL_REF (Pmode, max_lab);
 	  insn_shuid = INSN_SHUID (insn);
-	  rel = INSN_SHUID (XEXP (XEXP (pat, 0), 0));
+	  rel = INSN_SHUID (label_ref_label (XEXP (pat, 0)));
 	  memset (&flags, 0, sizeof (flags));
 	  flags.min_align = min_align;
 	  flags.base_after_vec = rel > insn_shuid;
