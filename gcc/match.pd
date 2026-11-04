@@ -1611,6 +1611,38 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
             { wide_int_to_tree (type,
 				wi::lshift (wone, wi::to_wide (@2))); }))))
 
+/* PR126644: A << N >> N -> A, for signed type A
+
+   For signed types we need to preserve the existing sign bit for
+   all possible values A might have.  Otherwise we can have an
+   originally positive A (no sign bit), A << N ends up setting
+   the sign bit (i.e. it's a negative number now) and now
+   (A << N) >> N becomes an arithmetic shift that will preserve
+   the sign bit.  And vice-versa if A has a sign bit and we ended
+   up clearing it.
+
+   We're not covering the unsigned case because it is already
+   covered by the existing "(x << c) >> c -> x & ((unsigned)-1 >> c)"
+   pattern, transforming it into a bit_and during 'original'.  */
+(simplify
+ (rshift (lshift@0 @A INTEGER_CST@N) @N)
+  (if (INTEGRAL_TYPE_P (type)
+       && !TYPE_UNSIGNED (type)
+       && tree_fits_uhwi_p (@N)
+       && tree_to_uhwi (@N) < TYPE_PRECISION (type)
+       && single_use (@0))
+   (with {
+      unsigned int prec = TYPE_PRECISION (type);
+      wide_int mask = wi::mask (prec - (tree_to_uhwi (@N) + 1),
+				true, prec);
+    }
+    /* get_nonzero_bits returns '0' for each bit we are certain
+       to be zero.  get_known_nonzero_bits returns '1' for each
+       bit we know to be one.  */
+    (if ((get_nonzero_bits (@A) & mask) == 0
+	 || (get_known_nonzero_bits (@A) & mask) == mask)
+     @A))))
+
 /* Fold (-x >> C) into -(x > 0) where C = precision(type) - 1.  */
 (for cst (INTEGER_CST VECTOR_CST)
  (simplify
@@ -7232,6 +7264,32 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 	  && ((op == PLUS_EXPR && wi::eq_p (wi::neg (c2), c1))
 	       || (op == BIT_AND_EXPR && wi::eq_p (wi::bit_not (c2), c1))))
 	  (bit_xor @0 @1)))))
+
+/* PR115547: (X ^ Y) & (X | Y) -> (X ^ Y).  */
+(simplify
+ (bit_and:c (bit_xor@0 @X @Y) (bit_ior @X @Y))
+ @0)
+
+/* PR115547: (X NE Y) & (X | Y) -> (X NE Y)
+   Variant from above when X and Y are booleans/zero_one.  */
+(simplify
+ (bit_and:c (ne zero_one_valued_p@X zero_one_valued_p@Y)
+	    (bit_ior @X @Y))
+ (ne @X @Y))
+
+/* PR115547:
+   (X ^ Y) & (Z | X | Y) -> (X ^ Y)
+   (X NE Y) & (Z | X | Y) -> (X NE Y)
+
+   For X, Y and Z being booleans/zero_one values.  */
+(for op (bit_xor ne)
+ (simplify
+  (bit_and:c
+    (op:c@0 zero_one_valued_p@X zero_one_valued_p@Y)
+    (bit_ior:c @Y (bit_ior:c zero_one_valued_p@Z @X)))
+   (if (op == BIT_XOR_EXPR)
+    @0
+   (ne @X @Y))))
 
 (simplify
  (convert (cond@0 @1 INTEGER_CST@2 INTEGER_CST@3))

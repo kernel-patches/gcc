@@ -2,7 +2,7 @@
 # aclocal && autoconf && autoheader && automake
 
 AC_INIT([GNU Fortran Runtime Library], 0.3,,[libgfortran])
-AC_CONFIG_HEADER(config.h)
+AC_CONFIG_HEADERS([config.h])
 GCC_TOPLEV_SUBDIRS
 
 # -------
@@ -286,6 +286,7 @@ AC_SUBST(extra_ldflags_libgfortran)
 LIBGFOR_WORKING_GFORTRAN
 
 AC_SYS_LARGEFILE
+LIBGFOR_CHECK_TIME_BITS64
 
 # Types
 AC_TYPE_OFF_T
