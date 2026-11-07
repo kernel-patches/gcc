@@ -4171,6 +4171,20 @@ gfc_conv_concat_op (gfc_se * se, gfc_expr * expr)
   se->string_length = len;
 }
 
+
+/* Return the variable that E puts in parentheses, or NULL.  */
+
+static gfc_expr *
+parenthesized_variable (gfc_expr *e)
+{
+  if (e->expr_type == EXPR_OP
+      && e->value.op.op == INTRINSIC_PARENTHESES
+      && e->value.op.op1->expr_type == EXPR_VARIABLE)
+    return e->value.op.op1;
+  return NULL;
+}
+
+
 /* Translates an op expression. Common (binary) cases are handled by this
    function, others are passed on. Recursion is used in either case.
    We use the fact that (op1.ts == op2.ts) (except for the power
@@ -8541,11 +8555,13 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
 	 procedures, and array arguments with descriptor to non-elemental
 	 procedures.  As bounds information for descriptorless arrays is no
 	 longer available here, they are dealt with in trans-array.cc
-	 (gfc_conv_array_parameter).  */
+	 (gfc_conv_array_parameter).  A derived-type temporary for a
+	 parenthesized variable shares the components of the variable.  */
       if (e && (e->ts.type == BT_DERIVED || e->ts.type == BT_CLASS)
 	    && e->ts.u.derived->attr.alloc_comp
 	    && (e->rank == 0 || elemental_proc || !nodesc_arg)
-	    && !expr_may_alias_variables (e, elemental_proc))
+	    && !expr_may_alias_variables (e, elemental_proc)
+	    && !(e->ts.type == BT_DERIVED && parenthesized_variable (e)))
 	{
 	  int parm_rank;
 	  /* It is known the e returns a structure type with at least one
@@ -8593,9 +8609,7 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
 		}
 	    }
 
-	  if (e->expr_type == EXPR_OP
-		&& e->value.op.op == INTRINSIC_PARENTHESES
-		&& e->value.op.op1->expr_type == EXPR_VARIABLE)
+	  if (parenthesized_variable (e))
 	    {
 	      tree local_tmp;
 	      local_tmp = gfc_evaluate_now (tmp, &se->pre);
@@ -8937,7 +8951,56 @@ gfc_conv_procedure_call (gfc_se * se, gfc_symbol * sym,
 
 	  vec_safe_push (stringargs, offset);
 	}
+     else if (e && gfc_pdt_requires_hidden_arg (fsym))
+	{
+	  gfc_actual_arglist *parms;
+	  tree hidden_pdt;
+	  gfc_symbol *derived;
 
+	  /* Build a temporary of the declared type.  */
+	  if (IS_CLASS_PDT (e))
+	    {
+	      tmp = gfc_typenode_for_spec (&CLASS_DATA (e)->ts);
+	      hidden_pdt = gfc_create_var (tmp, "pdt");
+	      derived = CLASS_DATA (e)->ts.u.derived;
+	    }
+	  else
+	    {
+	      tmp = gfc_typenode_for_spec (&e->ts);
+	      hidden_pdt = gfc_create_var (tmp, "pdt");
+	      derived = e->ts.u.derived;
+	    }
+
+	  /* Obtain the PDT parameter list.  */
+	  parms = e->param_list ? e->param_list :
+				  e->symtree->n.sym->param_list;
+
+	  if (gfc_spec_list_type (parms, derived) == SPEC_EXPLICIT)
+	    {
+	      /* If all the parameters are explcit, build the hidden PDT...  */
+	      tmp = gfc_allocate_pdt_comp (derived, hidden_pdt,
+					   0, parms);
+	      gfc_add_expr_to_block (&se->pre, tmp);
+	      tmp = gfc_build_addr_expr (NULL_TREE, hidden_pdt);
+	      vec_safe_push (stringargs, tmp);
+	      /* ...and deallocate it after the calls.  */
+	      tmp = gfc_deallocate_pdt_comp (derived,
+					     hidden_pdt, 0);
+	      gfc_add_expr_to_block (&se->post, tmp);
+	    }
+	  else if (e->expr_type == EXPR_VARIABLE
+		   && e->symtree->n.sym->attr.dummy
+		   && e->symtree->n.sym->hidden_pdt_dummy_decl != NULL_TREE)
+	    /* Otherwise hope that this was a dummy with a hidden arg.  */
+	    vec_safe_push (stringargs,
+			   e->symtree->n.sym->hidden_pdt_dummy_decl);
+	  else
+	    {
+	      /* Or else just add it without the parameter set here.  */
+	      tmp = gfc_build_addr_expr (NULL_TREE, hidden_pdt);
+	      vec_safe_push (stringargs, tmp);
+	    }
+	}
       vec_safe_push (arglist, parmse.expr);
     }
 
