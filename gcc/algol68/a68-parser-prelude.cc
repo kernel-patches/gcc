@@ -357,6 +357,66 @@ stand_moids (void)
   SLICE (M_ROW_SIMPLOUT) = M_SIMPLOUT;
 }
 
+/* Enter GNU extended modes in standenv.  */
+static void
+gnu_moids (void)
+{
+  /* First, create the extended modes in the M_* globals.  These are necessary
+     even if we are building in strict mode. */
+
+  MOID_T *m = NO_MOID;
+
+  a68_mode (100, "INT", &M_WORD_INT);
+  a68_mode (100, "BITS", &M_WORD_BITS);
+  a68_mode (100, "BYTES", &M_WORD_BYTES);
+  a68_mode (100, "REAL", &M_WORD_REAL);
+
+  a68_mode (100, "COMPL", &M_WORD_COMPLEX);
+  PACK_T *z = NO_PACK;
+  (void) a68_add_mode_to_pack (&z, M_WORD_REAL,
+			       TEXT (a68_add_token (&A68 (top_token), "im")),
+			       NO_NODE);
+  (void) a68_add_mode_to_pack (&z, M_WORD_REAL,
+			       TEXT (a68_add_token (&A68 (top_token), "re")),
+			       NO_NODE);
+  m = a68_add_mode (&TOP_MOID (&A68_JOB), STRUCT_SYMBOL,
+		    a68_count_pack_members (z), NO_NODE, NO_MOID, z);
+  EQUIVALENT (M_WORD_COMPLEX) = m;
+
+  M_REF_WORD_INT = a68_create_mode (REF_SYMBOL, 0, NO_NODE,
+				    M_WORD_INT, NO_PACK);
+  M_REF_WORD_REAL = a68_create_mode (REF_SYMBOL, 0, NO_NODE,
+				     M_WORD_REAL, NO_PACK);
+  M_REF_WORD_COMPLEX = a68_create_mode (REF_SYMBOL, 0, NO_NODE,
+					M_WORD_COMPLEX, NO_PACK);
+  z = NO_PACK;
+  (void) a68_add_mode_to_pack (&z, M_REF_WORD_REAL,
+			       TEXT (a68_add_token (&A68 (top_token), "im")),
+			       NO_NODE);
+  (void) a68_add_mode_to_pack (&z, M_REF_WORD_REAL,
+			       TEXT (a68_add_token (&A68 (top_token), "re")),
+			       NO_NODE);
+  m = a68_add_mode (&TOP_MOID (&A68_JOB),
+		    STRUCT_SYMBOL, a68_count_pack_members (z),
+		    NO_NODE, NO_MOID, z);
+  NAME (M_REF_WORD_COMPLEX) = m;
+
+  /* Make the extended modes visible only if we are not in strict Algol 68
+     mode.  */
+
+  if (!OPTION_STRICT (&A68_JOB))
+    {
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_WORD_INT);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_WORD_BITS);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_WORD_BYTES);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_WORD_REAL);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_WORD_COMPLEX);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_REF_WORD_INT);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_REF_WORD_REAL);
+      a68_register_extra_mode (&TOP_MOID (&A68_JOB), M_REF_WORD_COMPLEX);
+    }
+}
+
 /* Set up standenv - general RR including transput.  */
 
 static void
@@ -1220,41 +1280,6 @@ static void
 gnu_prelude (void)
 {
   MOID_T *m = NO_MOID;
-  /* Modes.  */
-  a68_mode (100, "INT", &M_WORD_INT);
-  a68_mode (100, "BITS", &M_WORD_BITS);
-  a68_mode (100, "BYTES", &M_WORD_BYTES);
-  a68_mode (100, "REAL", &M_WORD_REAL);
-
-  a68_mode (100, "COMPL", &M_WORD_COMPLEX);
-  PACK_T *z = NO_PACK;
-  (void) a68_add_mode_to_pack (&z, M_WORD_REAL,
-			       TEXT (a68_add_token (&A68 (top_token), "im")),
-			       NO_NODE);
-  (void) a68_add_mode_to_pack (&z, M_WORD_REAL,
-			       TEXT (a68_add_token (&A68 (top_token), "re")),
-			       NO_NODE);
-  m = a68_add_mode (&TOP_MOID (&A68_JOB), STRUCT_SYMBOL,
-		    a68_count_pack_members (z), NO_NODE, NO_MOID, z);
-  EQUIVALENT (M_WORD_COMPLEX) = m;
-
-  M_REF_WORD_INT = a68_add_mode (&TOP_MOID (&A68_JOB), REF_SYMBOL, 0, NO_NODE,
-				 M_WORD_INT, NO_PACK);
-  M_REF_WORD_REAL = a68_add_mode (&TOP_MOID (&A68_JOB), REF_SYMBOL, 0, NO_NODE,
-				  M_WORD_REAL, NO_PACK);
-
-  M_REF_WORD_COMPLEX = a68_add_mode (&TOP_MOID (&A68_JOB), REF_SYMBOL, 0, NO_NODE,
-				     M_WORD_COMPLEX, NO_PACK);
-  z = NO_PACK;
-  (void) a68_add_mode_to_pack (&z, M_REF_WORD_REAL,
-			       TEXT (a68_add_token (&A68 (top_token), "im")),
-			       NO_NODE);
-  (void) a68_add_mode_to_pack (&z, M_REF_WORD_REAL,
-			       TEXT (a68_add_token (&A68 (top_token), "re")),
-			       NO_NODE);
-  m = a68_add_mode (&TOP_MOID (&A68_JOB), STRUCT_SYMBOL, a68_count_pack_members (z),
-		    NO_NODE, NO_MOID, z);
-  NAME (M_REF_WORD_COMPLEX) = m;
 
   /* Priorities.  */
   a68_prio ("ELEMS", 8);
@@ -1375,6 +1400,16 @@ gnu_prelude (void)
   m = a68_proc (M_WORD_INT, M_WORD_INT, M_INT, NO_MOID);
   a68_op (A68_EXT, "**", m, a68_lower_pow_int);
   a68_op (A68_EXT, "^", m, a68_lower_pow_int);
+  m = a68_proc (M_WORD_INT, M_SHORT_SHORT_INT, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
+  m = a68_proc (M_WORD_INT, M_SHORT_INT, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
+  m = a68_proc (M_WORD_INT, M_INT, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
+  m = a68_proc (M_WORD_INT, M_LONG_INT, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
+  m = a68_proc (M_WORD_INT, M_LONG_LONG_INT, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
   /* SHORT SHORT BITS operators.  */
   m = a68_proc (M_SHORT_SHORT_BITS, M_SHORT_SHORT_BITS, M_INT, NO_MOID);
   a68_op (A68_EXT, "SET", m, a68_lower_set3);
@@ -1438,6 +1473,16 @@ gnu_prelude (void)
   a68_op (A68_EXT, "CLEAR", m, a68_lower_clear3);
   m = a68_proc (M_BOOL, M_WORD_BITS, M_INT, NO_MOID);
   a68_op (A68_EXT, "TEST", m, a68_lower_test3);
+  m = a68_proc (M_WORD_BITS, M_SHORT_SHORT_BITS, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenint2);
+  m = a68_proc (M_WORD_BITS, M_SHORT_BITS, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenint2);
+  m = a68_proc (M_WORD_BITS, M_BITS, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenint2);
+  m = a68_proc (M_WORD_BITS, M_LONG_BITS, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenint2);
+  m = a68_proc (M_WORD_BITS, M_LONG_LONG_BITS, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenint2);
   /* REAL operators.  */
   m = a68_proc (M_INT, M_REAL, NO_MOID);
   a68_op (A68_EXT, "FLOOR", m, a68_lower_entier2);
@@ -1490,6 +1535,12 @@ gnu_prelude (void)
   m = a68_proc (M_WORD_REAL, M_WORD_REAL, M_INT, NO_MOID);
   a68_op (A68_EXT, "**", m, a68_lower_pow_real);
   a68_op (A68_EXT, "^", m, a68_lower_pow_real);
+  m = a68_proc (M_WORD_REAL, M_REAL, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
+  m = a68_proc (M_WORD_REAL, M_LONG_REAL, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
+  m = a68_proc (M_WORD_REAL, M_LONG_LONG_REAL, NO_MOID);
+  a68_op (A68_EXT, "WORDEN", m, a68_lower_wordenreal2);
   /* WORD COMPLEX  operators */
   m = a68_proc (M_WORD_COMPLEX, M_WORD_INT, M_WORD_INT, NO_MOID);
   a68_op (A68_STD, "I", m, a68_lower_wordinti);
@@ -1529,6 +1580,11 @@ gnu_prelude (void)
   a68_op (A68_STD, "MINUSAB", m);
   a68_op (A68_STD, "TIMESAB", m);
   a68_op (A68_STD, "DIVAB", m);
+
+  /* Load Algol 68 parts.  */
+  if (!flag_building_libga68)
+    a68_extract_revelation (A68_STANDENV, LINE (INFO (TOP_NODE (&A68_JOB))),
+			    "GNU", "ga68");
 }
 
 /* POSIX prelude.  */
@@ -1545,6 +1601,8 @@ void
 a68_make_standard_environ (void)
 {
   stand_moids ();
+  gnu_moids ();
+
   A68_MCACHE (proc_bool) = a68_proc (M_BOOL, NO_MOID);
   A68_MCACHE (proc_char) = a68_proc (M_CHAR, NO_MOID);
   A68_MCACHE (proc_complex_complex) = a68_proc (M_COMPLEX, M_COMPLEX, NO_MOID);
@@ -1565,6 +1623,7 @@ a68_make_standard_environ (void)
   A68_MCACHE (proc_real_real_real_real_real_real) = a68_proc (M_REAL, M_REAL, M_REAL, M_REAL, M_REAL, M_REAL, NO_MOID);
   A68_MCACHE (proc_real_ref_real_ref_int_void) = a68_proc (M_VOID, M_REAL, M_REF_REAL, M_REF_INT, NO_MOID);
   A68_MCACHE (proc_void) = a68_proc (M_VOID, NO_MOID);
+
   stand_prelude ();
   if (!OPTION_STRICT (&A68_JOB))
     {
