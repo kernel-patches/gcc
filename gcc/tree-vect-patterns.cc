@@ -1235,9 +1235,10 @@ vect_recog_cond_expr_convert_pattern (vec_info *vinfo,
      [S6  prod = (TYPE2) prod;  #optional]
      S7  sum_1 = prod + sum_0;
 
-   where 'TYPE1' is exactly double the size of type 'type1a' and 'type1b',
-   the sign of 'TYPE1' must be one of 'type1a' or 'type1b' but the sign of
-   'type1a' and 'type1b' can differ.
+   For integer reductions, 'TYPE1' is exactly double the size of 'type1a'
+   and 'type1b', and its sign must match one of them.  Floating-point
+   reductions require matching input types at most half the width of TYPE1,
+   with the inputs converted before multiplication, and TYPE2 the same as TYPE1.
 
    Input:
 
@@ -1278,8 +1279,8 @@ vect_recog_dot_prod_pattern (vec_info *vinfo,
           DDPROD = (TYPE2) DPROD;
           sum_1 = DDPROD + sum_0;
      In which
-     - DX is double the size of X
-     - DY is double the size of Y
+     - DX and DY are at least twice as wide as X and Y (exactly twice for
+       integers).
      - DX, DY, DPROD all have the same type but the sign
        between X, Y and DPROD can differ.
      - sum is the same size of DPROD or bigger
@@ -1302,32 +1303,67 @@ vect_recog_dot_prod_pattern (vec_info *vinfo,
 
   type = TREE_TYPE (gimple_get_lhs (last_stmt));
 
+  /* So far so good.  Since LAST_STMT is a summation reduction, OPRND1 is
+     the reduction variable defined by a loop-header phi.  OPRND0 is the
+     value added to it, which must come from a multiplication.  For integer
+     reductions, first look through a possible promotion of OPRND0.  */
+  bool float_p = SCALAR_FLOAT_TYPE_P (type);
+  enum optab_subtype subtype = optab_vector;
   vect_unpromoted_value unprom_mult;
-  oprnd0 = vect_look_through_possible_promotion (vinfo, oprnd0, &unprom_mult);
-
-  /* So far so good.  Since last_stmt was detected as a (summation) reduction,
-     we know that oprnd1 is the reduction variable (defined by a loop-header
-     phi), and oprnd0 is an ssa-name defined by a stmt in the loop body.
-     Left to check that oprnd0 is defined by a (widen_)mult_expr  */
-  if (!oprnd0)
+  if (!float_p)
+    oprnd0 = vect_look_through_possible_promotion (vinfo, oprnd0, &unprom_mult);
+  if (!oprnd0 || TREE_CODE (oprnd0) != SSA_NAME)
     return NULL;
 
   stmt_vec_info mult_vinfo = vect_get_internal_def (vinfo, oprnd0);
   if (!mult_vinfo)
     return NULL;
 
-  /* FORNOW.  Can continue analyzing the def-use chain when this stmt in a phi
-     inside the loop (in case we are analyzing an outer-loop).  */
+  /* FORNOW.  We could continue following the def-use chain if this statement
+     is a phi inside the loop, as when analyzing an outer loop.  */
   vect_unpromoted_value unprom0[2];
-  enum optab_subtype subtype = optab_vector;
-  if (!vect_widened_op_tree (vinfo, mult_vinfo, MULT_EXPR, WIDEN_MULT_EXPR,
-			     false, 2, unprom0, &half_type, &subtype))
+  if (float_p)
+    {
+      /* Require multiplication of two directly promoted floating-point
+	 inputs.  A product rounded before promotion is not equivalent.  */
+      gassign *mult = dyn_cast <gassign *> (mult_vinfo->stmt);
+      if (!mult || gimple_assign_rhs_code (mult) != MULT_EXPR)
+	return NULL;
+
+      for (unsigned int i = 0; i < 2; ++i)
+	{
+	  tree op = gimple_op (mult, i + 1);
+	  stmt_vec_info cast_info
+	    = (TREE_CODE (op) == SSA_NAME
+	       ? vect_get_internal_def (vinfo, op) : NULL);
+	  gassign *cast
+	    = cast_info ? dyn_cast <gassign *> (cast_info->stmt) : NULL;
+	  if (!cast || !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (cast)))
+	    return NULL;
+
+	  op = gimple_assign_rhs1 (cast);
+	  tree op_type = TREE_TYPE (op);
+	  vect_def_type dt;
+	  if (TREE_CODE (op) != SSA_NAME
+	      || !SCALAR_FLOAT_TYPE_P (op_type)
+	      || TYPE_PRECISION (op_type) * 2 > TYPE_PRECISION (type)
+	      || !vect_is_simple_use (op, vinfo, &dt))
+	    return NULL;
+	  unprom0[i].set_op (op, dt, cast_info);
+	}
+      half_type = unprom0[0].type;
+      if (!types_compatible_p (half_type, unprom0[1].type))
+	return NULL;
+    }
+  else if (!vect_widened_op_tree (vinfo, mult_vinfo, MULT_EXPR, WIDEN_MULT_EXPR,
+				false, 2, unprom0, &half_type, &subtype))
     return NULL;
 
-  /* If there are two widening operations, make sure they agree on the sign
-     of the extension.  The result of an optab_vector_mixed_sign operation
-     is signed; otherwise, the result has the same sign as the operands.  */
-  if (TYPE_PRECISION (unprom_mult.type) != TYPE_PRECISION (type)
+  /* If there are two integer widening operations, make sure they agree on
+     the sign of the extension.  The result of an optab_vector_mixed_sign
+     operation is signed; otherwise, it has the same sign as the operands.  */
+  if (!float_p
+      && TYPE_PRECISION (unprom_mult.type) != TYPE_PRECISION (type)
       && (subtype == optab_vector_mixed_sign
 	  ? TYPE_UNSIGNED (unprom_mult.type)
 	  : TYPE_SIGN (unprom_mult.type) != TYPE_SIGN (half_type)))
@@ -1963,7 +1999,26 @@ vect_recog_ctz_ffs_pattern (vec_info *vinfo, stmt_vec_info stmt_vinfo,
   if (ifnnew == IFN_LAST)
     return NULL;
 
+  /* Only .FFS (X) = .CTZ (X) + 1 can be part of a reduction, and only
+     if the result for zero needs no select.  */
+  if (vect_is_reduction (stmt_vinfo)
+      && (ifnnew != IFN_CTZ
+	  || (defined_at_zero
+	      && (!defined_at_zero_new || val != val_new + 1))))
+    return NULL;
+
   vect_pattern_detected ("vec_recog_ctz_ffs_pattern", call_stmt);
+
+  /* .CLZ, .CTZ and .POPCOUNT take an unsigned argument.  */
+  if (!TYPE_UNSIGNED (rhs_type))
+    {
+      rhs_type = unsigned_type_for (rhs_type);
+      vec_rhs_type = get_vectype_for_scalar_type (vinfo, rhs_type);
+      new_var = vect_recog_temp_ssa_var (rhs_type, NULL);
+      pattern_stmt = gimple_build_assign (new_var, NOP_EXPR, rhs_oprnd);
+      append_pattern_def_seq (vinfo, stmt_vinfo, pattern_stmt, vec_rhs_type);
+      rhs_oprnd = new_var;
+    }
 
   val_cmp = val_new;
   if ((ifnnew == IFN_CLZ
@@ -1973,25 +2028,11 @@ vect_recog_ctz_ffs_pattern (vec_info *vinfo, stmt_vec_info stmt_vinfo,
        && val_new == prec)
       || (ifnnew == IFN_POPCOUNT && ifn == IFN_CTZ))
     {
-      if (vect_is_reduction (stmt_vinfo))
-	return NULL;
-
       /* .CTZ (X) = PREC - .CLZ ((X - 1) & ~X)
 	 .CTZ (X) = .POPCOUNT ((X - 1) & ~X).  */
       if (ifnnew == IFN_CLZ)
 	sub = prec;
       val_cmp = prec;
-
-      if (!TYPE_UNSIGNED (rhs_type))
-	{
-	  rhs_type = unsigned_type_for (rhs_type);
-	  vec_rhs_type = get_vectype_for_scalar_type (vinfo, rhs_type);
-	  new_var = vect_recog_temp_ssa_var (rhs_type, NULL);
-	  pattern_stmt = gimple_build_assign (new_var, NOP_EXPR, rhs_oprnd);
-	  append_pattern_def_seq (vinfo, stmt_vinfo, pattern_stmt,
-				  vec_rhs_type);
-	  rhs_oprnd = new_var;
-	}
 
       tree m1 = vect_recog_temp_ssa_var (rhs_type, NULL);
       pattern_stmt = gimple_build_assign (m1, PLUS_EXPR, rhs_oprnd,
@@ -2014,9 +2055,6 @@ vect_recog_ctz_ffs_pattern (vec_info *vinfo, stmt_vec_info stmt_vinfo,
     }
   else if (ifnnew == IFN_CLZ)
     {
-      if (vect_is_reduction (stmt_vinfo))
-	return NULL;
-
       /* .CTZ (X) = (PREC - 1) - .CLZ (X & -X)
 	 .FFS (X) = PREC - .CLZ (X & -X).  */
       sub = prec - (ifn == IFN_CTZ);
@@ -2036,9 +2074,6 @@ vect_recog_ctz_ffs_pattern (vec_info *vinfo, stmt_vec_info stmt_vinfo,
     }
   else if (ifnnew == IFN_POPCOUNT)
     {
-      if (vect_is_reduction (stmt_vinfo))
-	return NULL;
-
       /* .CTZ (X) = PREC - .POPCOUNT (X | -X)
 	 .FFS (X) = (PREC + 1) - .POPCOUNT (X | -X).  */
       sub = prec + (ifn == IFN_FFS);
@@ -2061,11 +2096,6 @@ vect_recog_ctz_ffs_pattern (vec_info *vinfo, stmt_vec_info stmt_vinfo,
       /* .FFS (X) = .CTZ (X) + 1.  */
       add = 1;
       val_cmp++;
-
-      if (vect_is_reduction (stmt_vinfo)
-	  && defined_at_zero
-	  && (!defined_at_zero_new || val != val_cmp))
-	return NULL;
     }
 
   /* Create B = .IFNNEW (A).  */
@@ -2331,12 +2361,22 @@ vect_recog_popcount_clz_ctz_ffs_pattern (vec_info *vinfo,
 			 call_stmt);
 
   tree orig_lhs_type = lhs_type;
-  gimple *cast_stmt = NULL;
   if (!type_has_mode_precision_p (lhs_type))
+    lhs_type = TREE_TYPE (vec_type);
+  tree arg_type = (lhs_type != orig_lhs_type
+		   ? lhs_type : TREE_TYPE (unprom_diff.op));
+  /* .CLZ, .CTZ and .POPCOUNT take an unsigned argument.  */
+  if (ifn != IFN_FFS && !TYPE_UNSIGNED (arg_type))
+    arg_type = unsigned_type_for (arg_type);
+  gimple *cast_stmt = NULL;
+  tree arg_vectype = vec_type;
+  if (arg_type != TREE_TYPE (unprom_diff.op))
     {
-      lhs_type = TREE_TYPE (vec_type);
+      arg_vectype = get_vectype_for_scalar_type (vinfo, arg_type);
+      if (!arg_vectype)
+	return NULL;
       cast_stmt
-	= gimple_build_assign (vect_recog_temp_ssa_var (lhs_type, NULL),
+	= gimple_build_assign (vect_recog_temp_ssa_var (arg_type, NULL),
 			       NOP_EXPR, unprom_diff.op);
       unprom_diff.op = gimple_assign_lhs (cast_stmt);
     }
@@ -2371,6 +2411,9 @@ vect_recog_popcount_clz_ctz_ffs_pattern (vec_info *vinfo,
     dump_printf_loc (MSG_NOTE, vect_location,
 		     "created pattern stmt: %G", pattern_stmt);
 
+  if (cast_stmt && supported)
+    append_pattern_def_seq (vinfo, stmt_vinfo, cast_stmt, arg_vectype);
+
   if (addend)
     {
       gcc_assert (supported);
@@ -2388,15 +2431,13 @@ vect_recog_popcount_clz_ctz_ffs_pattern (vec_info *vinfo,
       if (pattern_stmt == NULL)
 	return NULL;
       if (cast_stmt)
-	append_pattern_def_seq (vinfo, stmt_vinfo, cast_stmt, vec_type);
+	append_pattern_def_seq (vinfo, stmt_vinfo, cast_stmt, arg_vectype);
       if (gimple_seq seq = STMT_VINFO_PATTERN_DEF_SEQ (new_stmt_info))
 	{
 	  gimple_seq *pseq = &STMT_VINFO_PATTERN_DEF_SEQ (stmt_vinfo);
 	  gimple_seq_add_seq_without_update (pseq, seq);
 	}
     }
-  else if (cast_stmt)
-    append_pattern_def_seq (vinfo, stmt_vinfo, cast_stmt, vec_type);
 
   if (zero_val)
     {
@@ -2413,7 +2454,7 @@ vect_recog_popcount_clz_ctz_ffs_pattern (vec_info *vinfo,
 				  fold_convert (lhs_type, zero_val));
     }
 
-  if (cast_stmt)
+  if (lhs_type != orig_lhs_type)
     {
       append_pattern_def_seq (vinfo, stmt_vinfo, pattern_stmt, vec_type);
       tree ret_var = vect_recog_temp_ssa_var (orig_lhs_type, NULL);

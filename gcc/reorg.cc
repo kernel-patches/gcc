@@ -187,10 +187,11 @@ static void delete_scheduled_jump (rtx_insn *);
 static void note_delay_statistics (int, int);
 static int get_jump_flags (const rtx_insn *, rtx);
 static int mostly_true_jump (rtx_insn *);
-static rtx get_branch_condition (const rtx_insn *, rtx);
-static bool condition_dominates_p (rtx, const rtx_insn *);
-static bool redirect_with_delay_slots_safe_p (rtx_insn *, rtx, rtx_insn *);
-static bool redirect_with_delay_list_safe_p (rtx_insn *, rtx,
+static rtx get_branch_condition (const rtx_jump_insn *, rtx);
+static bool condition_dominates_p (rtx, const rtx_jump_insn *);
+static bool redirect_with_delay_slots_safe_p (rtx_jump_insn *,
+					      rtx, rtx_insn *);
+static bool redirect_with_delay_list_safe_p (rtx_jump_insn *, rtx,
 					     const vec<rtx_insn *> &);
 static bool check_annul_list_true_false (bool, const vec<rtx_insn *> &);
 static void steal_delay_list_from_target (rtx_insn *, rtx, rtx_sequence *,
@@ -807,7 +808,7 @@ mostly_true_jump (rtx_insn *jump_insn)
    type of jump, or it doesn't go to TARGET, return 0.  */
 
 static rtx
-get_branch_condition (const rtx_insn *insn, rtx target)
+get_branch_condition (const rtx_jump_insn *insn, rtx target)
 {
   rtx pat = PATTERN (insn);
   rtx src;
@@ -853,7 +854,7 @@ get_branch_condition (const rtx_insn *insn, rtx target)
    INSN, i.e., if INSN will always branch if CONDITION is true.  */
 
 static bool
-condition_dominates_p (rtx condition, const rtx_insn *insn)
+condition_dominates_p (rtx condition, const rtx_jump_insn *insn)
 {
   rtx other_condition = get_branch_condition (insn, JUMP_LABEL (insn));
   enum rtx_code code = GET_CODE (condition);
@@ -879,7 +880,8 @@ condition_dominates_p (rtx condition, const rtx_insn *insn)
    any insns already in the delay slot of JUMP.  */
 
 static bool
-redirect_with_delay_slots_safe_p (rtx_insn *jump, rtx newlabel, rtx_insn *seq)
+redirect_with_delay_slots_safe_p (rtx_jump_insn *jump, rtx newlabel,
+				  rtx_insn *seq)
 {
   int flags, i;
   rtx_sequence *pat = as_a <rtx_sequence *> (PATTERN (seq));
@@ -911,7 +913,7 @@ redirect_with_delay_slots_safe_p (rtx_insn *jump, rtx newlabel, rtx_insn *seq)
    any insns we wish to place in the delay slot of JUMP.  */
 
 static bool
-redirect_with_delay_list_safe_p (rtx_insn *jump, rtx newlabel,
+redirect_with_delay_list_safe_p (rtx_jump_insn *jump, rtx newlabel,
 				 const vec<rtx_insn *> &delay_list)
 {
   /* Make sure all the insns in DELAY_LIST would still be
@@ -1022,7 +1024,8 @@ steal_delay_list_from_target (rtx_insn *insn, rtx condition, rtx_sequence *seq,
     }
 
   if (XVECLEN (seq, 0) - 1 > slots_remaining
-      || ! condition_dominates_p (condition, seq->insn (0))
+      || ! condition_dominates_p (condition,
+				  as_a<rtx_jump_insn *> (seq->insn (0)))
       || ! single_set (seq->insn (0)))
     return;
 

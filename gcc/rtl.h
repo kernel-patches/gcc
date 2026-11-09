@@ -3826,7 +3826,7 @@ extern bool auto_inc_p (const_rtx);
 extern bool in_insn_list_p (const rtx_insn_list *, const rtx_insn *);
 extern void remove_node_from_insn_list (const rtx_insn *, rtx_insn_list **);
 extern bool loc_mentioned_in_p (rtx *, const_rtx);
-extern rtx_insn *find_first_parameter_load (rtx_insn *, rtx_insn *);
+extern rtx_insn *find_first_parameter_load (rtx_call_insn *, rtx_insn *);
 extern bool keep_with_call_p (const rtx_insn *);
 extern bool label_is_jump_target_p (const rtx_insn *, const rtx_insn *);
 extern int pattern_cost (rtx, bool);
@@ -4331,7 +4331,7 @@ extern bool invert_jump (rtx_jump_insn *, rtx, int);
 extern bool rtx_renumbered_equal_p (const_rtx, const_rtx);
 extern int true_regnum (const_rtx);
 extern unsigned int reg_or_subregno (const_rtx);
-extern bool redirect_jump_1 (rtx_insn *, rtx);
+extern bool redirect_jump_1 (rtx_jump_insn *, rtx);
 extern void redirect_jump_2 (rtx_jump_insn *, rtx, rtx, int, int);
 extern bool redirect_jump (rtx_jump_insn *, rtx, int);
 extern void rebuild_jump_labels (rtx_insn *);
@@ -4413,7 +4413,7 @@ extern void print_inline_rtx (FILE *, const_rtx, int);
 /* In stmt.cc */
 extern void expand_null_return (void);
 extern void expand_naked_return (void);
-extern void emit_jump (rtx);
+extern void emit_jump (rtx_code_label *);
 
 /* Memory operation built-ins differ by return value.  Mapping
    of the enum values is following:
@@ -4646,7 +4646,7 @@ extern void init_alias_target (void);
 extern void init_alias_analysis (void);
 extern void end_alias_analysis (void);
 extern void vt_equate_reg_base_value (const_rtx, const_rtx);
-extern bool memory_modified_in_insn_p (const_rtx, const_rtx);
+extern bool memory_modified_in_insn_p (const_rtx, const rtx_insn *);
 extern bool may_be_sp_based_p (rtx);
 extern rtx gen_hard_reg_clobber (machine_mode, unsigned int);
 extern rtx get_reg_known_value (unsigned int);

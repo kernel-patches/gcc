@@ -156,46 +156,53 @@ init_internal_fns ()
 
 /* Create static initializers for the information returned by
    direct_internal_fn.  */
-#define not_direct { -2, -2, false }
-#define mask_load_direct { -1, 2, false }
-#define load_lanes_direct { -1, -1, false }
-#define mask_load_lanes_direct { -1, -1, false }
-#define gather_load_direct { 3, 1, false }
-#define strided_load_direct { -1, -1, false }
-#define len_load_direct { -1, -1, false }
-#define mask_len_load_direct { -1, 4, false }
-#define mask_store_direct { 3, 2, false }
-#define store_lanes_direct { 0, 0, false }
-#define mask_store_lanes_direct { 0, 0, false }
-#define vec_cond_mask_direct { 1, 0, false }
-#define vec_cond_mask_len_direct { 1, 1, false }
-#define vec_cond_direct { 2, 0, false }
-#define scatter_store_direct { 3, 1, false }
-#define strided_store_direct { 1, 1, false }
-#define len_store_direct { 3, 3, false }
-#define mask_len_store_direct { 4, 5, false }
-#define vec_set_direct { 3, 3, false }
-#define vec_extract_direct { 0, -1, false }
-#define unary_direct { 0, 0, true }
-#define unary_convert_direct { -1, 0, true }
-#define binary_direct { 0, 0, true }
-#define ternary_direct { 0, 0, true }
-#define cond_unary_direct { 1, 1, true }
-#define cond_binary_direct { 1, 1, true }
-#define cond_ternary_direct { 1, 1, true }
-#define cond_len_unary_direct { 1, 1, true }
-#define cond_len_binary_direct { 1, 1, true }
-#define cond_len_ternary_direct { 1, 1, true }
-#define while_direct { 0, 2, false }
-#define fold_extract_direct { 2, 2, false }
-#define fold_len_extract_direct { 2, 2, false }
-#define fold_left_direct { 1, 1, false }
-#define mask_fold_left_direct { 1, 1, false }
-#define mask_len_fold_left_direct { 1, 1, false }
-#define check_ptrs_direct { 0, 0, false }
-#define crc_direct { 1, -1, true }
-#define reduc_sbool_direct { 0, 0, true }
-#define select_vl_direct { 2, 0, false }
+#define not_direct { -2, -2, false, 0, 0 }
+#define mask_load_direct { -1, 2, false, 4, 4 }
+#define load_lanes_direct { -1, -1, false, 1, 1 }
+#define mask_load_lanes_direct { -1, -1, false, 4, 4 }
+#define mask_len_load_lanes_direct { -1, -1, false, 6, 6 }
+#define gather_load_direct { 3, 1, false, 5, 5 }
+#define mask_gather_load_direct { 3, 1, false, 7, 7 }
+#define mask_len_gather_load_direct { 3, 1, false, 9, 9 }
+#define strided_load_direct { -1, -1, false, 7, 7 }
+#define len_load_direct { -1, -1, false, 5, 5 }
+#define mask_len_load_direct { -1, 4, false, 6, 6 }
+#define mask_store_direct { 3, 2, false, 4, 4 }
+#define store_lanes_direct { 0, 0, false, 1, 1 }
+#define mask_store_lanes_direct { 0, 0, false, 4, 4 }
+#define mask_len_store_lanes_direct { 0, 0, false, 6, 6 }
+#define vec_cond_mask_direct { 1, 0, false, 3, 3 }
+#define vec_cond_mask_len_direct { 1, 1, false, 5, 5 }
+#define vec_cond_direct { 2, 0, false, 5, 5 }
+#define scatter_store_direct { 3, 1, false, 5, 5 }
+#define mask_scatter_store_direct { 3, 1, false, 6, 6 }
+#define mask_len_scatter_store_direct { 3, 1, false, 8, 8 }
+#define strided_store_direct { 1, 1, false, 6, 6 }
+#define len_store_direct { 3, 3, false, 5, 5 }
+#define mask_len_store_direct { 4, 5, false, 6, 6 }
+#define vec_set_direct { 3, 3, false, 3, 3 }
+#define vec_extract_direct { 0, -1, false, 2, 2 }
+#define unary_direct { 0, 0, true, 1, 1 }
+#define unary_opt_direct { 0, 0, true, 1, 2 }
+#define unary_convert_direct { -1, 0, true, 1, 1 }
+#define binary_direct { 0, 0, true, 2, 2 }
+#define ternary_direct { 0, 0, true, 3, 3 }
+#define cond_unary_direct { 1, 1, true, 3, 3 }
+#define cond_binary_direct { 1, 1, true, 4, 4 }
+#define cond_ternary_direct { 1, 1, true, 5, 5 }
+#define cond_len_unary_direct { 1, 1, true, 5, 5 }
+#define cond_len_binary_direct { 1, 1, true, 6, 6 }
+#define cond_len_ternary_direct { 1, 1, true, 7, 7 }
+#define while_direct { 0, 2, false, 3, 3 }
+#define fold_extract_direct { 2, 2, false, 3, 3 }
+#define fold_len_extract_direct { 2, 2, false, 5, 5 }
+#define fold_left_direct { 1, 1, false, 2, 2 }
+#define mask_fold_left_direct { 1, 1, false, 3, 3 }
+#define mask_len_fold_left_direct { 1, 1, false, 5, 5 }
+#define check_ptrs_direct { 0, 0, false, 4, 4 }
+#define crc_direct { 1, -1, true, 3, 3 }
+#define reduc_sbool_direct { 0, 0, true, 1, 1 }
+#define select_vl_direct { 2, 0, false, 3, 3 }
 
 const direct_internal_fn_info direct_internal_fn_array[IFN_LAST + 1] = {
 #define DEF_INTERNAL_FN(CODE, FLAGS, FNSPEC) not_direct,
@@ -3218,6 +3225,7 @@ expand_partial_load_optab_fn (internal_fn ifn, gcall *stmt, convert_optab optab)
 
 #define expand_mask_load_optab_fn expand_partial_load_optab_fn
 #define expand_mask_load_lanes_optab_fn expand_mask_load_optab_fn
+#define expand_mask_len_load_lanes_optab_fn expand_mask_load_optab_fn
 #define expand_len_load_optab_fn expand_partial_load_optab_fn
 #define expand_mask_len_load_optab_fn expand_partial_load_optab_fn
 
@@ -3262,6 +3270,7 @@ expand_partial_store_optab_fn (internal_fn ifn, gcall *stmt, convert_optab optab
 
 #define expand_mask_store_optab_fn expand_partial_store_optab_fn
 #define expand_mask_store_lanes_optab_fn expand_mask_store_optab_fn
+#define expand_mask_len_store_lanes_optab_fn expand_mask_store_optab_fn
 #define expand_len_store_optab_fn expand_partial_store_optab_fn
 #define expand_mask_len_store_optab_fn expand_partial_store_optab_fn
 
@@ -3863,6 +3872,9 @@ expand_scatter_store_optab_fn (internal_fn, gcall *stmt, direct_optab optab)
   expand_insn (icode, i, ops);
 }
 
+#define expand_mask_scatter_store_optab_fn expand_scatter_store_optab_fn
+#define expand_mask_len_scatter_store_optab_fn expand_scatter_store_optab_fn
+
 /* Expand {MASK_,}GATHER_LOAD call CALL using optab OPTAB.  */
 
 static void
@@ -3891,6 +3903,9 @@ expand_gather_load_optab_fn (internal_fn ifn, gcall *stmt, direct_optab optab)
   expand_insn (icode, i, ops);
   assign_call_lhs (lhs, lhs_rtx, &ops[0]);
 }
+
+#define expand_mask_gather_load_optab_fn expand_gather_load_optab_fn
+#define expand_mask_len_gather_load_optab_fn expand_gather_load_optab_fn
 
 /* Expand MASK_LEN_STRIDED_LOAD call CALL by optab OPTAB.  */
 
@@ -4139,6 +4154,8 @@ static void
 expand_direct_optab_fn (internal_fn fn, gcall *stmt, direct_optab optab,
 			unsigned int nargs)
 {
+  gcc_checking_assert (direct_internal_fn_nargs_ok_p
+		       (fn, gimple_call_num_args (stmt)));
   tree_pair types = direct_internal_fn_types (fn, stmt);
   insn_code icode = direct_optab_handler (optab, TYPE_MODE (types.first));
   expand_fn_using_insn (stmt, icode, 1, nargs);
@@ -4193,6 +4210,8 @@ static void
 expand_convert_optab_fn (internal_fn fn, gcall *stmt, convert_optab optab,
 			 unsigned int nargs)
 {
+  gcc_checking_assert (direct_internal_fn_nargs_ok_p
+		       (fn, gimple_call_num_args (stmt)));
   tree_pair types = direct_internal_fn_types (fn, stmt);
   insn_code icode = convert_optab_handler (optab, TYPE_MODE (types.first),
 					  TYPE_MODE (types.second));
@@ -4327,6 +4346,8 @@ expand_reduc_sbool_optab_fn (internal_fn fn, gcall *stmt, direct_optab optab)
 #define expand_unary_optab_fn(FN, STMT, OPTAB) \
   expand_direct_optab_fn (FN, STMT, OPTAB, 1)
 
+#define expand_unary_opt_optab_fn expand_unary_optab_fn
+
 #define expand_binary_optab_fn(FN, STMT, OPTAB) \
   expand_direct_optab_fn (FN, STMT, OPTAB, 2)
 
@@ -4452,6 +4473,7 @@ multi_vector_optab_supported_p (convert_optab optab, tree_pair types,
 }
 
 #define direct_unary_optab_supported_p direct_optab_supported_p
+#define direct_unary_opt_optab_supported_p direct_optab_supported_p
 #define direct_unary_convert_optab_supported_p convert_optab_supported_p
 #define direct_binary_optab_supported_p direct_optab_supported_p
 #define direct_ternary_optab_supported_p direct_optab_supported_p
@@ -4465,16 +4487,25 @@ multi_vector_optab_supported_p (convert_optab optab, tree_pair types,
 #define direct_mask_load_optab_supported_p convert_optab_supported_p
 #define direct_load_lanes_optab_supported_p multi_vector_optab_supported_p
 #define direct_mask_load_lanes_optab_supported_p multi_vector_optab_supported_p
+#define direct_mask_len_load_lanes_optab_supported_p \
+  multi_vector_optab_supported_p
 #define direct_gather_load_optab_supported_p convert_optab_supported_p
+#define direct_mask_gather_load_optab_supported_p convert_optab_supported_p
+#define direct_mask_len_gather_load_optab_supported_p convert_optab_supported_p
 #define direct_strided_load_optab_supported_p direct_optab_supported_p
 #define direct_len_load_optab_supported_p direct_optab_supported_p
 #define direct_mask_len_load_optab_supported_p convert_optab_supported_p
 #define direct_mask_store_optab_supported_p convert_optab_supported_p
 #define direct_store_lanes_optab_supported_p multi_vector_optab_supported_p
 #define direct_mask_store_lanes_optab_supported_p multi_vector_optab_supported_p
+#define direct_mask_len_store_lanes_optab_supported_p \
+  multi_vector_optab_supported_p
 #define direct_vec_cond_mask_optab_supported_p convert_optab_supported_p
 #define direct_vec_cond_optab_supported_p convert_optab_supported_p
 #define direct_scatter_store_optab_supported_p convert_optab_supported_p
+#define direct_mask_scatter_store_optab_supported_p convert_optab_supported_p
+#define direct_mask_len_scatter_store_optab_supported_p \
+  convert_optab_supported_p
 #define direct_strided_store_optab_supported_p direct_optab_supported_p
 #define direct_len_store_optab_supported_p direct_optab_supported_p
 #define direct_mask_len_store_optab_supported_p convert_optab_supported_p
@@ -4803,6 +4834,58 @@ widening_evenodd_fn_p (code_helper code)
     default:
       return false;
     }
+}
+
+/* Check the NARGS arguments ARGS of a call to internal function FN.
+   Return true if they are valid.  Otherwise report an error at LOC
+   and return false.  */
+
+bool
+check_internal_fn_args (location_t loc, internal_fn fn, unsigned int nargs,
+			const tree *args)
+{
+  const char *name = internal_fn_name (fn);
+  if (direct_internal_fn_p (fn))
+    {
+      const direct_internal_fn_info &info = direct_internal_fn (fn);
+      if (nargs < info.nargs_min)
+	{
+	  error_at (loc, "%<.%s%> call with too few arguments", name);
+	  return false;
+	}
+      if (nargs > info.nargs_max)
+	{
+	  error_at (loc, "%<.%s%> call with too many arguments", name);
+	  return false;
+	}
+    }
+
+  switch (fn)
+    {
+    case IFN_CLZ:
+    case IFN_CTZ:
+      {
+	tree type = TREE_TYPE (args[0]);
+	if (!(INTEGRAL_TYPE_P (type) || VECTOR_INTEGER_TYPE_P (type))
+	    || !TYPE_UNSIGNED (type))
+	  {
+	    error_at (loc, "%<.%s%> call with an argument that is not "
+		      "unsigned integer", name);
+	    return false;
+	  }
+	if (nargs == 2 && TREE_CODE (args[1]) != INTEGER_CST)
+	  {
+	    error_at (loc, "%<.%s%> call with a value at zero that is not "
+		      "constant", name);
+	    return false;
+	  }
+	break;
+      }
+
+    default:
+      break;
+    }
+  return true;
 }
 
 /* Return true if IFN_SET_EDOM is supported.  */
@@ -6090,6 +6173,56 @@ expand_clmul (machine_mode mode, machine_mode op_mode, rtx op0, rtx op1,
 	  delete_insns_since (start);
 	}
     }
+  if (CONST_SCALAR_INT_P (op1))
+    {
+      wide_int wop1 = rtx_mode_t (op1, op_mode);
+      unsigned lz = wi::clz (wop1);
+      unsigned tz = wi::ctz (wop1);
+      unsigned cnt = wi::popcount (wop1);
+      if (lz + cnt + tz == op_prec
+	  && (pow2p_hwi (cnt) || (lz == 0 && prec == op_prec)))
+	{
+	  /* Optimize the cases where one argument is a constant
+	     equal to ((((T) 1) << M) - 1) << N for some M and N
+	     constants.
+	     In this case the clmul (x, ((((T) 1) << M) - 1) << N)
+	     result can be computed as
+	     T r = x;
+	     for (unsigned i = 1; i < M; i = i + i)
+	       r ^= r << i;
+	     return r << N;
+	     If M is not a power of two, it shouldn't be a widening
+	     shift and most significant bit of the constant should be
+	     set.  */
+	  rtx x = convert_modes (mode, op_mode, op0, 1);
+	  rtx res = gen_reg_rtx (mode);
+	  emit_move_insn (res, x);
+	  rtx i = gen_reg_rtx (TYPE_MODE (integer_type_node));
+	  emit_move_insn (i, const1_rtx);
+	  rtx_code_label *loop_label = gen_label_rtx ();
+	  emit_label (loop_label);
+	  rtx tem = expand_variable_shift (LSHIFT_EXPR, mode, res,
+					   make_tree (integer_type_node, i),
+					   NULL_RTX, 1);
+	  tem = expand_binop (mode, xor_optab, res, tem, res, 1, olw);
+	  if (tem != res)
+	    emit_move_insn (res, tem);
+	  tem = expand_binop (GET_MODE (i), add_optab, i, i, i, 1, olw);
+	  if (tem != res)
+	    emit_move_insn (i, tem);
+	  do_compare_rtx_and_jump (i, gen_int_mode (cnt, GET_MODE (i)),
+				   LTU, true, GET_MODE (i), NULL_RTX, NULL,
+				   loop_label,
+				   profile_probability::very_likely ());
+	  if (tz)
+	    {
+	      tem = expand_shift (LSHIFT_EXPR, mode, res, tz, res, 1);
+	      if (tem != res)
+		emit_move_insn (res, tem);
+	    }
+	  return res;
+	}
+    }
   /* Fallback using Kronecker substitution.
      Depending on the number of active bits in the operand with smaller
      number of those and the result precision we choose smallest spacing
@@ -6220,25 +6353,30 @@ expand_CLMUL_WIDEN (internal_fn, gcall *stmt)
   unsigned int prec0 = get_min_precision (arg0, UNSIGNED);
   unsigned int prec1 = get_min_precision (arg1, UNSIGNED);
   unsigned int prec = GET_MODE_PRECISION (mode);
+  unsigned int type_prec = TYPE_PRECISION (TREE_TYPE (arg0));
   rtx op0 = expand_normal (arg0);
   rtx op1 = expand_normal (arg1);
   rtx target = expand_expr (lhs, NULL_RTX, VOIDmode, EXPAND_WRITE);
   rtx bitint_mask = NULL_RTX;
-  if (TYPE_PRECISION (TREE_TYPE (arg0)) != prec)
+  if (type_prec != prec)
     bitint_mask
-      = immed_wide_int_const (wi::mask (TYPE_PRECISION (TREE_TYPE (arg0)),
-					false, prec), mode);
+      = immed_wide_int_const (wi::mask (type_prec, false, prec), mode);
   if (prec0 + prec1 - 1 <= prec)
     {
-      rtx res = expand_clmul (mode, mode, op0, op1, prec0, prec1);
+      /* The whole product fits in MODE.  For a type narrower than MODE
+	 the bits above its precision are the high half.  */
+      rtx reslo = expand_clmul (mode, mode, op0, op1, prec0, prec1);
+      rtx reshi = const0_rtx;
+      if (prec0 + prec1 - 1 > type_prec)
+	reshi = expand_shift (RSHIFT_EXPR, mode, reslo, type_prec, NULL_RTX, 1);
       if (bitint_mask)
-	res = expand_and (mode, res, bitint_mask, NULL_RTX);
-      write_complex_part (target, res, false, true);
-      write_complex_part (target, const0_rtx, true, false);
+	reslo = expand_and (mode, reslo, bitint_mask, NULL_RTX);
+      write_complex_part (target, reslo, false, true);
+      write_complex_part (target, reshi, true, false);
       return;
     }
   if (optab_handler (clmul_widen_optab, mode) != CODE_FOR_nothing
-      && TYPE_PRECISION (TREE_TYPE (arg0)) == prec)
+      && type_prec == prec)
     {
       rtx_insn *start = get_last_insn ();
       rtx reslo = gen_reg_rtx (mode);
@@ -6266,8 +6404,7 @@ expand_CLMUL_WIDEN (internal_fn, gcall *stmt)
       if (bitint_mask)
 	reslo = expand_and (mode, reslo, bitint_mask, NULL_RTX);
       write_complex_part (target, reslo, false, true);
-      rtx reshi = expand_shift (RSHIFT_EXPR, wmode, res,
-				TYPE_PRECISION (TREE_TYPE (arg0)),
+      rtx reshi = expand_shift (RSHIFT_EXPR, wmode, res, type_prec,
 				NULL_RTX, 1);
       reshi = convert_modes (mode, wmode, reshi, 1);
       write_complex_part (target, reshi, true, false);
@@ -6334,10 +6471,8 @@ expand_CLMUL_WIDEN (internal_fn, gcall *stmt)
       write_complex_part (target, reslom, false, true);
       rtx reshi = expand_binop (mode, xor_optab, h, t1, NULL_RTX, 1, olw);
       reshi = expand_shift (LSHIFT_EXPR, mode, reshi,
-			    prec - TYPE_PRECISION (TREE_TYPE (arg0)),
-			    NULL_RTX, 1);
-      reslo = expand_shift (RSHIFT_EXPR, mode, reslo,
-			    TYPE_PRECISION (TREE_TYPE (arg0)), NULL_RTX, 1);
+			    prec - type_prec, NULL_RTX, 1);
+      reslo = expand_shift (RSHIFT_EXPR, mode, reslo, type_prec, NULL_RTX, 1);
       reshi = expand_binop (mode, ior_optab, reshi, reslo, NULL_RTX, 1, olw);
       reshi = expand_and (mode, reshi, bitint_mask, NULL_RTX);
       write_complex_part (target, reshi, true, false);

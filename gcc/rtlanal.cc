@@ -1371,8 +1371,9 @@ modified_in_p (const_rtx x, const_rtx insn)
 	return true;
       if (MEM_READONLY_P (x))
 	return false;
-      if (memory_modified_in_insn_p (x, insn))
-	return true;
+      if (const rtx_insn *mem_insn = dyn_cast<const rtx_insn *> (insn))
+	if (memory_modified_in_insn_p (x, mem_insn))
+	  return true;
       return false;
 
     case REG:
@@ -4547,7 +4548,7 @@ parms_set (rtx x, const_rtx pat ATTRIBUTE_UNUSED, void *data)
    to the outer function is passed down as a parameter).
    Do not skip BOUNDARY.  */
 rtx_insn *
-find_first_parameter_load (rtx_insn *call_insn, rtx_insn *boundary)
+find_first_parameter_load (rtx_call_insn *call_insn, rtx_insn *boundary)
 {
   struct parms_set_data parm;
   rtx p;
