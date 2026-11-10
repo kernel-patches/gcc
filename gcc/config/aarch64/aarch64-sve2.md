@@ -145,6 +145,7 @@
 ;;
 ;; == FMMLA extensions
 ;; ---- [FP] Matrix multiply-accumulate widening
+;; ---- [FP] Matrix multiply-accumulate non-widening
 
 ;; =========================================================================
 ;; == Moves
@@ -2997,15 +2998,14 @@
   [(set_attr "sve_type" "sve_<sve_type_unspec>")]
 )
 
-;; Two-way dot-product.
-(define_insn "aarch64_sve_fdotvnx4sfvnx8hf"
-  [(set (match_operand:VNx4SF 0 "register_operand")
-	(plus:VNx4SF
-	  (unspec:VNx4SF
-	    [(match_operand:VNx8HF 1 "register_operand")
-	     (match_operand:VNx8HF 2 "register_operand")]
-	    UNSPEC_FDOT)
-	  (match_operand:VNx4SF 3 "register_operand")))]
+(define_insn "@<sur>dot_prod<VNx4SF_ONLY:mode><VNx8HF_ONLY:mode>"
+  [(set (match_operand:VNx4SF_ONLY 0 "register_operand")
+	(plus:VNx4SF_ONLY
+	  (unspec:VNx4SF_ONLY
+	    [(match_operand:VNx8HF_ONLY 1 "register_operand")
+	     (match_operand:VNx8HF_ONLY 2 "register_operand")]
+	    DOTPROD_FP)
+	  (match_operand:VNx4SF_ONLY 3 "register_operand")))]
   "TARGET_SVE2p1_OR_SME2"
   {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
      [ w        , w , w , 0 ; *              ] fdot\t%0.s, %1.h, %2.h
@@ -4249,6 +4249,20 @@
   [(set_attr "sve_type" "sve_int_pmul")]
 )
 
+;; PMULLB on scalar operands that overlap element 0 of SVE registers.  The
+;; result is the product of the 8-bit or 32-bit sources in element 0 of the
+;; destination, which has twice the element width.
+(define_insn "@aarch64_sve_pmullb_scalar<mode>"
+  [(set (match_operand:<DWI> 0 "register_operand" "=w")
+	(unspec:<DWI>
+	  [(match_operand:SVE_PMULL_SCALAR 1 "register_operand" "w")
+	   (match_operand:SVE_PMULL_SCALAR 2 "register_operand" "w")]
+	  UNSPEC_PMULLB))]
+  "TARGET_SVE2"
+  "pmullb\t%Z0.<Vpmull_wetype>, %Z1.<Vpmull_etype>, %Z2.<Vpmull_etype>"
+  [(set_attr "sve_type" "sve_int_pmul")]
+)
+
 ;; Extending PMUL, with the results modeled as pairs of values.
 ;; This representation works for .H, .D and .Q, with .Q requiring
 ;; the AES extension.  (This is enforced by the mode iterator.)
@@ -4857,7 +4871,24 @@
 ;; Includes:
 ;; - LUTI2
 ;; - LUTI4
+;; - LUTI6
 ;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_sve_luti6<mode>"
+  [(set (match_operand:SVE_FULL_BH 0 "register_operand" "=w")
+	(unspec:SVE_FULL_BH
+	 [(match_operand:<VDOUBLE> 1 "register_operand" "w")
+	  (match_operand:VNx16QI 2 "register_operand" "w")]
+	 UNSPEC_SVE_LUTI6))]
+  "TARGET_SVE2p3 && TARGET_NON_STREAMING
+   && known_ge (BYTES_PER_SVE_VECTOR, 32 * GET_MODE_UNIT_SIZE (<MODE>mode))"
+{
+  if (<MODE>mode == VNx16QImode)
+    return "luti6\t%0.b, %1, %2";
+  return "luti6\t%0.h, %1, %2[0]";
+}
+  [(set_attr "sve_type" "sve_int_general")]
+)
 
 (define_insn "@aarch64_sve_luti<LUTI_BITS><mode>"
   [(set (match_operand:SVE_FULL_BH 0 "register_operand" "=w")
@@ -5062,7 +5093,7 @@
 ;; -------------------------------------------------------------------------
 
 
-(define_insn "@aarch64_sve2_<sve_fp_op><SVE_FULL_HSF_FMMLA:mode><VNx16QI_ONLY:mode>"
+(define_insn "@aarch64_sve_<sve_fp_op><SVE_FULL_HSF_FMMLA:mode><VNx16QI_ONLY:mode>"
   [(set (match_operand:SVE_FULL_HSF_FMMLA 0 "register_operand")
 	(unspec:SVE_FULL_HSF_FMMLA
 	  [(match_operand:VNx16QI_ONLY 2 "register_operand")
@@ -5078,7 +5109,7 @@
   [(set_attr "sve_type" "sve_fp_mul")]
 )
 
-(define_insn "@aarch64_sve2_<sve_fp_op><VNx4SF_ONLY:mode><VNx8HF_ONLY:mode>"
+(define_insn "@aarch64_sve_<sve_fp_op><VNx4SF_ONLY:mode><VNx8HF_ONLY:mode>"
   [(set (match_operand:VNx4SF_ONLY 0 "register_operand")
 	(unspec:VNx4SF_ONLY
 	 [(match_operand:VNx8HF_ONLY 2 "register_operand")
@@ -5089,6 +5120,29 @@
   {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
      [ w        , 0 , w , w ; *              ] fmmla\t%0.s, %2.h, %3.h
      [ ?&w      , w , w , w ; yes            ] movprfx\t%0, %1\;fmmla\t%0.s, %2.h, %3.h
+  }
+  [(set_attr "sve_type" "sve_fp_mul")]
+)
+
+;; -------------------------------------------------------------------------
+;; ---- [FP] Matrix multiply-accumulate non-widening
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - FMMLA (F16MM)
+;; - BFMMLA (SVE_B16MM)
+;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_sve_<sve_fp_op><SVE_FULL_HF_FMMLA:mode><SVE_FULL_HF_FMMLA:mode>"
+  [(set (match_operand:SVE_FULL_HF_FMMLA 0 "register_operand")
+	(unspec:SVE_FULL_HF_FMMLA
+	 [(match_operand:SVE_FULL_HF_FMMLA 2 "register_operand")
+	  (match_operand:SVE_FULL_HF_FMMLA 3 "register_operand")
+	  (match_operand:SVE_FULL_HF_FMMLA 1 "register_operand")]
+	 FMMLA))]
+  "TARGET_NON_STREAMING"
+  {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
+     [ w        , 0 , w , w ; *              ] <b><sve_fp_op>\t%0.h, %2.h, %3.h
+     [ ?&w      , w , w , w ; yes            ] movprfx\t%0, %1\;<b><sve_fp_op>\t%0.h, %2.h, %3.h
   }
   [(set_attr "sve_type" "sve_fp_mul")]
 )

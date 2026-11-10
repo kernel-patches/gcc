@@ -1,7 +1,6 @@
-/* TODO: move to ../libgomp.c-c++-common once C++ is implemented. */
-/* NOTE: { target c } is unsupported with with the C compiler.  */
+/* { dg-do run { target c } } */
 
-/* { dg-do run } */
+/* In C++, omp allocate in an omp::decl attribute is not currently supported.  */
 
 #include <omp.h>
 
@@ -10,7 +9,7 @@ int AAA [[omp::decl(allocate,allocator(omp_low_lat_mem_alloc),align(4096))]];
 #ifndef __cplusplus
   _Static_assert (_Alignof(AAA) == _Alignof(int), "wrong alignment");
 #elif __cplusplus >= 201103L
-  static_assert (alignof(AAA) == _Alignof(int), "wrong alignment");
+  static_assert (alignof(AAA) == alignof(int), "wrong alignment");
 #endif
 
 

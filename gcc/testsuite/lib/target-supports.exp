@@ -6974,6 +6974,24 @@ proc check_effective_target_arm_neon_hw { } {
     } [add_options_for_arm_neon ""]]
 }
 
+# Return true if this is an AArch64 target that can run the 64-bit
+# polynomial multiply (PMULL) instructions of FEAT_PMULL.
+
+proc check_effective_target_aarch64_pmull_hw { } {
+    if { ![istarget aarch64*-*-*] } {
+	return 0
+    }
+    return [check_runtime aarch64_pmull_hw_available {
+	#pragma GCC target "+aes"
+	int
+	main (void)
+	{
+	  asm volatile ("pmull v0.1q, v1.1d, v2.1d");
+	  return 0;
+	}
+    }]
+}
+
 # Return true if this is an AArch64 target that can run SVE code.
 
 proc check_effective_target_aarch64_sve_hw { } {
@@ -6988,6 +7006,24 @@ proc check_effective_target_aarch64_sve_hw { } {
 	  return 0;
 	}
     } [add_options_for_aarch64_sve ""]]
+}
+
+# Return true if this is an AArch64 target that can run LUT instructions.
+
+proc check_effective_target_aarch64_lut_hw { } {
+    if { ![istarget aarch64*-*-*] } {
+	return 0
+    }
+    return [check_runtime aarch64_lut_hw_available {
+	#pragma GCC target "+lut"
+	int
+	main (void)
+	{
+	  asm volatile ("movi v0.16b, #0\n\t"
+			"luti2 v0.16b, {v0.16b}, v0[0]" ::: "v0");
+	  return 0;
+	}
+    }]
 }
 
 # Return true if this is an AArch64 target that can run SVE2 code.
@@ -7678,6 +7714,23 @@ proc add_options_for_aarch64_f16f32dot_neon { flags } {
     }
     global et_aarch64_f16f32dot_neon_flags
     return "$flags $et_aarch64_f16f32dot_neon_flags"
+}
+
+# Return true if the target can execute AdvSIMD FP16-to-FP32 dot products.
+
+proc check_effective_target_aarch64_f16f32dot_hw { } {
+    if { ![check_effective_target_aarch64_f16f32dot_neon_ok] } {
+	return 0
+    }
+    return [check_runtime aarch64_f16f32dot_hw_available {
+	int
+	main (void)
+	{
+	  asm volatile ("movi v0.4s, 0; fdot v0.4s, v0.8h, v0.8h"
+			: : : "v0");
+	  return 0;
+	}
+    } [add_options_for_aarch64_f16f32dot_neon ""]]
 }
 
 # Return 1 if the target supports BFloat16 SIMD instructions, 0 otherwise.
@@ -13390,9 +13443,9 @@ proc check_effective_target_aarch64_gas_has_dtprel_reloc { } {
 set exts {
     "bf16" "cmpbr" "crc" "crypto" "dotprod" "f32mm" "f64mm" "faminmax"
     "fp" "fp8" "fp8dot2" "fp8dot4" "fp8fma" "i8mm" "ls64" "lse" "lut"
-    "sb" "simd" "sve-b16b16" "sve" "sve2" "sve-sm4" "sve-aes" "sve-aes2"
-    "sve-bitperm" "sve-sha3" "f8f16mm" "f8f32mm" "sve-f16f32mm"
-    "sme-f8f16" "sme-f8f32"
+    "sb" "simd" "f16mm" "f16f32mm" "sve-b16b16" "sve" "sve2" "sve-sm4"
+    "sve-aes" "sve-aes2" "sve-bitperm" "sve-sha3" "f8f16mm" "f8f32mm"
+    "sve-f16f32mm" "sve-b16mm" "sme-f8f16" "sme-f8f32"
     "sme-b16b16" "sme-f16f16" "sme-i16i64" "sme" "sme2" "sme2p1" "sme2p2"
     "sme2p3"
 	"sme-tmop"

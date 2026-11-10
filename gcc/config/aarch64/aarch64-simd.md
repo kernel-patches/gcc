@@ -799,16 +799,16 @@
   [(set_attr "type" "neon_dot<VS:q>")]
 )
 
-(define_insn "sdot_prod<VDQSF:vsi2qi><vczle><vczbe>"
+(define_insn "sdot_prod<VDQSF:mode><vsi2qi><vczle><vczbe>"
   [(set (match_operand:VDQSF 0 "register_operand" "=w")
 	(plus:VDQSF
 	  (unspec:VDQSF
-	   [(match_operand:<VSI2QI> 2 "register_operand" "w")
-	    (match_operand:<VSI2QI> 3 "register_operand" "w")]
+	   [(match_operand:<VSI2QI> 1 "register_operand" "w")
+	    (match_operand:<VSI2QI> 2 "register_operand" "w")]
 	    UNSPEC_FDOT)
-	  (match_operand:VDQSF 1 "register_operand" "0")))]
+	  (match_operand:VDQSF 3 "register_operand" "0")))]
   "TARGET_F16F32DOT"
-  "fdot\t%0.<Vtype>, %2.<Vbfdottype>, %3.<Vbfdottype>"
+  "fdot\t%0.<Vtype>, %1.<Vbfdottype>, %2.<Vbfdottype>"
   [(set_attr "type" "neon_dot<q>")]
 )
 
@@ -823,7 +823,9 @@
 	  (match_operand:VDQSF 1 "register_operand" "0")))]
   "TARGET_F16F32DOT"
 {
-  operands[4] = aarch64_endian_lane_rtx (<VF:MODE>mode, INTVAL (operands[4]));
+  int nunits = GET_MODE_NUNITS (<VF:MODE>mode).to_constant ();
+  int lane = INTVAL (operands[4]);
+  operands[4] = gen_int_mode (ENDIAN_LANE_N (nunits / 2, lane), SImode);
   return "fdot\t%0.<VDQSF:Vtype>, %2.<VDQSF:Vbfdottype>, %3.2h[%4]";
 }
   [(set_attr "type" "neon_dot<VDQSF:q>")]
@@ -10833,6 +10835,91 @@
   [(set_attr "type" "crypto_pmull")]
 )
 
+;; Carry-less multiplication.  clmul<mode>3 returns the low half of the
+;; product.  clmul_widen<mode>3 returns the low half in operand 0 and the
+;; high half in operand 1.  The DImode pattern also serves narrower modes,
+;; which the middle-end zero-extends to DImode.  Advanced SIMD PMULL is
+;; used when available.  Otherwise SVE2 PMULLB is used, which is also
+;; available in streaming mode.
+
+(define_expand "clmuldi3"
+  [(match_operand:DI 0 "register_operand")
+   (match_operand:DI 1 "register_operand")
+   (match_operand:DI 2 "register_operand")]
+  "(TARGET_AES && TARGET_NON_STREAMING) || TARGET_SVE_AES"
+{
+  if (TARGET_AES && TARGET_NON_STREAMING)
+    {
+      rtx prod = gen_reg_rtx (TImode);
+      emit_insn (gen_aarch64_crypto_pmulldi (prod, operands[1], operands[2]));
+      emit_move_insn (operands[0], gen_lowpart (DImode, prod));
+    }
+  else
+    aarch64_expand_sve_clmul (operands[0], NULL_RTX, operands[1], operands[2]);
+  DONE;
+})
+
+(define_expand "clmul_widendi3"
+  [(match_operand:DI 0 "register_operand")
+   (match_operand:DI 1 "register_operand")
+   (match_operand:DI 2 "register_operand")
+   (match_operand:DI 3 "register_operand")]
+  "(TARGET_AES && TARGET_NON_STREAMING) || TARGET_SVE_AES"
+{
+  if (TARGET_AES && TARGET_NON_STREAMING)
+    {
+      rtx prod = gen_reg_rtx (TImode);
+      emit_insn (gen_aarch64_crypto_pmulldi (prod, operands[2], operands[3]));
+      emit_move_insn (operands[0], gen_lowpart (DImode, prod));
+      emit_insn (gen_vec_extractv2didi (operands[1],
+					gen_lowpart (V2DImode, prod),
+					aarch64_endian_lane_rtx (V2DImode, 1)));
+    }
+  else
+    aarch64_expand_sve_clmul (operands[0], operands[1], operands[2],
+			      operands[3]);
+  DONE;
+})
+
+;; Without the 64-bit PMULL, 32-bit operands use SVE2 PMULLB.
+(define_expand "clmul_widensi3"
+  [(match_operand:SI 0 "register_operand")
+   (match_operand:SI 1 "register_operand")
+   (match_operand:SI 2 "register_operand")
+   (match_operand:SI 3 "register_operand")]
+  "TARGET_SVE2 && !(TARGET_AES && TARGET_NON_STREAMING)"
+{
+  aarch64_expand_sve_clmul (operands[0], operands[1], operands[2],
+			    operands[3]);
+  DONE;
+})
+
+(define_expand "clmul_widenqi3"
+  [(match_operand:QI 0 "register_operand")
+   (match_operand:QI 1 "register_operand")
+   (match_operand:QI 2 "register_operand")
+   (match_operand:QI 3 "register_operand")]
+  "TARGET_SIMD || TARGET_SVE2"
+{
+  if (TARGET_SIMD)
+    {
+      rtx x = gen_reg_rtx (V8QImode);
+      rtx y = gen_reg_rtx (V8QImode);
+      rtx prod = gen_reg_rtx (V8HImode);
+      rtx half = gen_lowpart (HImode, prod);
+      emit_insn (gen_aarch64_simd_dupv8qi (x, operands[2]));
+      emit_insn (gen_aarch64_simd_dupv8qi (y, operands[3]));
+      emit_insn (gen_aarch64_pmullv8qi (prod, x, y));
+      emit_move_insn (operands[0], gen_lowpart (QImode, half));
+      rtx hi = expand_shift (RSHIFT_EXPR, HImode, half, 8, NULL_RTX, 1);
+      emit_move_insn (operands[1], gen_lowpart (QImode, hi));
+    }
+  else
+    aarch64_expand_sve_clmul (operands[0], operands[1], operands[2],
+			      operands[3]);
+  DONE;
+})
+
 ;; Sign- or zero-extend a 64-bit integer vector to a 128-bit vector.
 (define_insn_and_split "<optab><Vnarrowq><mode>2"
   [(set (match_operand:VQN 0 "register_operand" "=w")
@@ -10922,6 +11009,18 @@
                     UNSPEC_BFMMLA)))]
   "TARGET_BF16_SIMD"
   "bfmmla\\t%0.4s, %2.8h, %3.8h"
+  [(set_attr "type" "neon_fp_mla_s_q")]
+)
+
+;; fmmla
+(define_insn "@aarch64_fmmlaq<mode>"
+  [(set (match_operand:VQ_HSF_F16_FMMLA 0 "register_operand" "=w")
+        (plus:VQ_HSF_F16_FMMLA (match_operand:VQ_HSF_F16_FMMLA 1 "register_operand" "0")
+                               (unspec:VQ_HSF_F16_FMMLA [(match_operand:V8HF 2 "register_operand" "w")
+                                                         (match_operand:V8HF 3 "register_operand" "w")]
+                                UNSPEC_FMMLA)))]
+  ""
+  "fmmla\t%0.<Vtype>, %2.8h, %3.8h"
   [(set_attr "type" "neon_fp_mla_s_q")]
 )
 
@@ -11229,11 +11328,11 @@
 )
 
 (define_insn "@aarch64_<insn><mode>"
-  [(set (match_operand:VDQ_HSF_FMMLA 0 "register_operand")
-	(unspec:VDQ_HSF_FMMLA
+  [(set (match_operand:VQ_HSF_F8_FMMLA 0 "register_operand")
+	(unspec:VQ_HSF_F8_FMMLA
 	 [(match_operand:V16QI 2 "register_operand")
 	  (match_operand:V16QI 3 "register_operand")
-	  (match_operand:VDQ_HSF_FMMLA 1 "register_operand")
+	  (match_operand:VQ_HSF_F8_FMMLA 1 "register_operand")
 	  (reg:DI FPM_REGNUM)]
 	 FMMLA))]
   ""

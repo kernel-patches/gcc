@@ -20474,6 +20474,14 @@ aarch64_override_options_internal (struct gcc_options *opts,
       & AARCH64_EXTRA_TUNE_DISPATCH_SCHED)
     gcc_assert (aarch64_tune_params.dispatch_constraints != NULL);
 
+  /* Prefer SVE main loops that operate on full vectors, handling the
+     tail in a separate epilogue rather than with fully-masked WHILELO
+     loops.  */
+  if (aarch64_tune_params.extra_tuning_flags
+      & AARCH64_EXTRA_TUNE_PREFER_SVE_FULL_VECTORS)
+    SET_OPTION_IF_UNSET (opts, opts_set, param_vect_partial_vector_usage,
+			 1);
+
   /* Enable possible unprofitable vectorization.  */
   if (opts->x_flag_aarch64_max_vectorization)
     SET_OPTION_IF_UNSET (opts, opts_set,
@@ -28817,6 +28825,152 @@ aarch64_evpc_hvla (struct expand_vec_perm_d *d)
   return try_zip () || try_uzp () || try_extq () || try_dupq ();
 }
 
+/* Pack D's constant indices into BITS-bit fields.  For LUTI2/4, repeat the
+   packed pattern into the unused part of SEL_MODE too, to give immediate
+   materialization more freedom.  Only use those forms when the selector
+   needs no constant-pool load.  For LUTI6, pack all the indices and leave
+   the unused high bytes zero.  Stepped scalable selectors need another
+   expansion.  */
+
+static rtx
+aarch64_evpc_luti_indices (struct expand_vec_perm_d *d, unsigned int bits,
+			  machine_mode sel_mode)
+{
+  poly_int64 nelt = d->perm.length ();
+  unsigned int npatterns, packed_npatterns;
+  if (bits == 6)
+    {
+      npatterns = nelt.to_constant ();
+      packed_npatterns = GET_MODE_NUNITS (sel_mode).to_constant ();
+    }
+  else
+    {
+      const auto &encoding = d->perm.encoding ();
+      if (encoding.nelts_per_pattern () != 1)
+	return NULL_RTX;
+      npatterns = encoding.npatterns ();
+      packed_npatterns = CEIL (npatterns * bits, BITS_PER_UNIT);
+    }
+  rtx_vector_builder builder (sel_mode, packed_npatterns, 1);
+  /* Two-input LUTI4 reads eight halfwords from each register,
+     even when the input vectors are wider than that.  */
+  bool remap_inputs = bits == 4 && !d->one_vector_p;
+  unsigned int value = 0, nbits = 0, next = 0;
+  unsigned int nbytes = CEIL (npatterns * bits, BITS_PER_UNIT);
+  for (unsigned int i = 0; i < nbytes; ++i)
+    {
+      /* Append indices until we have a complete byte.  LUTI6 fields can
+	 straddle bytes, so keep any unused bits for the next byte.  */
+      while (nbits < BITS_PER_UNIT)
+	{
+	  poly_int64 elt = d->perm[next % npatterns];
+	  bool second = remap_inputs && known_ge (elt, nelt);
+	  if (second)
+	    elt -= nelt;
+	  HOST_WIDE_INT index;
+	  if (!elt.is_constant (&index)
+	      || !IN_RANGE (index, 0, remap_inputs ? 7 : (1U << bits) - 1))
+	    return NULL_RTX;
+	  value |= (index + (second ? 8 : 0)) << nbits;
+	  nbits += bits;
+	  ++next;
+	}
+      builder.quick_push (gen_int_mode (value, QImode));
+      value >>= BITS_PER_UNIT;
+      nbits -= BITS_PER_UNIT;
+    }
+  /* LUTI6 leaves the rest of the selector zero.  */
+  for (unsigned int i = nbytes; i < packed_npatterns; ++i)
+    builder.quick_push (const0_rtx);
+  rtx sel = builder.build ();
+  if (bits != 6 && !aarch64_simd_valid_mov_imm (sel))
+    return NULL_RTX;
+  return sel;
+}
+
+/* Try to implement D using LUTI2, LUTI4 or LUTI6, as selected by BITS.
+   Prefer LUTI2/4 when their packed selectors can be loaded as an immediate.
+   LUTI6 can implement any two-input permutation with 32 elements, avoiding
+   the two TBLs and their combining operations.  */
+
+static bool
+aarch64_evpc_luti (struct expand_vec_perm_d *d, unsigned int bits)
+{
+  machine_mode mode = d->vmode;
+  bool sve_p = d->vec_flags == VEC_SVE_DATA;
+  /* LUTI only supports .B and .H.  */
+  if (GET_MODE_UNIT_SIZE (mode) > 2
+      || (!sve_p && (d->vec_flags != VEC_ADVSIMD
+		    || !known_eq (GET_MODE_SIZE (mode), 16))))
+    return false;
+
+  bool two_tables;
+  if (bits == 6)
+    {
+      if (!sve_p || !TARGET_SVE2p3 || !TARGET_NON_STREAMING
+	  || d->one_vector_p || !known_eq (GET_MODE_NUNITS (mode), 32))
+	return false;
+      two_tables = true;
+    }
+  else
+    {
+      if (!TARGET_LUT || BYTES_BIG_ENDIAN
+	  || (sve_p && !TARGET_SVE2_OR_SME2))
+	return false;
+
+      /* Advanced SIMD halfword LUTI4 always needs two table registers.
+	 SVE needs two below VL == 256 or when using both inputs.  */
+      two_tables = (bits == 4 && GET_MODE_UNIT_SIZE (mode) == 2
+		    && (!d->one_vector_p
+			|| !known_ge (GET_MODE_SIZE (mode), 32)));
+      if (!d->one_vector_p && !two_tables)
+	return false;
+
+      /* Duplicating the table does not make its upper half accessible, but
+	 there's an open question whether a DUP or EXT like rotation could be
+	 used to get access.  For now just reject.  */
+      if (two_tables && d->one_vector_p
+	  && !d->perm.all_in_range_p (0, 8))
+	return false;
+    }
+
+  machine_mode sel_mode = sve_p ? VNx16QImode : V8QImode;
+  rtx sel = aarch64_evpc_luti_indices (d, bits, sel_mode);
+  if (!sel)
+    return false;
+  if (d->testing_p)
+    return true;
+
+  machine_mode table_mode = mode;
+  rtx table = d->op0;
+  if (two_tables)
+    {
+      table_mode = aarch64_array_mode (mode, 2).require ();
+      table = gen_reg_rtx (table_mode);
+      /* Emit clobber to start live region for the entire table.  */
+      emit_clobber (table);
+      emit_move_insn (gen_lowpart (mode, table), d->op0);
+      emit_move_insn (simplify_gen_subreg (mode, table, table_mode,
+					 GET_MODE_SIZE (mode)), d->op1);
+    }
+  else if (!sve_p && GET_MODE_UNIT_SIZE (mode) == 2)
+    {
+      /* LUTI2 uses only the low four halfwords of the input.  */
+      table_mode = mode_for_vector (GET_MODE_INNER (mode), 4).require ();
+      table = gen_lowpart (table_mode, table);
+    }
+  sel = force_reg (sel_mode, sel);
+  if (bits == 6)
+    emit_insn (gen_aarch64_sve_luti6 (mode, d->target, table, sel));
+  else if (sve_p)
+    emit_insn (gen_aarch64_sve_luti (bits, table_mode, d->target, table,
+				     sel, const0_rtx));
+  else
+    emit_insn (gen_aarch64_lut (table_mode, sel_mode, d->target, table,
+				sel, const0_rtx, GEN_INT (bits)));
+  return true;
+}
+
 static bool
 aarch64_evpc_tbl (struct expand_vec_perm_d *d)
 {
@@ -29148,6 +29302,10 @@ aarch64_expand_vec_perm_const_1 (struct expand_vec_perm_d *d)
 	  else if (aarch64_evpc_rev64_ext (d))
 	    return true;
 	  else if (aarch64_evpc_reencode (d))
+	    return true;
+	  else if (aarch64_evpc_luti (d, 2)
+		   || aarch64_evpc_luti (d, 4)
+		   || aarch64_evpc_luti (d, 6))
 	    return true;
 
 	  if (d->vec_flags == VEC_SVE_DATA)
@@ -33946,6 +34104,81 @@ aarch64::report_not_enum (location_t location, tree fndecl, unsigned int argno,
 {
   error_at (location, "passing %wd to argument %d of %qE, which expects"
 	    " a valid %qT value", actual, argno + 1, fndecl, enumtype);
+}
+
+/* Return the scalar X, which has 32 or 64 bits, in a new register of the SVE
+   vector mode VMODE with the elements of VMODE other than element 0 set to
+   zero.  Element 0 is loaded with a scalar FMOV.  */
+
+static rtx
+aarch64_sve_load_elt0 (machine_mode vmode, rtx x)
+{
+  rtx res = gen_reg_rtx (vmode);
+  emit_set_insn (res, gen_rtx_UNSPEC (vmode,
+				      gen_rtvec (2, CONST0_RTX (vmode), x),
+				      UNSPEC_INSR));
+  return res;
+}
+
+/* Store element 0 of the SVE vector VEC, which has mode VMODE, in the
+   scalar register DEST.  */
+
+static void
+aarch64_sve_store_elt0 (rtx dest, rtx vec, machine_mode vmode)
+{
+  insn_code icode = convert_optab_handler (vec_extract_optab, vmode,
+					   GET_MODE (dest));
+  class expand_operand ops[3];
+  create_output_operand (&ops[0], dest, GET_MODE (dest));
+  create_input_operand (&ops[1], vec, vmode);
+  create_integer_operand (&ops[2], 0);
+  expand_insn (icode, 3, ops);
+  if (!rtx_equal_p (ops[0].value, dest))
+    emit_move_insn (dest, ops[0].value);
+}
+
+/* Expand the carry-less multiplication of A and B, which are scalars of the
+   same integer mode, using SVE2 PMULLB.  Store the least significant half of
+   the product in LO and, if HI is nonnull, the most significant half in HI.
+
+   For 8-bit and 32-bit inputs PMULLB produces the whole product as one
+   element of twice the width, in the scalar register that overlaps element 0
+   of the result.  Split it into two halves with a shift.  For 64-bit inputs
+   the product has 128 bits, so use the pair form of PMULLB, which writes the
+   two halves to elements 0 and 1.  Move element 1 to element 0 with UZP2.  */
+
+void
+aarch64_expand_sve_clmul (rtx lo, rtx hi, rtx a, rtx b)
+{
+  scalar_mode mode = as_a <scalar_mode> (GET_MODE (a));
+
+  if (mode == DImode)
+    {
+      machine_mode vmode = aarch64_full_sve_mode (mode).require ();
+      rtx x = aarch64_sve_load_elt0 (vmode, a);
+      rtx y = rtx_equal_p (a, b) ? x : aarch64_sve_load_elt0 (vmode, b);
+      rtx prod = gen_reg_rtx (vmode);
+      emit_insn (gen_aarch64_sve (UNSPEC_PMULLB_PAIR, vmode, prod, x, y));
+      aarch64_sve_store_elt0 (lo, prod, vmode);
+      if (hi)
+	{
+	  rtx high = gen_reg_rtx (vmode);
+	  emit_insn (gen_aarch64_sve (UNSPEC_UZP2, vmode, high, prod, prod));
+	  aarch64_sve_store_elt0 (hi, high, vmode);
+	}
+      return;
+    }
+
+  scalar_mode wmode = GET_MODE_WIDER_MODE (mode).require ();
+  rtx wide = gen_reg_rtx (wmode);
+  emit_insn (gen_aarch64_sve_pmullb_scalar (mode, wide, a, b));
+  emit_move_insn (lo, gen_lowpart (mode, wide));
+  if (hi)
+    {
+      rtx high = expand_shift (RSHIFT_EXPR, wmode, wide,
+			       GET_MODE_BITSIZE (mode), NULL_RTX, 1);
+      emit_move_insn (hi, gen_lowpart (mode, high));
+    }
 }
 
 /* Generate assembly to calculate CRC

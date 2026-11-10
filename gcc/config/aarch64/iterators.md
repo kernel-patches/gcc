@@ -226,8 +226,12 @@
 				    (V2SF "TARGET_FP8DOT4")
 				    (V4SF "TARGET_FP8DOT4")])
 
-(define_mode_iterator VDQ_HSF_FMMLA [(V8HF "TARGET_F8F16MM")
-				     (V4SF "TARGET_F8F32MM")])
+;; Same, but with the appropriate conditions for FMMLA support with FP16 source.
+(define_mode_iterator VQ_HSF_F16_FMMLA [(V8HF "TARGET_F16MM")
+				       (V4SF "TARGET_F16F32MM")])
+
+(define_mode_iterator VQ_HSF_F8_FMMLA [(V8HF "TARGET_F8F16MM")
+				      (V4SF "TARGET_F8F32MM")])
 
 ;; Modes suitable to use as the return type of a vcond expression.
 (define_mode_iterator VDQF_COND [V2SF V2SI V4SF V4SI V2DF V2DI])
@@ -596,7 +600,11 @@
 ;; Fully-packed SVE vector modes that have 16-bit float elements.
 (define_mode_iterator SVE_FULL_HF [VNx8BF VNx8HF])
 
-;; Pairs of the above.
+;; Same, but with the appropriate conditions for FMMLA support.
+(define_mode_iterator SVE_FULL_HF_FMMLA [(VNx8BF "TARGET_SVE_B16MM")
+					 (VNx8HF "TARGET_F16MM && TARGET_SVE2p2")])
+
+;; Pairs of SVE_FULL_HF.
 (define_mode_iterator SVE_FULL_HFx2 [VNx16BF VNx16HF])
 
 ;; {f16}{x1,x2}
@@ -1403,6 +1411,7 @@
     UNSPEC_ZIPQ1
     UNSPEC_ZIPQ2
     UNSPEC_SVE_LUTI
+    UNSPEC_SVE_LUTI6
 
     ;; All used in aarch64-sme.md
     UNSPEC_SME_ADD
@@ -1540,6 +1549,12 @@
 
 ;; For doubling width of an integer mode
 (define_mode_attr DWI [(QI "HI") (HI "SI") (SI "DI") (DI "TI")])
+
+;; Scalar integer modes for which SVE2 PMULLB has a non-pair form, and the
+;; element sizes of its sources and result.
+(define_mode_iterator SVE_PMULL_SCALAR [QI SI])
+(define_mode_attr Vpmull_etype [(QI "b") (SI "s")])
+(define_mode_attr Vpmull_wetype [(QI "h") (SI "d")])
 
 (define_mode_attr fcvt_change_mode [(SI "df") (DI "sf")])
 
@@ -3746,6 +3761,7 @@
 (define_int_iterator BSL_DUP [1 2])
 
 (define_int_iterator DOTPROD [UNSPEC_SDOT UNSPEC_UDOT])
+(define_int_iterator DOTPROD_FP [UNSPEC_FDOT])
 
 (define_int_iterator DOTPROD_I8MM [UNSPEC_USDOT UNSPEC_SUDOT])
 (define_int_iterator DOTPROD_US_ONLY [UNSPEC_USDOT])
@@ -4826,6 +4842,7 @@
 		      (UNSPEC_URSHL  "ur") (UNSPEC_SRSHL  "sr")
 		      (UNSPEC_UQRSHL  "u") (UNSPEC_SQRSHL  "s")
 		      (UNSPEC_SDOT "s") (UNSPEC_UDOT "u")
+		      (UNSPEC_FDOT "s")
 		      (UNSPEC_USDOT "us") (UNSPEC_SUDOT "su")
 		      (UNSPEC_SMATMUL "s") (UNSPEC_UMATMUL "u")
 		      (UNSPEC_USMATMUL "us")

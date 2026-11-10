@@ -77,10 +77,10 @@ extern tree make_ssa_name_fn (struct function *, tree, gimple *,
 			      unsigned int version = 0);
 extern void init_ssa_name_imm_use (tree);
 extern void release_ssa_name_fn (struct function *, tree);
-extern bool get_ptr_info_alignment (const_tree, unsigned int *,
+extern bool get_ssa_name_alignment (const_tree, unsigned int *,
 				    unsigned int *);
-extern void mark_ptr_info_alignment_unknown (tree);
-extern void set_ptr_info_alignment (tree, unsigned int, unsigned int);
+extern void mark_ssa_name_alignment_unknown (tree);
+extern void set_ssa_name_alignment (tree, unsigned int, unsigned int);
 extern void set_ptr_nonnull (tree);
 extern bool ptr_nonnull_p (tree);
 
@@ -88,7 +88,8 @@ extern tree copy_ssa_name_fn (struct function *, tree, gimple *);
 extern tree duplicate_ssa_name_fn (struct function *, tree, gimple *);
 extern void duplicate_ssa_name_pt_solution (tree dest, const pt_solution *);
 extern void duplicate_ssa_name_pt_solution (tree dest, tree src);
-extern void duplicate_ssa_name_range_info (tree dest, tree src);
+extern void duplicate_ssa_name_range_info (tree dest, tree src,
+					   bool remove_local_addr = false);
 extern void maybe_duplicate_ssa_info_at_copy (tree dest, tree src);
 extern void reset_flow_sensitive_info (tree);
 extern void reset_flow_sensitive_info_in_bb (basic_block);
