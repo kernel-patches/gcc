@@ -3594,6 +3594,14 @@ duplicate_decls (tree newdecl, tree olddecl, bool hiding, bool was_hidden)
      Update OLDDECL to be the same.  */
   DECL_ATTRIBUTES (olddecl) = DECL_ATTRIBUTES (newdecl);
 
+  /* NEWDECL's TLS model was chosen for NEWDECL alone, which may not have
+     been weak until merge_weak.  */
+  if (VAR_P (olddecl)
+      && CP_DECL_THREAD_LOCAL_P (olddecl)
+      && DECL_WEAK (olddecl)
+      && !processing_template_decl)
+    weak_decl_tls_model (olddecl);
+
   /* If OLDDECL had its DECL_RTL instantiated, re-invoke make_decl_rtl
     so that encode_section_info has a chance to look at the new decl
     flags and attributes.  */
@@ -6341,10 +6349,10 @@ warn_misplaced_attr_for_class_type (location_t location,
 /* Returns the cv-qualifiers that apply to the type specified
    by the DECLSPECS.  */
 
-static int
+static cv_qualifier
 get_type_quals (const cp_decl_specifier_seq *declspecs)
 {
-  int type_quals = TYPE_UNQUALIFIED;
+  auto type_quals = TYPE_UNQUALIFIED;
 
   if (decl_spec_seq_has_spec_p (declspecs, ds_const))
     type_quals |= TYPE_QUAL_CONST;
@@ -11048,7 +11056,7 @@ cp_finish_decomp (tree decl, cp_decomp *decomp, bool test_p)
       eltscnt = 2;
       if (pack != -1 ? count - 1 > eltscnt : count != eltscnt)
 	goto cnt_mismatch;
-      eltype = cp_build_qualified_type (TREE_TYPE (type), TYPE_QUALS (type));
+      eltype = cp_build_qualified_type (TREE_TYPE (type), cp_type_quals (type));
       for (unsigned int i = 0; i < count; i++)
 	{
 	  if ((unsigned) pack == i)
@@ -11094,7 +11102,7 @@ cp_finish_decomp (tree decl, cp_decomp *decomp, bool test_p)
 	}
       if (pack != -1 ? count - 1 > eltscnt : count != eltscnt)
 	goto cnt_mismatch;
-      eltype = cp_build_qualified_type (TREE_TYPE (type), TYPE_QUALS (type));
+      eltype = cp_build_qualified_type (TREE_TYPE (type), cp_type_quals (type));
       for (unsigned int i = 0; i < count; i++)
 	{
 	  if ((unsigned) pack == i)
@@ -14223,7 +14231,7 @@ grokdeclarator (const cp_declarator *declarator,
      a member function.  */
   cp_ref_qualifier rqual = REF_QUAL_NONE;
   /* cv-qualifiers that apply to the type specified by the DECLSPECS.  */
-  int type_quals = get_type_quals (declspecs);
+  auto type_quals = get_type_quals (declspecs);
   tree raises = NULL_TREE;
   int template_count = 0;
   tree returned_attrs = NULL_TREE;
@@ -17652,7 +17660,7 @@ grokparms (tree parmlist, tree *parms)
 
 	  /* Top-level qualifiers on the parameters are
 	     ignored for function types.  */
-	  type = cp_build_qualified_type (type, 0);
+	  type = cp_build_qualified_type (type, TYPE_UNQUALIFIED);
 	  if (TREE_CODE (type) == METHOD_TYPE)
 	    {
 	      error ("parameter %qD invalidly declared method type", decl);
