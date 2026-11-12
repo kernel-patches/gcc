@@ -4585,6 +4585,16 @@
 	= exact_div (GET_MODE_BITSIZE (<MODE>mode), 8).to_constant ();
       machine_mode pred_mode = aarch64_sve_pred_mode (full_mode);
       rtx ptrue = aarch64_ptrue_reg (VNx16BImode, lanes);
+      /* The predicate created above limits the VL but does not encapsulate
+	 the element width from the original mode.  However the interface to
+	 aarch64_ptrue_reg doesn't allow this so we have to create 1 predicate
+	 for the length and one for the shape, and AND them together.  Constant
+	 folding takes care of the rest.  This is easier than manually encoding
+	 the bits.  */
+      rtx mask
+	= force_reg (VNx16BImode,
+		     aarch64_ptrue_all (GET_MODE_UNIT_SIZE (<MODE>mode)));
+      emit_insn (gen_and3 (VNx16BImode, ptrue, ptrue, mask));
       rtx hint = gen_int_mode (SVE_MAYBE_NOT_PTRUE, SImode);
 
       rtx tmp = gen_reg_rtx (pred_mode);
@@ -9474,6 +9484,21 @@
 			   operands[2], operands[3], <nunits>);
   DONE;
 })
+
+(define_expand "@aarch64_qtbl<VB:mode><QTBL:mode>"
+  [(set (match_operand:VB 0 "register_operand")
+	(unspec:VB [(match_operand:QTBL 1 "register_operand")
+		    (match_operand:VB 2 "register_operand")]
+		   UNSPEC_TBL))]
+  "TARGET_SIMD")
+
+(define_expand "@aarch64_qtbx<VB:mode><QTBL:mode>"
+  [(set (match_operand:VB 0 "register_operand")
+	(unspec:VB [(match_operand:VB 1 "register_operand")
+		    (match_operand:QTBL 2 "register_operand")
+		    (match_operand:VB 3 "register_operand")]
+		   UNSPEC_TBX))]
+  "TARGET_SIMD")
 
 (define_insn "aarch64_qtbl1<mode>"
   [(set (match_operand:VB 0 "register_operand" "=w")

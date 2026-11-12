@@ -1665,55 +1665,44 @@
 ;;     or  $r12,$r12,$r13
 ;; Optimized to use bstrins.w instruction as below:
 ;;     bstrins.w   $r13,$r12,31,1
-(define_insn_and_split "*bstrins_w_for_ior_ashift_and_extend"
+(define_insn "*bstrins_w_for_ior_ashift_and_extend"
   [(set (match_operand:DI 0 "register_operand" "=r")
-	(any_or_plus:DI
-	  (and:DI (match_operand:DI 1 "register_operand" "r")
-		  (match_operand:SI 2 "const_int_operand" "i"))
-	  (ashift:DI
-	    (sign_extract:DI
-	      (match_operand:DI 3 "register_operand" "r")
-	      (match_operand:SI 4 "const_uimm5_operand")
-	      (const_int 0))
-	    (match_operand:SI 5 "const_uimm5_operand"))))]
-  "TARGET_64BIT && loongarch_pre_reload_split ()
-   && !reg_overlap_mentioned_p (operands[0], operands[3])
-   && INTVAL (operands[2]) != 0 && INTVAL (operands[5]) != 0
-   && INTVAL (operands[2]) == (1LL << INTVAL (operands[5])) - 1
-   && INTVAL (operands[4]) + INTVAL (operands[5]) == 0x20"
-  "#"
-  "&& true"
-  [(const_int 0)]
-  {
-    emit_move_insn (operands[0], operands[1]);
-    rtx len = GEN_INT (32 - INTVAL (operands[5]));
-    rtx dest = gen_lowpart (SImode, operands[0]);
-    rtx op = gen_lowpart (SImode, operands[3]);
-    emit_insn (gen_insvsi (dest, len, operands[5], op));
-  })
+	(sign_extend:DI
+	  (any_or_plus:SI
+	    (ashift:SI
+		(match_operand:SI 3 "register_operand" "r")
+		(match_operand    4 "const_uimm5_operand"))
+	    (subreg:SI
+	      (and:DI (match_operand:DI 1 "register_operand" "0")
+		      (match_operand    2 "const_int_operand"))
+	      0))))]
+  "TARGET_64BIT
+   && INTVAL (operands[4]) != 0
+   && UINTVAL (operands[2]) == (HWIT_1U << INTVAL (operands[4])) - 1"
+  "bstrins.w\t%0,%3,31,%4"
+  [(set_attr "move_type" "pick_ins")
+   (set_attr "mode" "SI")])
 
 ;; Optimize (a << imm1) | (b & imm2) to use bstrins.d instruction, the size of
 ;; a and b are 8 bits, 16 bits or 64bits, imm2 value should be equal to
 ;; (1LL << imm1) - 1.
-(define_insn_and_split "*bstrins_d_for_ior_ashift_and"
-  [(set (match_operand:DI 0 "register_operand" "=r")
-	(any_or_plus:DI
-	  (and:DI (match_operand:DI 1 "register_operand" "r")
-		  (match_operand:DI 2 "const_int_operand" "i"))
-	  (ashift:DI
-	      (match_operand:DI 3 "register_operand" "r")
-	      (match_operand:DI 4 "const_uimm63_operand"))))]
-  "TARGET_64BIT && loongarch_pre_reload_split ()
-   && !reg_overlap_mentioned_p (operands[0], operands[3])
-   && INTVAL (operands[2]) != 0 && INTVAL (operands[4]) != 0
-   && INTVAL (operands[2]) == (1LL << INTVAL (operands[4])) - 1"
+(define_insn_and_split "*bstrins_for_ior_ashift_and"
+  [(set (match_operand:GPR 0 "register_operand" "=r")
+	(any_or_plus:GPR
+	  (and:GPR (match_operand:GPR 1 "register_operand" "0")
+		   (match_operand     2 "const_int_operand"))
+	  (ashift:GPR
+	      (match_operand:GPR 3 "register_operand" "r")
+	      (match_operand     4 "const_int_operand"))))]
+  "(TARGET_64BIT || TARGET_32BIT_S)
+   && IN_RANGE (INTVAL (operands[4]), 1, GET_MODE_BITSIZE (<MODE>mode) - 1)
+   && UINTVAL (operands[2]) == (HWIT_1U << INTVAL (operands[4])) - 1"
   "#"
-  "&& true"
-  [(set (match_dup 0) (match_dup 1))
-   (set (zero_extract:DI (match_dup 0) (match_dup 2) (match_dup 4))
+  "&& reload_completed"
+  [(set (zero_extract:GPR (match_dup 0) (match_dup 2) (match_dup 4))
 	(match_dup 3))]
   {
-    operands[2] = GEN_INT (64 - INTVAL (operands[4]));
+    operands[2] = GEN_INT (GET_MODE_BITSIZE (<MODE>mode) - INTVAL (operands[4]));
   })
 
 (define_insn "and_load_zero_extend<mode>"
@@ -4670,37 +4659,16 @@
   "bytepick.w\t%0,%1,%2,<bytepick_imm>"
   [(set_attr "mode" "SI")])
 
-(define_mode_attr bitsize [(QI "8") (HI "16")])
-(define_mode_attr bytepick_imm [(QI "3") (HI "2")])
-(define_mode_attr bytepick_w_ashift_amount [(QI "24") (HI "16")])
-
-(define_insn "bytepick_w_<bytepick_imm>_extend"
+(define_insn "*bytepick_w_<bytepick_imm>_extend"
   [(set (match_operand:DI 0 "register_operand" "=r")
-	(ior:DI
-	  (ashift:DI
-	    (sign_extend:DI
-	      (subreg:SHORT (match_operand:DI 1 "register_operand" "r") 0))
-	    (const_int <bytepick_w_ashift_amount>))
-	  (zero_extract:DI (match_operand:DI 2 "register_operand" "r")
-			   (const_int <bytepick_w_ashift_amount>)
-			   (const_int <bitsize>))))]
-  "TARGET_64BIT || TARGET_32BIT_S"
-  "bytepick.w\t%0,%2,%1,<bytepick_imm>"
-  [(set_attr "mode" "SI")])
-
-(define_insn "bytepick_w_1_extend"
-  [(set (match_operand:DI 0 "register_operand" "=r")
-	(ior:DI
-	  (ashift:DI
-	    (sign_extract:DI (match_operand:DI 1 "register_operand" "r")
-                         (const_int 24)
-                         (const_int 0))
-        (const_int 8))
-	  (zero_extract:DI (match_operand:DI 2 "register_operand" "r")
-			   (const_int 8)
-			   (const_int 24))))]
-  "TARGET_64BIT || TARGET_32BIT_S"
-  "bytepick.w\t%0,%2,%1,1"
+	(sign_extend:DI
+	  (any_or_plus:SI
+	    (lshiftrt:SI (match_operand:SI 1 "register_operand" "r")
+			 (const_int <bytepick_w_lshiftrt_amount>))
+	    (ashift:SI (match_operand:SI 2 "register_operand" "r")
+		       (const_int bytepick_w_ashift_amount)))))]
+  "TARGET_64BIT"
+  "bytepick.w\t%0,%1,%2,<bytepick_imm>"
   [(set_attr "mode" "SI")])
 
 (define_insn "*bytepick_d_<bytepick_imm>"
