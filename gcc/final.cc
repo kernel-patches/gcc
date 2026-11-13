@@ -268,7 +268,7 @@ int
 dbr_sequence_length (void)
 {
   if (final_sequence != 0)
-    return XVECLEN (final_sequence, 0) - 1;
+    return final_sequence->len () - 1;
   else
     return 0;
 }
@@ -1305,9 +1305,10 @@ shorten_branches (rtx_insn *first)
 	      continue;
 	    }
 
-	  if (NONJUMP_INSN_P (insn) && GET_CODE (PATTERN (insn)) == SEQUENCE)
+	  rtx_sequence *seqn;
+	  if (NONJUMP_INSN_P (insn)
+	      && (seqn = dyn_cast <rtx_sequence *> (PATTERN (insn))))
 	    {
-	      rtx_sequence *seqn = as_a <rtx_sequence *> (PATTERN (insn));
 	      int i;
 
 	      body = PATTERN (insn);
@@ -2543,7 +2544,8 @@ final_scan_insn_1 (rtx_insn *insn, FILE *file, int optimize_p ATTRIBUTE_UNUSED,
 		  {
 #ifdef ASM_OUTPUT_ADDR_VEC_ELT
 		    ASM_OUTPUT_ADDR_VEC_ELT
-		      (file, CODE_LABEL_NUMBER (XEXP (XVECEXP (body, 0, idx), 0)));
+		      (file, CODE_LABEL_NUMBER
+		       (label_ref_label (XVECEXP (body, 0, idx))));
 #else
 		    gcc_unreachable ();
 #endif
@@ -2554,8 +2556,9 @@ final_scan_insn_1 (rtx_insn *insn, FILE *file, int optimize_p ATTRIBUTE_UNUSED,
 		    ASM_OUTPUT_ADDR_DIFF_ELT
 		      (file,
 		       body,
-		       CODE_LABEL_NUMBER (XEXP (XVECEXP (body, 1, idx), 0)),
-		       CODE_LABEL_NUMBER (XEXP (XEXP (body, 0), 0)));
+		       CODE_LABEL_NUMBER
+		       (label_ref_label (XVECEXP (body, 1, idx))),
+		       CODE_LABEL_NUMBER (label_ref_label (XEXP (body, 0))));
 #else
 		    gcc_unreachable ();
 #endif
@@ -3688,9 +3691,10 @@ output_asm_label (rtx x)
 
   if (GET_CODE (x) == LABEL_REF)
     x = label_ref_label (x);
+  rtx_note *note = dyn_cast<rtx_note *> (x);
   if (LABEL_P (x)
-      || (NOTE_P (x)
-	  && NOTE_KIND (x) == NOTE_INSN_DELETED_LABEL))
+      || (note
+	  && NOTE_KIND (note) == NOTE_INSN_DELETED_LABEL))
     ASM_GENERATE_INTERNAL_LABEL (buf, "L", CODE_LABEL_NUMBER (x));
   else
     output_operand_lossage ("'%%l' operand isn't a label");
@@ -4163,14 +4167,14 @@ leaf_function_p (void)
 
   for (insn = get_insns (); insn; insn = NEXT_INSN (insn))
     {
-      if (CALL_P (insn)
-	  && ! SIBLING_CALL_P (insn)
-	  && ! FAKE_CALL_P (insn))
+      rtx_call_insn *call = dyn_cast<rtx_call_insn *> (insn);
+      if (call && ! SIBLING_CALL_P (call) && ! FAKE_CALL_P (call))
 	return false;
+      rtx_sequence *seq;
       if (NONJUMP_INSN_P (insn)
-	  && GET_CODE (PATTERN (insn)) == SEQUENCE
-	  && CALL_P (XVECEXP (PATTERN (insn), 0, 0))
-	  && ! SIBLING_CALL_P (XVECEXP (PATTERN (insn), 0, 0)))
+	  && (seq = dyn_cast <rtx_sequence *> (PATTERN (insn)))
+	  && (call = dyn_cast<rtx_call_insn *> (seq->insn (0)))
+	  && ! SIBLING_CALL_P (call))
 	return false;
     }
 
@@ -4529,12 +4533,10 @@ rest_of_clean_state (void)
       SET_PREV_INSN (insn) = NULL;
 
       rtx_insn *call_insn = insn;
+      rtx_sequence *seq;
       if (NONJUMP_INSN_P (call_insn)
-	  && GET_CODE (PATTERN (call_insn)) == SEQUENCE)
-	{
-	  rtx_sequence *seq = as_a <rtx_sequence *> (PATTERN (call_insn));
-	  call_insn = seq->insn (0);
-	}
+	  && (seq = dyn_cast <rtx_sequence *> (PATTERN (call_insn))))
+	call_insn = seq->insn (0);
       if (CALL_P (call_insn))
 	{
 	  rtx note
@@ -4699,10 +4701,10 @@ collect_fn_hard_reg_usage (void)
       if (!NONDEBUG_INSN_P (insn))
 	continue;
 
-      if (CALL_P (insn)
-	  && !self_recursive_call_p (insn))
+      auto call = dyn_cast<rtx_call_insn *> (insn);
+      if (call && !self_recursive_call_p (call))
 	function_used_regs
-	  |= insn_callee_abi (insn).full_and_partial_reg_clobbers ();
+	  |= insn_callee_abi (call).full_and_partial_reg_clobbers ();
 
       find_all_hard_reg_sets (insn, &insn_used_regs, false);
       function_used_regs |= insn_used_regs;

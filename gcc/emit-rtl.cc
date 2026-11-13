@@ -2994,8 +2994,8 @@ unshare_all_rtl_again (rtx_insn *insn)
       {
 	reset_used_flags (PATTERN (p));
 	reset_used_flags (REG_NOTES (p));
-	if (CALL_P (p))
-	  reset_used_flags (CALL_INSN_FUNCTION_USAGE (p));
+	if (auto call = dyn_cast<rtx_call_insn *> (p))
+	  reset_used_flags (CALL_INSN_FUNCTION_USAGE (call));
       }
 
   /* Make sure that virtual stack slots are not shared.  */
@@ -3031,7 +3031,7 @@ unshare_all_rtl (void)
    Recursively does the same for subexpressions.  */
 
 static void
-verify_rtx_sharing (rtx orig, rtx insn)
+verify_rtx_sharing (rtx orig, rtx_insn *insn)
 {
   rtx x = orig;
   int i;
@@ -3139,13 +3139,13 @@ verify_rtx_sharing (rtx orig, rtx insn)
 /* Reset used-flags for INSN.  */
 
 static void
-reset_insn_used_flags (rtx insn)
+reset_insn_used_flags (rtx_insn *insn)
 {
   gcc_assert (INSN_P (insn));
   reset_used_flags (PATTERN (insn));
   reset_used_flags (REG_NOTES (insn));
-  if (CALL_P (insn))
-    reset_used_flags (CALL_INSN_FUNCTION_USAGE (insn));
+  if (auto call = dyn_cast<rtx_call_insn *> (insn))
+    reset_used_flags (CALL_INSN_FUNCTION_USAGE (call));
 }
 
 /* Go through all the RTL insn bodies and clear all the USED bits.  */
@@ -3164,7 +3164,7 @@ reset_all_used_flags (void)
 	    gcc_assert (REG_NOTES (p) == NULL);
 	    for (int i = 0; i < seq->len (); i++)
 	      {
-		rtx insn = seq->element (i);
+		rtx_insn *insn = seq->insn (i);
 		if (INSN_P (insn))
 		  reset_insn_used_flags (insn);
 	      }
@@ -3177,13 +3177,13 @@ reset_all_used_flags (void)
 /* Verify sharing in INSN.  */
 
 static void
-verify_insn_sharing (rtx insn)
+verify_insn_sharing (rtx_insn *insn)
 {
   gcc_assert (INSN_P (insn));
   verify_rtx_sharing (PATTERN (insn), insn);
   verify_rtx_sharing (REG_NOTES (insn), insn);
-  if (CALL_P (insn))
-    verify_rtx_sharing (CALL_INSN_FUNCTION_USAGE (insn), insn);
+  if (auto call = dyn_cast<rtx_call_insn *> (insn))
+    verify_rtx_sharing (CALL_INSN_FUNCTION_USAGE (call), call);
 }
 
 /* Go through all the RTL insn bodies and check that there is no unexpected
@@ -3205,7 +3205,7 @@ verify_rtl_sharing (void)
 	if (rtx_sequence *seq = dyn_cast<rtx_sequence *> (pat))
 	  for (int i = 0; i < seq->len (); i++)
 	      {
-		rtx insn = seq->element (i);
+		rtx_insn *insn = seq->insn (i);
 		if (INSN_P (insn))
 		  verify_insn_sharing (insn);
 	      }
@@ -3229,9 +3229,9 @@ unshare_all_rtl_in_chain (rtx_insn *insn)
       {
 	PATTERN (insn) = copy_rtx_if_shared (PATTERN (insn));
 	REG_NOTES (insn) = copy_rtx_if_shared (REG_NOTES (insn));
-	if (CALL_P (insn))
-	  CALL_INSN_FUNCTION_USAGE (insn)
-	    = copy_rtx_if_shared (CALL_INSN_FUNCTION_USAGE (insn));
+	if (auto call = dyn_cast<rtx_call_insn *> (insn))
+	  CALL_INSN_FUNCTION_USAGE (call)
+	    = copy_rtx_if_shared (CALL_INSN_FUNCTION_USAGE (call));
       }
 }
 
@@ -3636,9 +3636,9 @@ next_insn (rtx_insn *insn)
   if (insn)
     {
       insn = NEXT_INSN (insn);
-      if (insn && NONJUMP_INSN_P (insn)
-	  && GET_CODE (PATTERN (insn)) == SEQUENCE)
-	insn = as_a <rtx_sequence *> (PATTERN (insn))->insn (0);
+      if (insn && NONJUMP_INSN_P (insn))
+	if (rtx_sequence *seq = dyn_cast <rtx_sequence *> (PATTERN (insn)))
+	  insn = seq->insn (0);
     }
 
   return insn;
@@ -4051,7 +4051,7 @@ try_split (rtx pat, rtx_insn *trial, int last)
       if (JUMP_P (insn))
 	{
 	  if (JUMP_P (trial))
-	    CROSSING_JUMP_P (insn) = CROSSING_JUMP_P (trial);
+	    set_crossing_jump (insn, CROSSING_JUMP_P (trial));
 	  mark_jump_label (PATTERN (insn), insn, 0);
 	  njumps++;
 	  if (probability.initialized_p ()
@@ -4070,23 +4070,23 @@ try_split (rtx pat, rtx_insn *trial, int last)
 
   /* If we are splitting a CALL_INSN, look for the CALL_INSN
      in SEQ and copy any additional information across.  */
-  if (CALL_P (trial))
+  if (auto call_trial = dyn_cast<rtx_call_insn *> (trial))
     {
       for (insn = insn_last; insn ; insn = PREV_INSN (insn))
-	if (CALL_P (insn))
+	if (auto call = dyn_cast<rtx_call_insn *> (insn))
 	  {
 	    gcc_assert (call_insn == NULL_RTX);
 	    call_insn = insn;
 
 	    /* Add the old CALL_INSN_FUNCTION_USAGE to whatever the
 	       target may have explicitly specified.  */
-	    rtx *p = &CALL_INSN_FUNCTION_USAGE (insn);
+	    rtx *p = &CALL_INSN_FUNCTION_USAGE (call);
 	    while (*p)
 	      p = &XEXP (*p, 1);
-	    *p = CALL_INSN_FUNCTION_USAGE (trial);
+	    *p = CALL_INSN_FUNCTION_USAGE (call_trial);
 
 	    /* Preserve the ABI information from the original call.  */
-	    CALL_INSN_ABI_ID (insn) = CALL_INSN_ABI_ID (trial);
+	    CALL_INSN_ABI_ID (call) = CALL_INSN_ABI_ID (call_trial);
 
 	    /* If the old call was a sibling call, the new one must
 	       be too.  */
@@ -4314,28 +4314,27 @@ link_insn_into_chain (rtx_insn *insn, rtx_insn *prev, rtx_insn *next)
   if (prev != NULL)
     {
       SET_NEXT_INSN (prev) = insn;
-      if (NONJUMP_INSN_P (prev) && GET_CODE (PATTERN (prev)) == SEQUENCE)
-	{
-	  rtx_sequence *sequence = as_a <rtx_sequence *> (PATTERN (prev));
+      if (NONJUMP_INSN_P (prev))
+	if (rtx_sequence *sequence
+	    = dyn_cast <rtx_sequence *> (PATTERN (prev)))
 	  SET_NEXT_INSN (sequence->insn (sequence->len () - 1)) = insn;
-	}
     }
   if (next != NULL)
     {
       SET_PREV_INSN (next) = insn;
-      if (NONJUMP_INSN_P (next) && GET_CODE (PATTERN (next)) == SEQUENCE)
-	{
-	  rtx_sequence *sequence = as_a <rtx_sequence *> (PATTERN (next));
+      if (NONJUMP_INSN_P (next))
+	if (rtx_sequence *sequence
+	    = dyn_cast <rtx_sequence *> (PATTERN (next)))
 	  SET_PREV_INSN (sequence->insn (0)) = insn;
-	}
     }
 
-  if (NONJUMP_INSN_P (insn) && GET_CODE (PATTERN (insn)) == SEQUENCE)
-    {
-      rtx_sequence *sequence = as_a <rtx_sequence *> (PATTERN (insn));
-      SET_PREV_INSN (sequence->insn (0)) = prev;
-      SET_NEXT_INSN (sequence->insn (sequence->len () - 1)) = next;
-    }
+  if (NONJUMP_INSN_P (insn))
+    if (rtx_sequence *sequence
+	= dyn_cast <rtx_sequence *> (PATTERN (insn)))
+      {
+	SET_PREV_INSN (sequence->insn (0)) = prev;
+	SET_NEXT_INSN (sequence->insn (sequence->len () - 1)) = next;
+      }
 }
 
 /* Add INSN to the end of the doubly-linked list.
@@ -4499,11 +4498,10 @@ remove_insn (rtx_insn *insn)
   if (prev)
     {
       SET_NEXT_INSN (prev) = next;
-      if (NONJUMP_INSN_P (prev) && GET_CODE (PATTERN (prev)) == SEQUENCE)
-	{
-	  rtx_sequence *sequence = as_a <rtx_sequence *> (PATTERN (prev));
+      if (NONJUMP_INSN_P (prev))
+	if (rtx_sequence *sequence
+	    = dyn_cast <rtx_sequence *> (PATTERN (prev)))
 	  SET_NEXT_INSN (sequence->insn (sequence->len () - 1)) = next;
-	}
     }
   else
     {
@@ -4522,11 +4520,10 @@ remove_insn (rtx_insn *insn)
   if (next)
     {
       SET_PREV_INSN (next) = prev;
-      if (NONJUMP_INSN_P (next) && GET_CODE (PATTERN (next)) == SEQUENCE)
-	{
-	  rtx_sequence *sequence = as_a <rtx_sequence *> (PATTERN (next));
+      if (NONJUMP_INSN_P (next))
+	if (rtx_sequence *sequence
+	    = dyn_cast <rtx_sequence *> (PATTERN (next)))
 	  SET_PREV_INSN (sequence->insn (0)) = prev;
-	}
     }
   else
     {
@@ -6667,7 +6664,7 @@ emit_copy_of_insn_after (rtx_insn *insn, rtx_insn *after)
 
     case JUMP_INSN:
       new_rtx = emit_jump_insn_after (copy_insn (PATTERN (insn)), after);
-      CROSSING_JUMP_P (new_rtx) = CROSSING_JUMP_P (insn);
+      set_crossing_jump (new_rtx, CROSSING_JUMP_P (insn));
       break;
 
     case DEBUG_INSN:

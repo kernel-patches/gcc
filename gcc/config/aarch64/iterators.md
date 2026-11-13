@@ -215,6 +215,13 @@
 ;; Advanced SIMD single Float modes.
 (define_mode_iterator VDQSF [V2SF V4SF])
 
+;; Advanced SIMD half and single Float modes.
+(define_mode_iterator VDQHSF [
+	(V4HF "TARGET_SIMD_F16INST")
+	(V8HF "TARGET_SIMD_F16INST")
+	V2SF V4SF
+])
+
 ;; Quad vector float modes with half/bfloat elements.
 (define_mode_iterator VQ_BHF [V8HF V8BF])
 
@@ -973,8 +980,6 @@
     UNSPEC_FMULX	; Used in aarch64-simd.md.
     UNSPEC_USQADD	; Used in aarch64-simd.md.
     UNSPEC_SUQADD	; Used in aarch64-simd.md.
-    UNSPEC_SSRA		; Used in aarch64-simd.md.
-    UNSPEC_USRA		; Used in aarch64-simd.md.
     UNSPEC_SRSHR	; Used in aarch64-simd.md.
     UNSPEC_URSHR	; Used in aarch64-simd.md.
     UNSPEC_SQSHLU	; Used in aarch64-simd.md.
@@ -3795,7 +3800,6 @@
 (define_int_iterator VQSHL [UNSPEC_SQSHL UNSPEC_UQSHL
                             UNSPEC_SQRSHL UNSPEC_UQRSHL])
 
-(define_int_iterator VSRA [UNSPEC_SSRA UNSPEC_USRA])
 
 (define_int_iterator VSLRI [UNSPEC_SSLI UNSPEC_USLI
 			      UNSPEC_SSRI UNSPEC_USRI])
@@ -4841,7 +4845,6 @@
 		      (UNSPEC_USQADD "us") (UNSPEC_SUQADD "su")
 		      (UNSPEC_SSLI  "s") (UNSPEC_USLI  "u")
 		      (UNSPEC_SSRI  "s") (UNSPEC_USRI  "u")
-		      (UNSPEC_USRA  "u") (UNSPEC_SSRA  "s")
 		      (UNSPEC_URSHR  "ur") (UNSPEC_SRSHR  "sr")
 		      (UNSPEC_SQSHLU "s") (UNSPEC_SQSHL   "s")
 		      (UNSPEC_UQSHL  "u")

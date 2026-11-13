@@ -1583,9 +1583,18 @@ jump_table_for_label (const rtx_code_label *label)
   (RTL_FLAG_CHECK6 ("RTX_FRAME_RELATED_P", (RTX), DEBUG_INSN, INSN,	\
 		    CALL_INSN, JUMP_INSN, BARRIER, SET)->frame_related)
 
-/* 1 if JUMP RTX is a crossing jump.  */
-#define CROSSING_JUMP_P(RTX) \
-  (RTL_FLAG_CHECK1 ("CROSSING_JUMP_P", (RTX), JUMP_INSN)->jump)
+/* If JUMP RTX is a crossing jump.  */
+inline bool
+CROSSING_JUMP_P (const rtx_insn *insn)
+{
+  return RTL_FLAG_CHECK1 ("CROSSING_JUMP_P", insn, JUMP_INSN)->jump;
+}
+
+inline void
+set_crossing_jump (rtx_insn *insn, bool set)
+{
+  RTL_FLAG_CHECK1 ("CROSSING_JUMP_P", insn, JUMP_INSN)->jump = set;
+}
 
 /* 1 if RTX is a call to a const function.  Built from ECF_CONST and
    TREE_READONLY.  */
@@ -1614,13 +1623,24 @@ jump_table_for_label (const rtx_code_label *label)
 #define INSN_ANNULLED_BRANCH_P(RTX)					\
   (RTL_FLAG_CHECK1 ("INSN_ANNULLED_BRANCH_P", (RTX), JUMP_INSN)->unchanging)
 
-/* 1 if RTX is an insn in a delay slot and is from the target of the branch.
+/* If RTX is an insn in a delay slot and is from the target of the branch.
    If the branch insn has INSN_ANNULLED_BRANCH_P set, this insn should only be
    executed if the branch is taken.  For annulled branches with this bit
    clear, the insn should be executed only if the branch is not taken.  */
-#define INSN_FROM_TARGET_P(RTX)						\
-  (RTL_FLAG_CHECK3 ("INSN_FROM_TARGET_P", (RTX), INSN, JUMP_INSN, \
-		    CALL_INSN)->in_struct)
+
+inline bool
+INSN_FROM_TARGET_P (const rtx_insn *insn)
+{
+  return RTL_FLAG_CHECK3 ("INSN_FROM_TARGET_P", insn, INSN, JUMP_INSN,
+		    CALL_INSN)->in_struct;
+}
+
+inline void
+set_insn_from_target (rtx_insn *insn, bool set)
+{
+  RTL_FLAG_CHECK3 ("INSN_FROM_TARGET_P", insn, INSN, JUMP_INSN,
+		    CALL_INSN)->in_struct = set;
+}
 
 /* In an ADDR_DIFF_VEC, the flags for RTX for use by branch shortening.
    See the comments for ADDR_DIFF_VEC in rtl.def.  */
@@ -1709,10 +1729,6 @@ extern const char * const reg_note_name[];
    Other kinds of NOTEs are identified by negative numbers here.  */
 #define NOTE_KIND(INSN) XCINT (INSN, 4, NOTE)
 
-/* Nonzero if INSN is a note marking the beginning of a basic block.  */
-#define NOTE_INSN_BASIC_BLOCK_P(INSN) \
-  (NOTE_P (INSN) && NOTE_KIND (INSN) == NOTE_INSN_BASIC_BLOCK)
-
 /* Nonzero if INSN is a debug nonbind marker note,
    for which NOTE_MARKER_LOCATION can be used.  */
 #define NOTE_MARKER_P(INSN)				\
@@ -1741,10 +1757,12 @@ extern const char * const reg_note_name[];
 
 /* Evaluate to TRUE if INSN is a debug insn that denotes a variable
    location/value tracking annotation.  */
-#define DEBUG_BIND_INSN_P(INSN)			\
-  (DEBUG_INSN_P (INSN)				\
-   && (GET_CODE (PATTERN (INSN))		\
-       == VAR_LOCATION))
+inline bool
+DEBUG_BIND_INSN_P (const rtx_insn *insn)
+{
+  return DEBUG_INSN_P (insn) && GET_CODE (PATTERN (insn)) == VAR_LOCATION;
+}
+
 /* Evaluate to TRUE if INSN is a debug insn that denotes a program
    source location marker.  */
 #define DEBUG_MARKER_INSN_P(INSN)		\
@@ -1795,8 +1813,17 @@ extern const char * const reg_note_name[];
 
 /* 1 if RTX is emitted after a call, but it should take effect before
    the call returns.  */
-#define NOTE_DURING_CALL_P(RTX)				\
-  (RTL_FLAG_CHECK1 ("NOTE_VAR_LOCATION_DURING_CALL_P", (RTX), NOTE)->call)
+inline bool
+NOTE_DURING_CALL_P (const rtx_insn *note)
+{
+  return RTL_FLAG_CHECK1 ("NOTE_VAR_LOCATION_DURING_CALL_P", note, NOTE)->call;
+}
+
+inline void
+set_note_during_call_p (rtx_insn *note, bool set)
+{
+  RTL_FLAG_CHECK1 ("NOTE_VAR_LOCATION_DURING_CALL_P", note, NOTE)->call = set;
+}
 
 /* DEBUG_EXPR_DECL corresponding to a DEBUG_EXPR RTX.  */
 #define DEBUG_EXPR_TREE_DECL(RTX) XCTREE (RTX, 0, DEBUG_EXPR)
@@ -1824,6 +1851,14 @@ enum insn_note
 
   NOTE_INSN_MAX
 };
+
+/* Nonzero if INSN is a note marking the beginning of a basic block.  */
+
+inline bool
+NOTE_INSN_BASIC_BLOCK_P (const rtx_insn *insn)
+{
+  return NOTE_P (insn) && NOTE_KIND (insn) == NOTE_INSN_BASIC_BLOCK;
+}
 
 /* Names for NOTE insn's other than line numbers.  */
 

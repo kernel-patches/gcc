@@ -853,7 +853,7 @@ const struct tune_params *current_tune;
 int arm_fpu_attr;
 
 /* Used for Thumb call_via trampolines.  */
-rtx thumb_call_via_label[14];
+rtx_code_label *thumb_call_via_label[14];
 static int thumb_call_reg_needed;
 
 /* The bits in this mask specify which instruction scheduling options should
@@ -21008,7 +21008,7 @@ arm_output_function_epilogue (FILE *)
 	 of call_reg and call_value_reg type insns.  */
       for (regno = 0; regno < LR_REGNUM; regno++)
 	{
-	  rtx label = cfun->machine->call_via[regno];
+	  rtx_insn *label = cfun->machine->call_via[regno];
 
 	  if (label != NULL)
 	    {
@@ -24544,19 +24544,19 @@ arm_final_prescan_insn (rtx_insn *insn)
       /* Flag which part of the IF_THEN_ELSE is the LABEL_REF.  */
       int then_not_else = TRUE;
       rtx_insn *this_insn = start_insn;
-      rtx label = 0;
+      rtx_insn *label = 0;
 
       /* Register the insn jumped to.  */
       if (reverse)
         {
 	  if (!seeking_return)
-	    label = XEXP (SET_SRC (body), 0);
+	    label = label_ref_label (SET_SRC (body));
         }
       else if (GET_CODE (XEXP (SET_SRC (body), 1)) == LABEL_REF)
-	label = XEXP (XEXP (SET_SRC (body), 1), 0);
+	label = label_ref_label (XEXP (SET_SRC (body), 1));
       else if (GET_CODE (XEXP (SET_SRC (body), 2)) == LABEL_REF)
 	{
-	  label = XEXP (XEXP (SET_SRC (body), 2), 0);
+	  label = label_ref_label (XEXP (SET_SRC (body), 2));
 	  then_not_else = FALSE;
 	}
       else if (ANY_RETURN_P (XEXP (SET_SRC (body), 1)))
@@ -24654,7 +24654,8 @@ arm_final_prescan_insn (rtx_insn *insn)
 		  && GET_CODE (SET_DEST (scanbody)) == PC)
 		{
 		  if (GET_CODE (SET_SRC (scanbody)) == LABEL_REF
-		      && XEXP (SET_SRC (scanbody), 0) == label && !reverse)
+		      && label_ref_label (SET_SRC (scanbody)) == label
+		      && !reverse)
 		    {
 		      arm_ccfsm_state = 2;
 		      succeed = TRUE;
@@ -25684,7 +25685,7 @@ thumb1_final_prescan_insn (rtx_insn *insn)
 	    }
 	}
       else if (conds != CONDS_NOCOND)
-	cfun->machine->thumb1_cc_insn = NULL_RTX;
+	cfun->machine->thumb1_cc_insn = nullptr;
     }
 
     /* Check if unexpected far jump is used.  */
@@ -27410,7 +27411,7 @@ const char *
 thumb_call_via_reg (rtx reg)
 {
   int regno = REGNO (reg);
-  rtx *labelp;
+  rtx_code_label **labelp;
 
   gcc_assert (regno < LR_REGNUM);
 
@@ -27432,7 +27433,8 @@ thumb_call_via_reg (rtx reg)
       labelp = cfun->machine->call_via + regno;
     }
 
-  output_asm_insn ("bl\t%a0", labelp);
+  rtx temp = *labelp;
+  output_asm_insn ("bl\t%a0", &temp);
   return "";
 }
 
@@ -27833,7 +27835,7 @@ arm_file_end (void)
 
   for (regno = 0; regno < LR_REGNUM; regno++)
     {
-      rtx label = thumb_call_via_label[regno];
+      rtx_code_label *label = thumb_call_via_label[regno];
 
       if (label != 0)
 	{

@@ -6253,7 +6253,7 @@ static rtx call_arguments;
 /* Compute call_arguments.  */
 
 static void
-prepare_call_arguments (basic_block bb, rtx_insn *insn)
+prepare_call_arguments (basic_block bb, rtx_call_insn *insn)
 {
   rtx link, x, call;
   rtx prev, cur, next;
@@ -8898,7 +8898,7 @@ emit_note_insn_var_location (variable **varp, emit_note_data *data)
     {
       note = emit_note_after (NOTE_INSN_VAR_LOCATION, insn);
       if (where == EMIT_NOTE_AFTER_CALL_INSN)
-	NOTE_DURING_CALL_P (note) = true;
+	set_note_during_call_p (note, true);
     }
   else
     {
@@ -10013,7 +10013,7 @@ vt_init_cfa_base (void)
 
 /* Reemit INSN, a MARKER_DEBUG_INSN, as a note.  */
 
-static rtx_insn *
+static rtx_note *
 reemit_marker_as_note (rtx_insn *insn)
 {
   gcc_checking_assert (DEBUG_MARKER_INSN_P (insn));
@@ -10295,8 +10295,8 @@ vt_initialize (void)
 
 		  if (MAY_HAVE_DEBUG_BIND_INSNS)
 		    {
-		      if (CALL_P (insn))
-			prepare_call_arguments (bb, insn);
+		      if (auto call = dyn_cast<rtx_call_insn *> (insn))
+			prepare_call_arguments (bb, call);
 		      cselib_process_insn (insn);
 		      if (dump_file && (dump_flags & TDF_DETAILS))
 			{

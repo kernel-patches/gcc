@@ -148,7 +148,8 @@ static tree *get_block_vector (tree, int *);
 extern tree debug_find_var_in_block_tree (tree, tree);
 /* We always define `record_insns' even if it's not used so that we
    can always export `prologue_epilogue_contains'.  */
-static void record_insns (rtx_insn *, rtx, hash_table<insn_cache_hasher> **)
+static void record_insns (rtx_insn *, rtx_insn *,
+			  hash_table<insn_cache_hasher> **)
      ATTRIBUTE_UNUSED;
 static bool contains (const rtx_insn *, hash_table<insn_cache_hasher> *);
 static void prepare_function_start (void);
@@ -2071,8 +2072,8 @@ instantiate_virtual_regs (void)
 	instantiate_virtual_regs_in_rtx (&REG_NOTES (insn));
 
 	/* Instantiate any virtual registers in CALL_INSN_FUNCTION_USAGE.  */
-	if (CALL_P (insn))
-	  instantiate_virtual_regs_in_rtx (&CALL_INSN_FUNCTION_USAGE (insn));
+	if (auto call = dyn_cast<rtx_call_insn *> (insn))
+	  instantiate_virtual_regs_in_rtx (&CALL_INSN_FUNCTION_USAGE (call));
       }
 
   /* Instantiate the virtual registers in the DECLs for debugging purposes.  */
@@ -5811,7 +5812,8 @@ dump_stack_clash_frame_info (enum stack_clash_probes probes, bool residuals)
    for the first time.  */
 
 static void
-record_insns (rtx_insn *insns, rtx end, hash_table<insn_cache_hasher> **hashp)
+record_insns (rtx_insn *insns, rtx_insn *end,
+	      hash_table<insn_cache_hasher> **hashp)
 {
   rtx_insn *tmp;
   hash_table<insn_cache_hasher> *hash = *hashp;
@@ -6340,7 +6342,8 @@ thread_prologue_and_epilogue_insns (void)
 
       rtx_insn *insn = BB_END (e->src);
 
-      if (!(CALL_P (insn) && SIBLING_CALL_P (insn)))
+      auto call = dyn_cast<rtx_call_insn *> (insn);
+      if (!(call && SIBLING_CALL_P (call)))
 	continue;
 
       rtx_insn *ep_seq;

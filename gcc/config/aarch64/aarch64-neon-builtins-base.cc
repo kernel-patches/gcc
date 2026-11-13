@@ -125,6 +125,25 @@ build_vec_dup (tree type, tree elem)
 	   : fold_build1 (VEC_DUPLICATE_EXPR, type, elem);
 }
 
+/* Build `VAL >> AMOUNT` for the integer vector type TYPE, conforming to ACLE
+   semantics.  AMOUNT is an integer constant.  */
+tree
+build_shift_right (tree type, tree val, tree amount)
+{
+  auto bits = element_precision (type);
+  if (wi::ltu_p (wi::to_wide (amount), bits))
+    return fold_build2 (RSHIFT_EXPR, type, val, amount);
+
+  /* A logical (unsigned) shift by the element width shifts every bit out.  */
+  if (TYPE_UNSIGNED (type))
+    return build_zero_cst (type);
+
+  /* An arithmetic (signed) shift by the element width leaves every bit equal to
+     the sign bit which a shift by one less already gives.  */
+  return fold_build2 (RSHIFT_EXPR, type, val,
+		      build_int_cst (TREE_TYPE (amount), bits - 1));
+}
+
 /* Build a `TUPLE.val[INDEX]` expression.  */
 tree
 build_tuple_get (tree tuple, tree index)
@@ -177,6 +196,44 @@ one_element_vector_type_p (tree type)
   return VECTOR_TYPE_P (type) && known_eq (TYPE_VECTOR_SUBPARTS (type), 1U);
 }
 
+tree
+build_var (tree type)
+{
+  return gimple_in_ssa_p (cfun) && is_gimple_reg_type (type)
+	   ? make_ssa_name (type)
+	   : create_tmp_var (type);
+}
+
+/* Build a call to the internal function IFN.
+   Handles singleton vector arguments specially: they are cast to their
+   inner element type before the function is called, and then the return value
+   is cast back to the expected singleton vector type.  */
+static tree
+build_ifn_call (gimple_folder &f, internal_fn ifn, tree ret_type,
+		vec<tree> &args)
+{
+  for (auto &arg : args)
+    if (one_element_vector_type_p (TREE_TYPE (arg)))
+      arg = f.force_val (build_cast (TREE_TYPE (TREE_TYPE (arg)), arg));
+
+  auto call = gimple_build_call_internal_vec (ifn, args);
+  gimple_seq_add_stmt_without_update (&f.stmts, call);
+
+  if (!one_element_vector_type_p (ret_type))
+    {
+      auto ret = build_var (ret_type);
+      gimple_call_set_lhs (call, ret);
+      return ret;
+    }
+  else
+    {
+      auto elem_type = TREE_TYPE (ret_type);
+      auto ret = build_var (elem_type);
+      gimple_call_set_lhs (call, ret);
+      return build_vec_dup (ret_type, ret);
+    }
+}
+
 /* Base class for all function expanders.
    At least one of `expand` or `fold` must be overriden by derived classes.  */
 class gimple_function_base : public function_base
@@ -201,14 +258,154 @@ public:
   }
 };
 
-template <insn_code insn> struct gimple_exact_insn : gimple_function_base
+/* Base class for intrinsics that map to a single instruction.  Derived classes
+   name the instruction by overriding `code_for`.
+
+   M_MODE_ARG is the index of the argument whose mode selects the instruction,
+   or -1 if the intrinsic goes through use_exact_insn.  If the argument has a
+   one-element vector type, such as int64x1_t, there is no instruction for it,
+   so `code_for` is passed the element mode instead and the arguments and the
+   result are unwrapped to match.  This is what arm_neon.h did for these types
+   before they moved to the pragma-based framework.  */
+class gimple_insn_based_function : public gimple_function_base
 {
+  int m_mode_arg;
+
+protected:
+  /* Return the instruction to use for mode MODE.  */
+  virtual insn_code code_for (function_expander &e, machine_mode mode) const
+    = 0;
+
+public:
+  constexpr gimple_insn_based_function (int mode_arg) : m_mode_arg (mode_arg) {}
+
   gimple *fold (gimple_folder &) const override { return nullptr; }
+
   rtx expand (function_expander &e) const override
   {
-    return e.use_exact_insn (insn);
+    gcc_assert (m_mode_arg >= -1);
+    if (m_mode_arg == -1)
+      return e.use_exact_insn (code_for (e, VOIDmode));
+
+    auto type = TREE_TYPE (CALL_EXPR_ARG (e.call_expr, m_mode_arg));
+
+    /* Handle vector types.  */
+    if (!one_element_vector_type_p (type))
+      return e.use_exact_insn (code_for (e, TYPE_MODE (type)));
+
+    /* Handle scalar types.  This is similar to the handling in gimple_ifn for
+       V1DI and V1DF types.  */
+    auto icode = code_for (e, TYPE_MODE (TREE_TYPE (type)));
+    auto scalar_mode = GET_MODE_INNER (e.result_mode ());
+
+    for (unsigned int i = 0; i < e.args.length (); i++)
+      {
+	auto arg_type = TREE_TYPE (CALL_EXPR_ARG (e.call_expr, i));
+	if (one_element_vector_type_p (arg_type))
+	  e.args[i] = force_lowpart_subreg (scalar_mode, e.args[i],
+					    TYPE_MODE (arg_type));
+      }
+
+    auto res = e.use_exact_insn (icode);
+    return force_lowpart_subreg (e.result_mode (), res, scalar_mode);
   }
 };
+
+/* For intrinsics that always map to instruction INSN.  */
+template <insn_code INSN>
+struct gimple_exact_insn : public gimple_insn_based_function
+{
+  constexpr gimple_exact_insn () : gimple_insn_based_function (-1) {}
+
+  insn_code code_for (function_expander &, machine_mode) const override
+  {
+    return INSN;
+  }
+};
+
+/* Wrapper for `aarch64_<sur>q<r>shl<mode>` as it names its iterator twice.  */
+static insn_code
+code_for_qshl (int unspec, machine_mode mode)
+{
+  return code_for_aarch64_qshl (unspec, unspec, mode);
+}
+
+/* Likewise for `aarch64_<sur>qshl<u>_n<mode>`.  */
+static insn_code
+code_for_qshl_n (int unspec, machine_mode mode)
+{
+  return code_for_aarch64_qshl_n (unspec, unspec, mode);
+}
+
+/* Likewise for `aarch64_<sur>s<lr>i_n<mode>`.  */
+static insn_code
+code_for_si_n (int unspec, machine_mode mode)
+{
+  return code_for_aarch64_si_n (unspec, unspec, mode);
+}
+
+/* Wrapper for `aarch64_<shrn_op><sra_op>shrn2_n<mode>` as it names two
+   different code iterators.  AARCH64_VALID_SHRN_OP ties the shift to the
+   saturating truncation so derive the former from the latter.  */
+static insn_code
+code_for_shrn2_n (rtx_code code, machine_mode mode)
+{
+  auto shift = code == SS_TRUNCATE ? ASHIFTRT : LSHIFTRT;
+  return code_for_aarch64_shrn2_n (code, shift, mode);
+}
+
+/* For intrinsics whose instruction is selected by a mode through the
+   code_for_* helpers that insn-opinit.h generates for `@`-prefixed
+   pattterns.  */
+class gimple_code_for_mode_function : public gimple_insn_based_function
+{
+  insn_code (*m_code_for) (machine_mode);
+
+  insn_code code_for (function_expander &, machine_mode mode) const override
+  {
+    return this->m_code_for (mode);
+  }
+
+public:
+  constexpr gimple_code_for_mode_function (insn_code (*code_for) (machine_mode),
+					   int mode_arg = 0)
+    : gimple_insn_based_function (mode_arg), m_code_for (code_for)
+  {}
+};
+
+/* Like gimple_code_for_mode_function, but for a pattern whose name also
+   contains an attribute of an iterator that distinguishes signed forms from
+   unsigned ones, such as `<sra_op>` or `<sur>`.  SIGNED_VALUE and
+   UNSIGNED_VALUE give the iterator value to use for signed and unsigned type
+   suffixes respectively.
+
+   T is the type that insn-opinit.h uses for the iterator: `rtx_code` for a
+   code iterator and `int` for an int iterator.  */
+template <typename T>
+class gimple_iterator_function : public gimple_insn_based_function
+{
+  insn_code (*m_code_for) (T, machine_mode);
+  T m_signed_value;
+  T m_unsigned_value;
+
+  insn_code code_for (function_expander &e, machine_mode mode) const override
+  {
+    return m_code_for (e.type_suffix (0).unsigned_p ? m_unsigned_value
+						    : m_signed_value,
+		       mode);
+  }
+
+public:
+  constexpr gimple_iterator_function (insn_code (*code_for) (T, machine_mode),
+				      T signed_value, T unsigned_value,
+				      int mode_arg = 0)
+    : gimple_insn_based_function (mode_arg), m_code_for (code_for),
+      m_signed_value (signed_value), m_unsigned_value (unsigned_value)
+  {}
+};
+
+using gimple_rtx_code_function = gimple_iterator_function<rtx_code>;
+using gimple_unspec_based_function = gimple_iterator_function<int>;
 
 /* For intrinsics that map to a single GIMPLE expression with no argument
    preparation necessary.  */
@@ -440,14 +637,6 @@ struct gimple_dup : public gimple_function_base
   }
 };
 
-// Vector creation
-NEON_FUNCTION (vcreate,		gimple_create,)
-NEON_FUNCTION (vcombine,	gimple_combine,)
-NEON_FUNCTION (vdup_n,		gimple_dup,)
-NEON_FUNCTION (vdupq_n,		gimple_dup,)
-NEON_FUNCTION (vmov_n,		gimple_dup,)
-NEON_FUNCTION (vmovq_n,		gimple_dup,)
-
 struct gimple_dup_lane : public gimple_function_base
 {
   gimple *fold (gimple_folder &f) const override
@@ -645,44 +834,19 @@ public:
   gimple *fold (gimple_folder &f) const override
   {
     tree lhs_type = TREE_TYPE (f.lhs);
-    /* There are no instructions that handle V1DI or V1DF modes for these
-       operations.  They need to be specially handled by casting the vector to
-       its element type and using it to feed the scalar version of the
-       operation.  The scalar result is then cast back to a vector and returned.
-       This matches the prior implementation that arm_neon.h used for these
-       operations.  */
-    bool scalar_lhs = one_element_vector_type_p (lhs_type);
-
-    vec<tree> args{};
+    auto_vec<tree> args{};
     for (unsigned i = 0; i < gimple_call_num_args (f.call); i++)
       {
 	tree arg = gimple_call_arg (f.call, i);
-	/* Convert V1DI/V1DF arguments to corresponding scalar modes.  */
-	if (scalar_lhs && one_element_vector_type_p (TREE_TYPE (arg)))
-	  arg = f.force_val (build_cast (TREE_TYPE (lhs_type), arg));
 	/* .CLZ and .POPCOUNT take an unsigned argument.  */
-	else if ((m_ifn == IFN_CLZ || m_ifn == IFN_POPCOUNT)
-		 && !TYPE_UNSIGNED (TREE_TYPE (arg)))
+	if ((m_ifn == IFN_CLZ || m_ifn == IFN_POPCOUNT)
+	    && !TYPE_UNSIGNED (TREE_TYPE (arg)))
 	  arg = f.force_val (build_cast (unsigned_type_for (TREE_TYPE (arg)),
 					 arg));
 	args.safe_push (arg);
       }
-
-    auto call = gimple_build_call_internal_vec (this->m_ifn, args);
-    args.release ();
-
-    if (!scalar_lhs)
-      {
-	gimple_call_set_lhs (call, f.lhs);
-	return call;
-      }
-
-    /* Temporary scalar to hold the result.  */
-    tree res = create_tmp_var (TREE_TYPE (lhs_type));
-    gimple_call_set_lhs (call, res);
-    gimple_seq_add_stmt_without_update (&f.stmts, call);
-    /* Build the actual vector that the call's result gets assigned to.  */
-    return gimple_build_assign (f.lhs, build_vec_dup (lhs_type, res));
+    return gimple_build_assign (f.lhs, build_ifn_call (f, this->m_ifn, lhs_type,
+						       args));
   }
 };
 
@@ -736,7 +900,7 @@ public:
     gcc_assert (types_compatible_p (arg_type, TREE_TYPE (b)));
 
     auto tuple_type = TREE_TYPE (f.lhs);
-    auto tuple = create_tmp_var (tuple_type);
+    auto tuple = build_var (tuple_type);
     f.assign (tuple, build_clobber (tuple_type));
     for (auto i = 0; i < 2; i++)
       {
@@ -1104,8 +1268,7 @@ build_abs_diff (gimple_folder &f, tree lhs, tree rhs)
     return fold_build1 (ABS_EXPR, type,
 			f.force_val (fold_build2 (MINUS_EXPR, type, lhs, rhs)));
 
-  auto ret
-    = is_gimple_reg_type (type) ? make_ssa_name (type) : create_tmp_var (type);
+  auto ret = build_var (type);
   auto call = gimple_build_call_internal (IFN_ABD, 2, lhs, rhs);
   gimple_seq_add_stmt_without_update (&f.stmts, call);
   gimple_call_set_lhs (call, ret);
@@ -1140,8 +1303,266 @@ public:
   }
 };
 
+// vmla (acc, lhs, rhs) = acc + lhs * rhs
+// vmls (acc, lhs, rhs) = acc - lhs * rhs
+template <arith_kind kind, bool negate>
+struct multiply_accumulate : public gimple_function_base
+{
+  gimple *fold (gimple_folder &f) const override
+  {
+    tree acc = gimple_call_arg (f.call, 0);
+    tree lhs = gimple_call_arg (f.call, 1);
+    tree rhs = gimple_call_arg (f.call, 2);
+    tree lane_index;
+    tree ret_type = TREE_TYPE (f.lhs);
+
+    switch (kind)
+      {
+      case arith_kind::normal:
+	break;
+
+      case arith_kind::dup:
+	rhs = f.force_val (build_vec_dup (TREE_TYPE (lhs), rhs));
+	break;
+
+      case arith_kind::lane:
+	lane_index = gimple_call_arg (f.call, 3);
+	rhs = f.force_val (build_lane_get (rhs, lane_index));
+	if (VECTOR_TYPE_P (ret_type))
+	  rhs = f.force_val (build_vec_dup (TREE_TYPE (lhs), rhs));
+	break;
+      }
+
+    tree_code code = negate ? MINUS_EXPR : PLUS_EXPR;
+    if (FLOAT_TYPE_P (ret_type))
+      {
+	/* Use a PAREN_EXPR (equivalent to C's `__builtin_assoc_barrier`) to
+	   prevent floating-point add and mul being transformed to an FMA.  */
+	auto mul = f.force_val (fold_build2 (MULT_EXPR, ret_type, lhs, rhs));
+	auto paren = f.force_val (fold_build1 (PAREN_EXPR, ret_type, mul));
+	auto addsub = f.force_val (fold_build2 (code, ret_type, acc, paren));
+	return this->maybe_optimization_barrier (f, addsub);
+      }
+    else if (!TYPE_UNSIGNED (ret_type))
+      {
+	/* Convert signed inputs to unsigned first, to avoid undefined behaviour
+	   on overflow.  */
+	auto signed_type = ret_type;
+	auto unsigned_type = unsigned_type_for (signed_type);
+	lhs = f.force_val (build_cast (unsigned_type, lhs));
+	rhs = f.force_val (build_cast (unsigned_type, rhs));
+	acc = f.force_val (build_cast (unsigned_type, acc));
+	auto mul = f.force_val (fold_build2 (MULT_EXPR, unsigned_type, lhs, rhs));
+	auto addsub = f.force_val (fold_build2 (code, unsigned_type, acc, mul));
+	return gimple_build_assign (f.lhs, build_cast (signed_type, addsub));
+      }
+    else
+      {
+	auto mul = f.force_val (fold_build2 (MULT_EXPR, ret_type, lhs, rhs));
+	return gimple_build_assign (f.lhs, code, acc, mul);
+      }
+  }
+};
+template <arith_kind kind> using gimple_mla = multiply_accumulate<kind, false>;
+template <arith_kind kind> using gimple_mls = multiply_accumulate<kind, true>;
+
+template <arith_kind kind, bool negate>
+struct gimple_fused_mla : public gimple_function_base
+{
+  gimple *fold (gimple_folder &f) const override
+  {
+    tree acc = gimple_call_arg (f.call, 0);
+    tree lhs = gimple_call_arg (f.call, 1);
+    tree rhs = gimple_call_arg (f.call, 2);
+    tree lane_index;
+    tree ret_type = TREE_TYPE (f.lhs);
+
+    switch (kind)
+      {
+      case arith_kind::normal:
+	break;
+
+      case arith_kind::dup:
+	rhs = f.force_val (build_vec_dup (TREE_TYPE (lhs), rhs));
+	break;
+
+      case arith_kind::lane:
+	lane_index = gimple_call_arg (f.call, 3);
+	rhs = f.force_val (build_lane_get (rhs, lane_index));
+	if (VECTOR_TYPE_P (ret_type))
+	  rhs = f.force_val (build_vec_dup (TREE_TYPE (lhs), rhs));
+	break;
+      }
+
+    auto_vec<tree> args{};
+    args.safe_push (lhs);
+    args.safe_push (rhs);
+    args.safe_push (acc);
+    auto ret = build_ifn_call (f, negate ? IFN_FNMA : IFN_FMA, ret_type, args);
+    return this->maybe_optimization_barrier (f, ret);
+  }
+};
+template <arith_kind kind> using gimple_fma = gimple_fused_mla<kind, false>;
+template <arith_kind kind> using gimple_fms = gimple_fused_mla<kind, true>;
+
+template <bool min_p>
+struct gimple_minmax : public gimple_function_base
+{
+  rtx expand (function_expander &e) const override
+  {
+    auto ret_mode = e.result_mode ();
+    auto singleton_p = (ret_mode == V1DFmode);
+    auto unspec = min_p ? UNSPEC_FMIN : UNSPEC_FMAX;
+
+    if (singleton_p)
+      {
+	for (int i = 0; i < 2; i++)
+	  e.args[i] = simplify_gen_subreg (DFmode, e.args[i], V1DFmode, 0);
+	ret_mode = DFmode;
+      }
+
+    auto ret = gen_reg_rtx (ret_mode);
+    auto args = gen_rtvec_v (e.args.length (), e.args.address ());
+    emit_insn (gen_rtx_SET (ret, gen_rtx_UNSPEC (ret_mode, args, unspec)));
+
+    if (singleton_p)
+      ret = simplify_gen_subreg (V1DFmode, ret, DFmode, 0);
+
+    return ret;
+  }
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto lhs = gimple_call_arg (f.call, 0);
+    auto rhs = gimple_call_arg (f.call, 1);
+    auto ret_type = TREE_TYPE (f.lhs);
+    if (FLOAT_TYPE_P (ret_type))
+      return nullptr;
+    return gimple_build_assign (f.lhs, min_p ? MIN_EXPR : MAX_EXPR, lhs, rhs);
+  }
+};
+
+template <bool min_p>
+struct gimple_reduce_minmax : public gimple_function_base
+{
+  rtx expand (function_expander &e) const override
+  {
+    auto arg_mode = e.args[0]->mode;
+    auto unspec = min_p ? UNSPEC_FMINV : UNSPEC_FMAXV;
+    auto icode = code_for_reduc_scal (unspec, arg_mode);
+    gcc_assert (icode != CODE_FOR_nothing);
+    return e.use_exact_insn (icode);
+  }
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto arg = gimple_call_arg (f.call, 0);
+    auto ret_type = TREE_TYPE (f.lhs);
+    if (FLOAT_TYPE_P (ret_type))
+      return nullptr;
+
+    auto_vec<tree> args{};
+    args.safe_push (arg);
+    auto ifn = min_p ? IFN_REDUC_MIN : IFN_REDUC_MAX;
+    return gimple_build_assign (f.lhs, build_ifn_call (f, ifn, ret_type, args));
+  }
+};
+
+/* Shift by an immediate with an optional accumulator.  */
+class gimple_shift_imm : public gimple_function_base
+{
+  /* LSHIFT_EXPR or RSHIFT_EXPR.  */
+  tree_code m_code;
+
+  /* PLUS_EXPR for vsra_n and ERROR_MARK for the non-accumulating forms.  */
+  tree_code m_acc_code;
+
+  /* The value to shift is operand 0, unless an accumulator comes first.  */
+  int first_shift_arg () const { return m_acc_code != ERROR_MARK; }
+
+public:
+  constexpr gimple_shift_imm (tree_code code, tree_code acc_code = ERROR_MARK)
+    : m_code (code), m_acc_code (acc_code)
+  {}
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto type = TREE_TYPE (f.lhs);
+    int first = first_shift_arg ();
+    auto val = gimple_call_arg (f.call, first);
+    auto amount = gimple_call_arg (f.call, first + 1);
+
+    auto shifted = m_code == LSHIFT_EXPR
+		     ? fold_build2 (LSHIFT_EXPR, type, val, amount)
+		     : build_shift_right (type, val, amount);
+
+    /* Non-accumulating intrinsic.  */
+    if (m_acc_code == ERROR_MARK)
+      return gimple_build_assign (f.lhs, shifted);
+
+    /* Accumulating intrinsic.  */
+    auto acc = gimple_call_arg (f.call, 0);
+    shifted = f.force_val (shifted);
+
+    /* Accumulate in an unsigned type so that signed overflow wraps as the
+       ACLE requires.  */
+    auto utype = type;
+    if (!TYPE_UNSIGNED (type))
+      {
+	utype = unsigned_type_for (type);
+	acc = f.force_val (build_cast (utype, acc));
+	shifted = f.force_val (build_cast (utype, shifted));
+      }
+
+    return gimple_build_assign (
+      f.lhs, build_cast (type, f.force_val (fold_build2 (m_acc_code, utype, acc,
+							 shifted))));
+  }
+};
+
+/* Shift by a vector amount.  The amount is signed and a negative
+   value shifts right, so this only folds to a GIMPLE shift when the amount is
+   a constant whose magnitude is in range.  */
+class gimple_shift_reg : public gimple_unspec_based_function
+{
+public:
+  using gimple_unspec_based_function::gimple_unspec_based_function;
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto val = gimple_call_arg (f.call, 0);
+    auto amount = gimple_call_arg (f.call, 1);
+
+    /* Fold when the shift is a known constant value.  */
+    auto cst = uniform_integer_cst_p (amount);
+    if (!cst)
+      return nullptr;
+
+    auto wcst = wi::to_wide (cst);
+    if (wi::geu_p (wi::abs (wcst), element_precision (val)))
+      return nullptr;
+
+    if (!wi::neg_p (wcst))
+      return gimple_build_assign (f.lhs, LSHIFT_EXPR, val, amount);
+
+    /* A negative amount shifts right by its magnitude.  */
+    auto rhs
+      = build_uniform_cst (TREE_TYPE (amount),
+			   wide_int_to_tree (TREE_TYPE (cst), wi::abs (wcst)));
+    return gimple_build_assign (f.lhs, RSHIFT_EXPR, val, rhs);
+  }
+};
+
 // Reinterpret
 NEON_FUNCTION (vreinterpret, vreinterpretq, gimple_reinterpret,)
+
+// Vector creation
+NEON_FUNCTION (vcreate,		gimple_create,)
+NEON_FUNCTION (vcombine,	gimple_combine,)
+NEON_FUNCTION (vdup_n,		gimple_dup,)
+NEON_FUNCTION (vdupq_n,		gimple_dup,)
+NEON_FUNCTION (vmov_n,		gimple_dup,)
+NEON_FUNCTION (vmovq_n,		gimple_dup,)
 
 // Lane get/set
 NEON_FUNCTION (vget_lane, vgetq_lane,   gimple_get_lane,)
@@ -1170,20 +1591,50 @@ NEON_FUNCTION (vmul_lane, vmul_laneq,
 	       vmuls_lane, vmuls_laneq,
 	       vmuld_lane, vmuld_laneq, gimple_arith_lane, (MULT_EXPR))
 
+// Multiply-accumulate
+NEON_FUNCTION (vmla, vmlaq, gimple_mla<arith_kind::normal>,)
+NEON_FUNCTION (vmla_n, vmlaq_n, gimple_mla<arith_kind::dup>,)
+NEON_FUNCTION (vmla_lane, vmla_laneq, vmlaq_lane, vmlaq_laneq,
+	       gimple_mla<arith_kind::lane>,)
+
+NEON_FUNCTION (vmls, vmlsq, gimple_mls<arith_kind::normal>,)
+NEON_FUNCTION (vmls_n, vmlsq_n, gimple_mls<arith_kind::dup>,)
+NEON_FUNCTION (vmls_lane, vmls_laneq, vmlsq_lane, vmlsq_laneq,
+	       gimple_mls<arith_kind::lane>,)
+
+// Multiply-accumulate (fused)
+NEON_FUNCTION (vfma,   vfmaq,   gimple_fma<arith_kind::normal>,);
+NEON_FUNCTION (vfma_n, vfmaq_n, gimple_fma<arith_kind::dup>,);
+NEON_FUNCTION (vfmah_lane, vfmah_laneq,
+	       vfmas_lane, vfmas_laneq,
+	       vfmad_lane, vfmad_laneq,
+	       vfma_lane,  vfma_laneq,
+	       vfmaq_lane, vfmaq_laneq,
+	       gimple_fma<arith_kind::lane>,);
+
+NEON_FUNCTION (vfms,   vfmsq,   gimple_fms<arith_kind::normal>,);
+NEON_FUNCTION (vfms_n, vfmsq_n, gimple_fms<arith_kind::dup>,);
+NEON_FUNCTION (vfmsh_lane, vfmsh_laneq,
+	       vfmss_lane, vfmss_laneq,
+	       vfmsd_lane, vfmsd_laneq,
+	       vfms_lane,  vfms_laneq,
+	       vfmsq_lane, vfmsq_laneq,
+	       gimple_fms<arith_kind::lane>,);
+
 // Saturating arithmetic
 NEON_FUNCTION (vqaddb, vqaddh, vqadds, vqaddd, vqadd, vqaddq, gimple_ifn, (IFN_SAT_ADD))
 NEON_FUNCTION (vqsubb, vqsubh, vqsubs, vqsubd, vqsub, vqsubq, gimple_ifn, (IFN_SAT_SUB))
 
 // Max/min
-NEON_FUNCTION (vmax,   vmaxq,   gimple_expr, (MAX_EXPR))
-NEON_FUNCTION (vmin,   vminq,   gimple_expr, (MIN_EXPR))
+NEON_FUNCTION (vmax,   vmaxq,   gimple_minmax<false>,)
+NEON_FUNCTION (vmin,   vminq,   gimple_minmax<true>,)
 NEON_FUNCTION (vmaxnm, vmaxnmq, gimple_ifn,  (IFN_FMAX))
 NEON_FUNCTION (vminnm, vminnmq, gimple_ifn,  (IFN_FMIN))
 
 // Reductions
 NEON_FUNCTION (vaddv,   vaddvq,   gimple_ifn, (IFN_REDUC_PLUS))
-NEON_FUNCTION (vmaxv,   vmaxvq,   gimple_ifn, (IFN_REDUC_MAX))
-NEON_FUNCTION (vminv,   vminvq,   gimple_ifn, (IFN_REDUC_MIN))
+NEON_FUNCTION (vmaxv,   vmaxvq,   gimple_reduce_minmax<false>,)
+NEON_FUNCTION (vminv,   vminvq,   gimple_reduce_minmax<true>,)
 NEON_FUNCTION (vmaxnmv, vmaxnmvq, gimple_ifn, (IFN_REDUC_FMAX))
 NEON_FUNCTION (vminnmv, vminnmvq, gimple_ifn, (IFN_REDUC_FMIN))
 
@@ -1202,6 +1653,57 @@ NEON_FUNCTION (vrndm, vrndmq,         gimple_ifn, (IFN_FLOOR))
 NEON_FUNCTION (vrndn, vrndnq, vrndns, gimple_ifn, (IFN_ROUNDEVEN))
 NEON_FUNCTION (vrndp, vrndpq,         gimple_ifn, (IFN_CEIL))
 NEON_FUNCTION (vrndx, vrndxq,         gimple_ifn, (IFN_RINT))
+
+// Shifts by an immediate
+NEON_FUNCTION (vshl_n, vshlq_n, vshld_n, gimple_shift_imm, (LSHIFT_EXPR))
+NEON_FUNCTION (vshr_n, vshrq_n, vshrd_n, gimple_shift_imm, (RSHIFT_EXPR))
+NEON_FUNCTION (vsra_n, vsraq_n, vsrad_n, gimple_shift_imm, (RSHIFT_EXPR, PLUS_EXPR))
+
+// Shifts by a vector amount
+NEON_FUNCTION (vshl,  vshlq,  vshld,  gimple_shift_reg,             (code_for_aarch64_shl, UNSPEC_SSHL, UNSPEC_USHL))
+NEON_FUNCTION (vrshl, vrshlq, vrshld, gimple_unspec_based_function, (code_for_aarch64_shl, UNSPEC_SRSHL, UNSPEC_URSHL))
+NEON_FUNCTION (vqshl,  vqshlq,  vqshlb,  vqshlh,  vqshls,  vqshld,
+	       gimple_unspec_based_function, (code_for_qshl, UNSPEC_SQSHL, UNSPEC_UQSHL))
+NEON_FUNCTION (vqrshl, vqrshlq, vqrshlb, vqrshlh, vqrshls, vqrshld,
+	       gimple_unspec_based_function, (code_for_qshl, UNSPEC_SQRSHL, UNSPEC_UQRSHL))
+
+// Rounding shifts by an immediate
+NEON_FUNCTION (vrshr_n, vrshrq_n, vrshrd_n, gimple_rtx_code_function, (code_for_aarch64_rshr_n, ASHIFTRT, LSHIFTRT))
+NEON_FUNCTION (vrsra_n, vrsraq_n, vrsrad_n, gimple_rtx_code_function, (code_for_aarch64_rsra_n, ASHIFTRT, LSHIFTRT))
+
+// Saturating shifts by an immediate
+NEON_FUNCTION (vqshl_n,  vqshlq_n,  vqshlb_n,  vqshlh_n,  vqshls_n,  vqshld_n,
+	       gimple_unspec_based_function, (code_for_qshl_n, UNSPEC_SQSHL, UNSPEC_UQSHL))
+NEON_FUNCTION (vqshlu_n, vqshluq_n, vqshlub_n, vqshluh_n, vqshlus_n, vqshlud_n,
+	       gimple_unspec_based_function, (code_for_qshl_n, UNSPEC_SQSHLU, UNSPEC_SQSHLU))
+
+// Shift and insert
+NEON_FUNCTION (vsli_n, vsliq_n, vslid_n, gimple_unspec_based_function, (code_for_si_n, UNSPEC_SSLI, UNSPEC_USLI))
+NEON_FUNCTION (vsri_n, vsriq_n, vsrid_n, gimple_unspec_based_function, (code_for_si_n, UNSPEC_SSRI, UNSPEC_USRI))
+
+// Narrowing shifts by an immediate
+NEON_FUNCTION (vshrn_n,       gimple_rtx_code_function, (code_for_aarch64_shrn_n, TRUNCATE, TRUNCATE))
+NEON_FUNCTION (vqshrn_n, vqshrnh_n, vqshrns_n, vqshrnd_n,
+	       gimple_rtx_code_function, (code_for_aarch64_shrn_n, SS_TRUNCATE, US_TRUNCATE))
+NEON_FUNCTION (vshrn_high_n,  gimple_rtx_code_function, (code_for_shrn2_n, TRUNCATE, TRUNCATE, 1))
+NEON_FUNCTION (vqshrn_high_n, gimple_rtx_code_function, (code_for_shrn2_n, SS_TRUNCATE, US_TRUNCATE, 1))
+
+NEON_FUNCTION (vrshrn_n,       gimple_rtx_code_function, (code_for_aarch64_rshrn_n, TRUNCATE, TRUNCATE))
+NEON_FUNCTION (vqrshrn_n, vqrshrnh_n, vqrshrns_n, vqrshrnd_n,
+	       gimple_rtx_code_function, (code_for_aarch64_rshrn_n, SS_TRUNCATE, US_TRUNCATE))
+NEON_FUNCTION (vrshrn_high_n,  gimple_rtx_code_function, (code_for_aarch64_rshrn2_n, TRUNCATE, TRUNCATE, 1))
+NEON_FUNCTION (vqrshrn_high_n, gimple_rtx_code_function, (code_for_aarch64_rshrn2_n, SS_TRUNCATE, US_TRUNCATE, 1))
+
+NEON_FUNCTION (vqshrun_n, vqshrunh_n, vqshruns_n, vqshrund_n,
+	       gimple_code_for_mode_function, (code_for_aarch64_sqshrun_n))
+NEON_FUNCTION (vqrshrun_n, vqrshrunh_n, vqrshruns_n, vqrshrund_n,
+	       gimple_code_for_mode_function, (code_for_aarch64_sqrshrun_n))
+NEON_FUNCTION (vqshrun_high_n,  gimple_code_for_mode_function, (code_for_aarch64_sqshrun2_n, 1))
+NEON_FUNCTION (vqrshrun_high_n, gimple_code_for_mode_function, (code_for_aarch64_sqrshrun2_n, 1))
+
+// Widening shifts by an immediate
+NEON_FUNCTION (vshll_n,      gimple_unspec_based_function, (code_for_aarch64_shll_n, UNSPEC_SSHLL, UNSPEC_USHLL))
+NEON_FUNCTION (vshll_high_n, gimple_unspec_based_function, (code_for_aarch64_shll2_n, UNSPEC_SSHLL, UNSPEC_USHLL))
 
 // Bitwise operations
 NEON_FUNCTION (vand,  vandq,  gimple_expr,    (BIT_AND_EXPR))

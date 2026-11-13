@@ -4496,7 +4496,7 @@ recompute_pool_offsets (struct rtx_constant_pool *pool)
    Emit referenced deferred strings.  */
 
 static void
-mark_constants_in_pattern (rtx insn)
+mark_constants_in_pattern (rtx_insn *insn)
 {
   subrtx_iterator::array_type array;
   FOR_EACH_SUBRTX (iter, array, PATTERN (insn), ALL)
@@ -4545,7 +4545,7 @@ mark_constants (rtx_insn *insn)
       int i, n = seq->len ();
       for (i = 0; i < n; ++i)
 	{
-	  rtx subinsn = seq->element (i);
+	  rtx_insn *subinsn = seq->insn (i);
 	  if (INSN_P (subinsn))
 	    mark_constants_in_pattern (subinsn);
 	}

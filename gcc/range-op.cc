@@ -2090,7 +2090,7 @@ operator_minus::lhs_op1_relation (const irange &, const irange &op1,
 
 bool
 minus_op1_op2_relation_effect (irange &lhs_range, tree type,
-			       const irange &op1_range ATTRIBUTE_UNUSED,
+			       const irange &op1_range,
 			       const irange &op2_range ATTRIBUTE_UNUSED,
 			       relation_kind rel)
 {
@@ -2107,12 +2107,51 @@ minus_op1_op2_relation_effect (irange &lhs_range, tree type,
   else if (rel == VREL_NE)
     rel_range = int_range<2> (type, wi::zero (prec), wi::zero (prec),
 			      VR_ANTI_RANGE);
+  else if (TYPE_UNSIGNED (type))
+    {
+      wide_int ub1 = op1_range.upper_bound ();
+      wide_int ub2 = op2_range.upper_bound ();
+      switch (rel)
+	{
+	  // op1 > op2, so the subtraction cannot wrap : [1, UB (op1)].
+	  case VREL_GT:
+	    // [0, 0] > op2 is undefined, so just return.
+	    if (ub1 == 0)
+	      return false;
+	    rel_range = int_range<2> (type, wi::one (prec), ub1);
+	    break;
+	  // op1 >= op2 >= 0, so the subtraction cannot wrap : [0, UB (op1)].
+	  case VREL_GE:
+	    rel_range = int_range<2> (type, wi::zero (prec), ub1);
+	    break;
+	  // op1 < op2, so the subtraction always wraps : [-UB (op2), -1].
+	  case VREL_LT:
+	    // op1 < [0, 0] is undefined, so just return.
+	    if (ub2 == 0)
+	      return false;
+	    rel_range = int_range<2> (type, wi::neg (ub2),
+				      wi::minus_one (prec));
+	    break;
+	  // As VREL_LT, except that op1 == op2 also produces zero.
+	  case VREL_LE:
+	    // If UB (op2) is MAX_INT the result won't change, plus
+	    // we dont want to construct an illegal  [1, 0] range next.
+	    if (ub2 == wi::max_value (prec, UNSIGNED))
+	      return false;
+	    rel_range = int_range<2> (type, wi::one (prec),
+				      wi::sub (wi::minus_one (prec), ub2),
+				      VR_ANTI_RANGE);
+	    break;
+	  default:
+	    return false;
+	}
+    }
   else if (TYPE_OVERFLOW_WRAPS (type))
     {
       switch (rel)
 	{
-	  // For wrapping signed values and unsigned, if op1 > op2 or
-	  // op1 < op2, then op1 - op2 can be restricted to ~[0, 0].
+	  // For wrapping signed values , if op1 > op2 or op1 < op2,
+	  // then op1 - op2 can be restricted to ~[0, 0].
 	  case VREL_GT:
 	  case VREL_LT:
 	      rel_range = int_range<2> (type, wi::zero (prec), wi::zero (prec),
@@ -2156,10 +2195,12 @@ minus_op1_op2_relation_effect (irange &lhs_range, tree type,
 
 // Check if the LHS range indicates a relation between OP1 and OP2.
 // OP1 - OP2 == 0 implies OP1 == OP2 even with wrapping arithmetic.
+// For signed types, when both OP1 and OP2 are both positive, infer
+// a relationship if there were it is overflow free.
 
 relation_kind
-operator_minus::op1_op2_relation (const irange &lhs, const irange &,
-				  const irange &) const
+operator_minus::op1_op2_relation (const irange &lhs, const irange &rhs1,
+				  const irange &rhs2) const
 {
   if (lhs.undefined_p ())
     return VREL_UNDEFINED;
@@ -2167,7 +2208,20 @@ operator_minus::op1_op2_relation (const irange &lhs, const irange &,
   if (lhs.zero_p ())
     return VREL_EQ;
 
-  if (!lhs.contains_zero_p ())
+  bool contains_z = lhs.contains_zero_p ();
+  // When a - b does not overflow and signed,
+  // we can figure out the relationship between
+  // a and b if the result is non-negative or non-positive.
+  if (!TYPE_UNSIGNED (lhs.type ())
+      && overflow_free_p (rhs1, rhs2))
+    {
+      if (lhs.nonnegative_p ())
+	return contains_z ? VREL_GE : VREL_GT;
+      if (lhs.nonpositive_p ())
+	return contains_z ? VREL_LE : VREL_LT;
+    }
+
+  if (!contains_z)
     return VREL_NE;
 
   return VREL_VARYING;

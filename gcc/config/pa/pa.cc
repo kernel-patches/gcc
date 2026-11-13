@@ -244,7 +244,7 @@ static unsigned int last_address;
    output time.  They are output after the current function.  */
 struct GTY(()) deferred_plabel
 {
-  rtx internal_label;
+  rtx_code_label *internal_label;
   rtx symbol;
 };
 static GTY((length ("n_deferred_plabels"))) struct deferred_plabel *
@@ -995,8 +995,8 @@ legitimize_pic_address (rtx orig, machine_mode mode, rtx reg)
 	  orig = XEXP (orig, 0);
 	  add_reg_note (insn, REG_LABEL_OPERAND, orig);
 	  /* Make sure we have label and not a note.  */
-	  if (LABEL_P (orig))
-	    LABEL_NUSES (orig)++;
+	  if (auto lab = dyn_cast<rtx_code_label *> (orig))
+	    LABEL_NUSES (lab)++;
 	}
       crtl->uses_pic_offset_table = 1;
       return reg;
@@ -4670,8 +4670,10 @@ pa_output_function_epilogue (FILE *file)
     insn = prev_real_insn (insn);
 
   /* If it is a sequence, then look inside.  */
-  if (insn && NONJUMP_INSN_P (insn) && GET_CODE (PATTERN (insn)) == SEQUENCE)
-    insn = as_a <rtx_sequence *> (PATTERN (insn))-> insn (0);
+  rtx_sequence *seq;
+  if (insn && NONJUMP_INSN_P (insn)
+      && (seq = dyn_cast <rtx_sequence *> (PATTERN (insn))))
+    insn = seq->insn (0);
 
   /* If insn is a CALL_INSN, then it must be a call to a volatile
      function (otherwise there would be epilogue insns).  */
@@ -5405,8 +5407,8 @@ pa_adjust_insn_length (rtx_insn *insn, int length)
   /* If length is negative or undefined, provide initial length.  */
   if ((unsigned int) length >= INT_MAX)
     {
-      if (GET_CODE (pat) == SEQUENCE)
-	insn = as_a <rtx_insn *> (XVECEXP (pat, 0, 0));
+      if (rtx_sequence *seq = dyn_cast <rtx_sequence *> (pat))
+	insn = seq->insn (0);
 
       switch (get_attr_type (insn))
 	{
@@ -5507,7 +5509,7 @@ pa_print_operand (FILE *file, rtx x, int code)
       /* delay slot or nullification is requested.  */
       if (dbr_sequence_length () == 0 ||
 	  (final_sequence &&
-	   INSN_ANNULLED_BRANCH_P (XVECEXP (final_sequence, 0, 0))))
+	   INSN_ANNULLED_BRANCH_P (final_sequence->insn (0))))
         fputs (",n", file);
       return;
     case 'R':
@@ -9832,15 +9834,15 @@ pa_combine_instructions (void)
 	      /* Emit the new_jump instruction and delete the old anchor.  */
 	      rtvec vtemp = gen_rtvec (2, copy_rtx (PATTERN (anchor)),
 				       copy_rtx (PATTERN (floater)));
-	      rtx temp = gen_rtx_PARALLEL (VOIDmode, vtemp);
-	      temp = emit_jump_insn_before (temp, anchor);
+	      rtx body = gen_rtx_PARALLEL (VOIDmode, vtemp);
+	      rtx_jump_insn *insn = emit_jump_insn_before (body, anchor);
 
-	      JUMP_LABEL (temp) = JUMP_LABEL (anchor);
+	      JUMP_LABEL (insn) = JUMP_LABEL (anchor);
 	      SET_INSN_DELETED (anchor);
 
 	      /* Emit a special USE insn for FLOATER, then delete
 		 the floating insn.  */
-	      temp = copy_rtx (PATTERN (floater));
+	      rtx temp = copy_rtx (PATTERN (floater));
 	      emit_insn_before (gen_rtx_USE (VOIDmode, temp), floater);
 	      delete_insn (floater);
 	      continue;
@@ -11413,7 +11415,8 @@ pa_output_addr_vec (rtx lab, rtx body)
   for (idx = 0; idx < vlen; idx++)
     {
       ASM_OUTPUT_ADDR_VEC_ELT
-	(asm_out_file, CODE_LABEL_NUMBER (XEXP (XVECEXP (body, 0, idx), 0)));
+	(asm_out_file,
+	 CODE_LABEL_NUMBER (label_ref_label (XVECEXP (body, 0, idx))));
     }
   if (TARGET_GAS)
     fputs ("\t.end_brtab\n", asm_out_file);
@@ -11424,7 +11427,7 @@ pa_output_addr_vec (rtx lab, rtx body)
 void
 pa_output_addr_diff_vec (rtx lab, rtx body)
 {
-  rtx base = XEXP (XEXP (body, 0), 0);
+  rtx_insn *base = label_ref_label (XEXP (body, 0));
   int idx, vlen = XVECLEN (body, 1);
 
   targetm.asm_out.internal_label (asm_out_file, "L", CODE_LABEL_NUMBER (lab));
@@ -11435,7 +11438,7 @@ pa_output_addr_diff_vec (rtx lab, rtx body)
       ASM_OUTPUT_ADDR_DIFF_ELT
 	(asm_out_file,
 	 body,
-	 CODE_LABEL_NUMBER (XEXP (XVECEXP (body, 1, idx), 0)),
+	 CODE_LABEL_NUMBER (label_ref_label (XVECEXP (body, 1, idx))),
 	 CODE_LABEL_NUMBER (base));
     }
   if (TARGET_GAS)

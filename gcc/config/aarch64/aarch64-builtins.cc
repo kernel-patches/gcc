@@ -286,11 +286,6 @@ aarch64_types_ternopu_lane_qualifiers[SIMD_MAX_BUILTIN_ARGS]
       qualifier_unsigned, qualifier_lane_index };
 #define TYPES_TERNOPU_LANE (aarch64_types_ternopu_lane_qualifiers)
 static enum aarch64_type_qualifiers
-aarch64_types_ternopu_imm_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_unsigned, qualifier_unsigned,
-      qualifier_unsigned, qualifier_immediate };
-#define TYPES_TERNOPUI (aarch64_types_ternopu_imm_qualifiers)
-static enum aarch64_type_qualifiers
 aarch64_types_ternop_sssu_qualifiers[SIMD_MAX_BUILTIN_ARGS]
   = { qualifier_none, qualifier_none, qualifier_none, qualifier_unsigned };
 #define TYPES_TERNOP_SSSU (aarch64_types_ternop_sssu_qualifiers)
@@ -349,34 +344,6 @@ static enum aarch64_type_qualifiers
 aarch64_types_fcvt_from_unsigned_qualifiers[SIMD_MAX_BUILTIN_ARGS]
   = { qualifier_none, qualifier_unsigned, qualifier_immediate };
 #define TYPES_FCVTIMM_SUS (aarch64_types_fcvt_from_unsigned_qualifiers)
-static enum aarch64_type_qualifiers
-aarch64_types_unsigned_shift_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_unsigned, qualifier_unsigned, qualifier_immediate };
-#define TYPES_USHIFTIMM (aarch64_types_unsigned_shift_qualifiers)
-#define TYPES_USHIFT2IMM (aarch64_types_ternopu_imm_qualifiers)
-static enum aarch64_type_qualifiers
-aarch64_types_shift2_to_unsigned_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_unsigned, qualifier_unsigned, qualifier_none, qualifier_immediate };
-#define TYPES_SHIFT2IMM_UUSS (aarch64_types_shift2_to_unsigned_qualifiers)
-
-static enum aarch64_type_qualifiers
-aarch64_types_ternop_s_imm_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_none, qualifier_none, qualifier_none, qualifier_immediate};
-#define TYPES_SETREG (aarch64_types_ternop_s_imm_qualifiers)
-#define TYPES_SHIFTINSERT (aarch64_types_ternop_s_imm_qualifiers)
-#define TYPES_SHIFTACC (aarch64_types_ternop_s_imm_qualifiers)
-#define TYPES_SHIFT2IMM (aarch64_types_ternop_s_imm_qualifiers)
-
-static enum aarch64_type_qualifiers
-aarch64_types_ternop_p_imm_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_poly, qualifier_poly, qualifier_poly, qualifier_immediate};
-#define TYPES_SHIFTINSERTP (aarch64_types_ternop_p_imm_qualifiers)
-
-static enum aarch64_type_qualifiers
-aarch64_types_unsigned_shiftacc_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_unsigned, qualifier_unsigned, qualifier_unsigned,
-      qualifier_immediate };
-#define TYPES_USHIFTACC (aarch64_types_unsigned_shiftacc_qualifiers)
 
 static enum aarch64_type_qualifiers
 aarch64_types_load1_qualifiers[SIMD_MAX_BUILTIN_ARGS]
@@ -5268,24 +5235,6 @@ aarch64_general_gimple_fold_builtin (unsigned int fcode, gcall *stmt,
 	  break;
 	}
 
-      BUILTIN_VDQIF (UNOP, reduc_smax_scal_, 10, ALL)
-      BUILTIN_VDQ_BHSI (UNOPU, reduc_umax_scal_, 10, ALL)
-	new_stmt = gimple_build_call_internal (IFN_REDUC_MAX,
-					       1, args[0]);
-	gimple_call_set_lhs (new_stmt, gimple_call_lhs (stmt));
-	break;
-      BUILTIN_VDQIF (UNOP, reduc_smin_scal_, 10, ALL)
-      BUILTIN_VDQ_BHSI (UNOPU, reduc_umin_scal_, 10, ALL)
-	new_stmt = gimple_build_call_internal (IFN_REDUC_MIN,
-					       1, args[0]);
-	gimple_call_set_lhs (new_stmt, gimple_call_lhs (stmt));
-	break;
-      BUILTIN_VSDQ_I_DI (BINOP, ashl, 3, DEFAULT)
-	if (TREE_CODE (args[1]) == INTEGER_CST
-	    && wi::ltu_p (wi::to_wide (args[1]), element_precision (args[0])))
-	  new_stmt = gimple_build_assign (gimple_call_lhs (stmt),
-					  LSHIFT_EXPR, args[0], args[1]);
-	break;
       /* lower saturating add/sub neon builtins to gimple.  */
       BUILTIN_VSDQ_I (BINOP, ssadd, 3, DEFAULT)
       BUILTIN_VSDQ_I (BINOPU, usadd, 3, DEFAULT)
@@ -5298,48 +5247,6 @@ aarch64_general_gimple_fold_builtin (unsigned int fcode, gcall *stmt,
 	gimple_call_set_lhs (new_stmt, gimple_call_lhs (stmt));
 	break;
 
-      BUILTIN_VSDQ_I_DI (BINOP, sshl, 0, DEFAULT)
-      BUILTIN_VSDQ_I_DI (BINOP_UUS, ushl, 0, DEFAULT)
-	{
-	  tree cst = args[1];
-	  tree ctype = TREE_TYPE (cst);
-	  /* Left shifts can be both scalar or vector, e.g. uint64x1_t is
-	     treated as a scalar type not a vector one.  */
-	  if ((cst = uniform_integer_cst_p (cst)) != NULL_TREE)
-	    {
-	      wide_int wcst = wi::to_wide (cst);
-	      tree unit_ty = TREE_TYPE (cst);
-
-	      wide_int abs_cst = wi::abs (wcst);
-	      if (wi::geu_p (abs_cst, element_precision (args[0])))
-		break;
-
-	      if (wi::neg_p (wcst, TYPE_SIGN (ctype)))
-		{
-		  tree final_cst;
-		  final_cst = wide_int_to_tree (unit_ty, abs_cst);
-		  if (TREE_CODE (cst) != INTEGER_CST)
-		    final_cst = build_uniform_cst (ctype, final_cst);
-
-		  new_stmt = gimple_build_assign (gimple_call_lhs (stmt),
-						  RSHIFT_EXPR, args[0],
-						  final_cst);
-		}
-	      else
-		new_stmt = gimple_build_assign (gimple_call_lhs (stmt),
-						LSHIFT_EXPR, args[0], args[1]);
-	    }
-	}
-	break;
-      BUILTIN_VDQ_I (SHIFTIMM, ashr, 3, DEFAULT)
-      VAR1 (SHIFTIMM, ashr_simd, 0, DEFAULT, di)
-      BUILTIN_VDQ_I (USHIFTIMM, lshr, 3, DEFAULT)
-      VAR1 (USHIFTIMM, lshr_simd, 0, DEFAULT, di)
-	if (TREE_CODE (args[1]) == INTEGER_CST
-	    && wi::ltu_p (wi::to_wide (args[1]), element_precision (args[0])))
-	  new_stmt = gimple_build_assign (gimple_call_lhs (stmt),
-					  RSHIFT_EXPR, args[0], args[1]);
-	break;
       BUILTIN_GPF (BINOP, fmulx, 0, ALL)
 	{
 	  gcc_assert (nargs == 2);

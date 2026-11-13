@@ -3997,14 +3997,15 @@ empty_delay_slot (rtx_insn *insn)
 int
 emit_cbcond_nop (rtx_insn *insn)
 {
-  rtx next = next_active_insn (insn);
+  rtx_insn *next = next_active_insn (insn);
 
   if (!next)
     return 1;
 
+  rtx_sequence *seq;
   if (NONJUMP_INSN_P (next)
-      && GET_CODE (PATTERN (next)) == SEQUENCE)
-    next = XVECEXP (PATTERN (next), 0, 0);
+      && (seq = dyn_cast <rtx_sequence *> (PATTERN (next))))
+    next = seq->insn (0);
   else if (CALL_P (next)
 	   && GET_CODE (PATTERN (next)) == PARALLEL)
     {
@@ -6350,15 +6351,15 @@ sparc_asm_function_epilogue (FILE *file)
 
   rtx_insn *insn = get_last_insn ();
 
-  rtx last_real_insn = prev_real_insn (insn);
+  rtx_insn *last_real_insn = prev_real_insn (insn);
+  rtx_sequence *seq;
   if (last_real_insn
       && NONJUMP_INSN_P (last_real_insn)
-      && GET_CODE (PATTERN (last_real_insn)) == SEQUENCE)
-    last_real_insn = XVECEXP (PATTERN (last_real_insn), 0, 0);
+      && (seq = dyn_cast <rtx_sequence *> (PATTERN (last_real_insn))))
+    last_real_insn = seq->insn (0);
 
-  if (last_real_insn
-      && CALL_P (last_real_insn)
-      && !SIBLING_CALL_P (last_real_insn))
+  auto call = safe_dyn_cast<rtx_call_insn *> (last_real_insn);
+  if (call && !SIBLING_CALL_P (call))
     fputs("\tnop\n", file);
 
   sparc_output_deferred_case_vectors ();
@@ -10478,7 +10479,8 @@ sparc_output_addr_vec (rtx vec)
   for (idx = 0; idx < vlen; idx++)
     {
       ASM_OUTPUT_ADDR_VEC_ELT
-	(asm_out_file, CODE_LABEL_NUMBER (XEXP (XVECEXP (body, 0, idx), 0)));
+	(asm_out_file,
+	 CODE_LABEL_NUMBER (label_ref_label (XVECEXP (body, 0, idx))));
     }
 
 #ifdef ASM_OUTPUT_ADDR_VEC_END
@@ -10490,7 +10492,7 @@ static void
 sparc_output_addr_diff_vec (rtx vec)
 {
   rtx lab = XEXP (vec, 0), body = XEXP (vec, 1);
-  rtx base = XEXP (XEXP (body, 0), 0);
+  rtx_insn *base = label_ref_label (XEXP (body, 0));
   int idx, vlen = XVECLEN (body, 1);
 
 #ifdef ASM_OUTPUT_ADDR_VEC_START
@@ -10509,7 +10511,7 @@ sparc_output_addr_diff_vec (rtx vec)
       ASM_OUTPUT_ADDR_DIFF_ELT
         (asm_out_file,
          body,
-         CODE_LABEL_NUMBER (XEXP (XVECEXP (body, 1, idx), 0)),
+	 CODE_LABEL_NUMBER (label_ref_label (XVECEXP (body, 1, idx))),
          CODE_LABEL_NUMBER (base));
     }
 
