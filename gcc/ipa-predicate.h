@@ -48,7 +48,7 @@ typedef vec<expr_eval_op, va_gc> *expr_eval_ops;
 struct GTY(()) condition
 {
   /* If agg_contents is set, this is the offset from which the used data was
-     loaded.  */
+     loaded, or -1 if unknown_offset is set.  */
   HOST_WIDE_INT offset;
   /* Type of the access reading the data (or the PARM_DECL SSA_NAME).  */
   tree type;
@@ -61,6 +61,11 @@ struct GTY(()) condition
   /* If agg_contents is set, this differentiates between loads from data
      passed by reference and by value.  */
   unsigned by_ref : 1;
+  /* If by_ref is set, this is set when we cannot prove that the value
+     pointed to is unmodified from the beginning of the function to use.  */
+  unsigned maybe_modified : 1;
+  /* If agg_contents is set, this is set when the offset is unknown.  */
+  unsigned unknown_offset : 1;
   /* A set of sequential operations on the parameter, which can be seen as
      a mathematical function on the parameter.  */
   expr_eval_ops param_ops;
@@ -252,6 +257,7 @@ public:
 				      ipa_fn_summary *,
 				      const vec<int> &,
 				      const vec<HOST_WIDE_INT> &,
+				      const vec<bool> &,
 				      clause_t, const ipa_predicate &);
 
   void stream_in (lto_input_block *);

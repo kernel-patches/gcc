@@ -21,6 +21,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
+#include "target.h"
 #include "rtl.h"
 #include "tree.h"
 #include "gimple.h"
@@ -1277,6 +1278,174 @@ parm_ref_data_pass_through_p (struct ipa_func_body_info *fbi, int index,
   return !modified;
 }
 
+/* Fallback for ipa_load_from_parm_agg when OP is a 1-byte integral (char)
+   load whose byte offset is unknown (for example due to a variable ARRAY_REF
+   index or pointer arithmetic from a parameter).  Use get_base_address to
+   strip component references down to a MEM_REF and walk backwards through
+   pointer adjustments, copies, conversions and PHI nodes using a worklist and
+   a visited set of SSA_NAME versions, verifying that every reachable path
+   originates from the same function parameter.  If so, record *OFFSET_P as
+   -1 and set *UNKNOWN_OFFSET_P to true.  */
+
+static bool
+ipa_load_from_parm_agg_unknown_offset (struct ipa_func_body_info *fbi,
+				       vec<ipa_param_descriptor, va_gc>
+					 *descriptors,
+				       gimple *stmt, tree op, int *index_p,
+				       HOST_WIDE_INT *offset_p,
+				       poly_int64 *size_p, bool *by_ref_p,
+				       bool *guaranteed_unmodified,
+				       bool *unknown_offset_p)
+{
+  /* Currently we only work on STRING_CST when evaluating unknown-offset
+     conditions, so we do not record other cases (such as by-value
+     aggregates or general constructors).
+     TODO: Support general constructors.  */
+  tree type = TREE_TYPE (op);
+  if (TREE_CODE (type) != INTEGER_TYPE
+      || TYPE_PRECISION (type) != BITS_PER_UNIT)
+    return false;
+
+  tree base = get_base_address (op);
+  if (!base || TREE_CODE (base) != MEM_REF)
+    return false;
+
+  tree start_ptr = TREE_OPERAND (base, 0);
+  if (TREE_CODE (start_ptr) != SSA_NAME)
+    return false;
+
+  bool null_invalid_p
+    = ((fbi && fbi->node
+	? opt_for_fn (fbi->node->decl, flag_delete_null_pointer_checks)
+	: flag_delete_null_pointer_checks)
+       && !targetm.addr_space.zero_address_valid
+	     (TYPE_ADDR_SPACE (TREE_TYPE (base))));
+
+  /* Walk backwards through pointer adjustments, copies, conversions and PHIs,
+     verifying that all reachable definitions originate from the same function
+     parameter.  Since BASE is dereferenced at STMT and POINTER_PLUS_EXPR,
+     same-address-space conversions and PHIs preserve null provenance,
+     integer_zerop operands cannot reach a valid dereference when
+     NULL_INVALID_P holds and can be skipped (FOUND_INDEX < 0 still ensures
+     at least one parameter path exists).  */
+  auto_vec<tree, 8> worklist;
+  hash_set<int_hash<unsigned, 0>> visited;
+  visited.add (SSA_NAME_VERSION (start_ptr));
+  worklist.quick_push (start_ptr);
+
+  int found_index = -1;
+  tree parm_ptr = NULL_TREE;
+  bool saw_phi = false;
+  int steps = 0;
+
+  while (!worklist.is_empty ())
+    {
+      tree ptr = worklist.pop ();
+      if (SSA_NAME_IS_DEFAULT_DEF (ptr))
+	{
+	  tree parm = SSA_NAME_VAR (ptr);
+	  if (!parm || TREE_CODE (parm) != PARM_DECL)
+	    return false;
+	  int index = ipa_get_param_decl_index_1 (descriptors, parm);
+	  if (index < 0
+	      || (found_index != -1 && found_index != index))
+	    return false;
+	  found_index = index;
+	  parm_ptr = ptr;
+	  continue;
+	}
+
+      if (++steps > param_ipa_jump_function_lookups)
+	return false;
+
+      gimple *def = SSA_NAME_DEF_STMT (ptr);
+      if (gphi *phi = dyn_cast <gphi *> (def))
+	{
+	  saw_phi = true;
+	  unsigned int n = gimple_phi_num_args (phi);
+	  for (unsigned int i = 0; i < n; i++)
+	    {
+	      tree arg = gimple_phi_arg_def (phi, i);
+	      if (null_invalid_p && integer_zerop (arg))
+		continue;
+	      if (TREE_CODE (arg) != SSA_NAME)
+		return false;
+	      if (!visited.add (SSA_NAME_VERSION (arg)))
+		worklist.safe_push (arg);
+	    }
+	}
+      else if (is_gimple_assign (def))
+	{
+	  enum tree_code rhs_code = gimple_assign_rhs_code (def);
+	  tree rhs1 = gimple_assign_rhs1 (def);
+	  if (rhs_code == POINTER_PLUS_EXPR
+	      || rhs_code == SSA_NAME
+	      || (CONVERT_EXPR_CODE_P (rhs_code)
+		  && POINTER_TYPE_P (TREE_TYPE (ptr))
+		  && POINTER_TYPE_P (TREE_TYPE (rhs1))))
+	    {
+	      if (null_invalid_p && integer_zerop (rhs1))
+		continue;
+	      if (TREE_CODE (rhs1) != SSA_NAME)
+		return false;
+	      if (!visited.add (SSA_NAME_VERSION (rhs1)))
+		worklist.safe_push (rhs1);
+	    }
+	  else if (rhs_code == ADDR_EXPR)
+	    {
+	      tree inner = get_base_address (TREE_OPERAND (rhs1, 0));
+	      if (!inner || TREE_CODE (inner) != MEM_REF)
+		return false;
+	      tree next = TREE_OPERAND (inner, 0);
+	      if (null_invalid_p && integer_zerop (next))
+		continue;
+	      if (TREE_CODE (next) != SSA_NAME)
+		return false;
+	      if (!visited.add (SSA_NAME_VERSION (next)))
+		worklist.safe_push (next);
+	    }
+	  else
+	    {
+	      int index = load_from_unmodified_param (fbi, descriptors, def);
+	      if (index < 0
+		  || (found_index != -1 && found_index != index))
+		return false;
+	      found_index = index;
+	      parm_ptr = ptr;
+	    }
+	}
+      else
+	return false;
+    }
+
+  if (found_index < 0)
+    return false;
+
+  /* When a PHI was crossed (for instance a pointer induction variable in a
+     loop), a store to ptr + 1 in a previous iteration aliases *ptr in the
+     next iteration even though both share the same SSA_NAME base, so check
+     preservation of the whole pointed-to object via
+     parm_ref_data_pass_through_p.  */
+  bool data_preserved
+    = (gimple_vuse (stmt)
+       ? (saw_phi
+	  ? parm_ref_data_pass_through_p (fbi, found_index, stmt, parm_ptr)
+	  : parm_ref_data_preserved_p (fbi, found_index, stmt, op))
+       : false);
+  if (!data_preserved && !guaranteed_unmodified)
+    return false;
+
+  *index_p = found_index;
+  *offset_p = -1;
+  *by_ref_p = true;
+  if (size_p)
+    *size_p = BITS_PER_UNIT;
+  if (guaranteed_unmodified)
+    *guaranteed_unmodified = data_preserved;
+  *unknown_offset_p = true;
+  return true;
+}
+
 /* Return true if we can prove that OP is a memory reference loading
    data from an aggregate passed as a parameter.
 
@@ -1285,6 +1454,10 @@ parm_ref_data_pass_through_p (struct ipa_func_body_info *fbi, int index,
    load in STMT.  If GUARANTEED_UNMODIFIED is not NULL, it will return true even
    if it cannot prove the value has not been modified, in that case it will
    store false to *GUARANTEED_UNMODIFIED, otherwise it will store true there.
+
+   If UNKNOWN_OFFSET_P is non-NULL, also accept 1-byte integral (char) loads at
+   unknown (variable) offsets through a parameter pointer; in that case store
+   true to *UNKNOWN_OFFSET_P and -1 to *OFFSET_P.
 
    INFO and PARMS_AINFO describe parameters of the current function (but the
    latter can be NULL), STMT is the load statement.  If function returns true,
@@ -1300,84 +1473,96 @@ ipa_load_from_parm_agg (struct ipa_func_body_info *fbi,
 			vec<ipa_param_descriptor, va_gc> *descriptors,
 			gimple *stmt, tree op, int *index_p,
 			HOST_WIDE_INT *offset_p, poly_int64 *size_p,
-			bool *by_ref_p, bool *guaranteed_unmodified)
+			bool *by_ref_p, bool *guaranteed_unmodified,
+			bool *unknown_offset_p)
 {
   int index;
   HOST_WIDE_INT size;
   bool reverse;
-  tree base = get_ref_base_and_extent_hwi (op, offset_p, &size, &reverse);
 
-  if (!base
-      || (*offset_p / BITS_PER_UNIT) > UINT_MAX)
-    return false;
+  if (unknown_offset_p)
+    *unknown_offset_p = false;
 
   /* We can not propagate across volatile loads.  */
   if (TREE_THIS_VOLATILE (op))
     return false;
 
-  if (DECL_P (base))
+  tree base = get_ref_base_and_extent_hwi (op, offset_p, &size, &reverse);
+
+  if (base && (*offset_p / BITS_PER_UNIT) <= UINT_MAX)
     {
-      int index = ipa_get_param_decl_index_1 (descriptors, base);
-      if (index >= 0
-	  && parm_preserved_before_stmt_p (fbi, index, stmt, op))
+      if (DECL_P (base))
 	{
-	  *index_p = index;
-	  *by_ref_p = false;
-	  if (size_p)
-	    *size_p = size;
-	  if (guaranteed_unmodified)
-	    *guaranteed_unmodified = true;
-	  return true;
+	  int index = ipa_get_param_decl_index_1 (descriptors, base);
+	  if (index >= 0
+	      && parm_preserved_before_stmt_p (fbi, index, stmt, op))
+	    {
+	      *index_p = index;
+	      *by_ref_p = false;
+	      if (size_p)
+		*size_p = size;
+	      if (guaranteed_unmodified)
+		*guaranteed_unmodified = true;
+	      return true;
+	    }
+	  return false;
 	}
-      return false;
+
+      if (TREE_CODE (base) == MEM_REF
+	  && TREE_CODE (TREE_OPERAND (base, 0)) == SSA_NAME
+	  && integer_zerop (TREE_OPERAND (base, 1)))
+	{
+	  if (SSA_NAME_IS_DEFAULT_DEF (TREE_OPERAND (base, 0)))
+	    {
+	      tree parm = SSA_NAME_VAR (TREE_OPERAND (base, 0));
+	      index = ipa_get_param_decl_index_1 (descriptors, parm);
+	    }
+	  else
+	    {
+	      /* This branch catches situations where a pointer parameter is
+		 not a gimple register, for example:
+
+		 void hip7(S*) (struct S * p)
+		 {
+		 void (*<T2e4>) (struct S *) D.1867;
+		 struct S * p.1;
+
+		 <bb 2>:
+		 p.1_1 = p;
+		 D.1867_2 = p.1_1->f;
+		 D.1867_2 ();
+		 gdp = &p;
+	      */
+
+	      gimple *def = SSA_NAME_DEF_STMT (TREE_OPERAND (base, 0));
+	      index = load_from_unmodified_param (fbi, descriptors, def);
+	    }
+
+	  if (index >= 0)
+	    {
+	      bool data_preserved = parm_ref_data_preserved_p (fbi, index, stmt,
+							       op);
+	      if (!data_preserved && !guaranteed_unmodified)
+		return false;
+
+	      *index_p = index;
+	      *by_ref_p = true;
+	      if (size_p)
+		*size_p = size;
+	      if (guaranteed_unmodified)
+		*guaranteed_unmodified = data_preserved;
+	      return true;
+	    }
+	}
     }
 
-  if (TREE_CODE (base) != MEM_REF
-	   || TREE_CODE (TREE_OPERAND (base, 0)) != SSA_NAME
-	   || !integer_zerop (TREE_OPERAND (base, 1)))
+  if (!unknown_offset_p)
     return false;
 
-  if (SSA_NAME_IS_DEFAULT_DEF (TREE_OPERAND (base, 0)))
-    {
-      tree parm = SSA_NAME_VAR (TREE_OPERAND (base, 0));
-      index = ipa_get_param_decl_index_1 (descriptors, parm);
-    }
-  else
-    {
-      /* This branch catches situations where a pointer parameter is not a
-	 gimple register, for example:
-
-	 void hip7(S*) (struct S * p)
-	 {
-	 void (*<T2e4>) (struct S *) D.1867;
-	 struct S * p.1;
-
-	 <bb 2>:
-	 p.1_1 = p;
-	 D.1867_2 = p.1_1->f;
-	 D.1867_2 ();
-	 gdp = &p;
-      */
-
-      gimple *def = SSA_NAME_DEF_STMT (TREE_OPERAND (base, 0));
-      index = load_from_unmodified_param (fbi, descriptors, def);
-    }
-
-  if (index >= 0)
-    {
-      bool data_preserved = parm_ref_data_preserved_p (fbi, index, stmt, op);
-      if (!data_preserved && !guaranteed_unmodified)
-	return false;
-
-      *index_p = index;
-      *by_ref_p = true;
-      if (size_p)
-	*size_p = size;
-      if (guaranteed_unmodified)
-	*guaranteed_unmodified = data_preserved;
-      return true;
-    }
-  return false;
+  return ipa_load_from_parm_agg_unknown_offset (fbi, descriptors, stmt, op,
+						index_p, offset_p, size_p,
+						by_ref_p, guaranteed_unmodified,
+						unknown_offset_p);
 }
 
 /* If STMT is an assignment that loads a value from a parameter declaration,
@@ -3768,12 +3953,27 @@ update_jump_functions_after_inlining (struct cgraph_edge *cs,
 	      src = ipa_get_ith_jump_func (top, dst_fid);
 	      if (src->type == IPA_JF_CONST)
 		{
-		  if (item->jftype == IPA_JF_PASS_THROUGH
-		      && item->value.pass_through.operation == NOP_EXPR)
+		  if (item->jftype == IPA_JF_PASS_THROUGH)
 		    {
-		      item->jftype = IPA_JF_CONST;
-		      item->value.constant = src->value.constant.value;
-		      continue;
+		      if (item->value.pass_through.operation == NOP_EXPR)
+			{
+			  item->jftype = IPA_JF_CONST;
+			  item->value.constant = src->value.constant.value;
+			  continue;
+			}
+		      tree cst = ipa_get_jf_arith_result
+				   (item->value.pass_through.operation,
+				    src->value.constant.value,
+				    item->value.pass_through.operand,
+				    item->value.pass_through.op_type);
+		      cst = ipacp_value_safe_for_type (item->type, cst);
+		      if (cst)
+			{
+			  item->jftype = IPA_JF_CONST;
+			  item->value.constant
+			    = unshare_expr_without_location (cst);
+			  continue;
+			}
 		    }
 		}
 	      else if (src->type == IPA_JF_PASS_THROUGH
@@ -3873,8 +4073,25 @@ update_jump_functions_after_inlining (struct cgraph_edge *cs,
 		item->offset -= dst->value.ancestor.offset;
 	    }
 
-	  if (src->type == IPA_JF_PASS_THROUGH
-	      && src->value.pass_through.operation == NOP_EXPR)
+	  if (src->type == IPA_JF_CONST)
+	    {
+	      tree parm_type = ipa_get_callee_param_type (e, i);
+	      tree cst = ipa_get_jf_ancestor_result (dst,
+						     ipa_get_jf_constant (src));
+	      if (cst && parm_type)
+		cst = ipacp_value_safe_for_type (parm_type, cst);
+	      if (cst)
+		{
+		  dst->type = IPA_JF_CONST;
+		  dst->value.constant.value
+		    = unshare_expr_without_location (cst);
+		  ipa_zap_jf_refdesc (dst);
+		}
+	      else
+		ipa_set_jf_unknown (dst);
+	    }
+	  else if (src->type == IPA_JF_PASS_THROUGH
+		   && src->value.pass_through.operation == NOP_EXPR)
 	    {
 	      dst->value.ancestor.formal_id = src->value.pass_through.formal_id;
 	      dst->value.ancestor.agg_preserved &=
@@ -4285,23 +4502,77 @@ find_constructor_constant_at_offset (tree constructor, HOST_WIDE_INT req_offset)
    NULL. */
 
 tree
-ipa_find_agg_cst_from_init (tree scalar, HOST_WIDE_INT offset, bool by_ref)
+ipa_find_agg_cst_from_init (tree scalar, HOST_WIDE_INT offset, bool by_ref, tree type)
 {
+  if (!scalar || scalar == error_mark_node)
+    return NULL_TREE;
+
   if (by_ref)
     {
       if (TREE_CODE (scalar) != ADDR_EXPR)
-	return NULL;
+	return NULL_TREE;
       scalar = TREE_OPERAND (scalar, 0);
     }
 
-  if (!VAR_P (scalar)
-      || !is_global_var (scalar)
-      || !TREE_READONLY (scalar)
-      || !DECL_INITIAL (scalar)
-      || TREE_CODE (DECL_INITIAL (scalar)) != CONSTRUCTOR)
-    return NULL;
+  poly_int64 byte_offset = 0;
+  scalar = get_addr_base_and_unit_offset (scalar, &byte_offset);
+  if (!scalar)
+    return NULL_TREE;
 
-  return find_constructor_constant_at_offset (DECL_INITIAL (scalar), offset);
+  if (!CONSTANT_CLASS_P (scalar)
+      && TREE_CODE (scalar) != CONST_DECL
+      && !(VAR_P (scalar) && TREE_READONLY (scalar)))
+    return NULL_TREE;
+
+  poly_offset_int bit_off
+    = poly_offset_int (byte_offset) * BITS_PER_UNIT + offset;
+  poly_int64 const_bit_off;
+  if (!bit_off.to_shwi (&const_bit_off)
+      || !const_bit_off.is_constant (&offset)
+      || offset < 0)
+    return NULL_TREE;
+
+  if (type && is_gimple_reg_type (type))
+    {
+      if (!TYPE_SIZE (type) || !tree_fits_uhwi_p (TYPE_SIZE (type)))
+	return NULL_TREE;
+      unsigned HOST_WIDE_INT size = tree_to_uhwi (TYPE_SIZE (type));
+      if (size == 0)
+	return NULL_TREE;
+
+      tree ctor = NULL_TREE;
+      tree from_decl = NULL_TREE;
+      if (VAR_P (scalar) || TREE_CODE (scalar) == CONST_DECL)
+	{
+	  ctor = ctor_for_folding (scalar);
+	  if (ctor == error_mark_node)
+	    return NULL_TREE;
+	  from_decl = scalar;
+	}
+      else
+	ctor = scalar;
+
+      tree res = (ctor
+		  ? fold_ctor_reference (type, ctor, offset, size, from_decl)
+		  : build_zero_cst (type));
+      if (res && is_gimple_ip_invariant (res))
+	return res;
+      return NULL_TREE;
+    }
+
+  if (VAR_P (scalar) || TREE_CODE (scalar) == CONST_DECL)
+    {
+      tree ctor = ctor_for_folding (scalar);
+      if (!ctor || ctor == error_mark_node)
+	return NULL_TREE;
+      if (TREE_CODE (ctor) == CONSTRUCTOR)
+	return find_constructor_constant_at_offset (ctor, offset);
+      if (offset == 0
+	  && is_gimple_reg_type (TREE_TYPE (ctor))
+	  && is_gimple_ip_invariant (ctor))
+	return ctor;
+    }
+  return NULL_TREE;
 }
 
 /* Retrieve value from AGG_JFUNC for the given OFFSET or return NULL if there
@@ -4426,7 +4697,9 @@ try_make_edge_direct_simple_call (struct cgraph_edge *ie,
     {
       if (scalar)
 	target = ipa_find_agg_cst_from_init (scalar, sii->offset, sii->by_ref);
-      if (!target && sii->guaranteed_unmodified)
+      if (!target
+	  && (sii->guaranteed_unmodified
+	      || (sii->by_ref && ipa_points_to_readonly_memory_p (scalar))))
 	target = ipa_find_agg_cst_from_jfunc_items (&jfunc->agg, new_root_info,
 						    new_root, sii->offset,
 						    sii->by_ref);
