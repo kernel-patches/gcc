@@ -1189,38 +1189,28 @@ oecount_cmp (const void *p1, const void *p2)
     return c1->id > c2->id ? 1 : -1;
 }
 
+static bool acceptable_pow_call (gcall *, tree *, HOST_WIDE_INT *);
+
 /* Return TRUE iff STMT represents a builtin call that raises OP
-   to some constant integer exponent, as required by decrement_power.  */
+   to some constant integer exponent, as required by decrement_power.
+   This has to agree with the calls linearize_expr_tree expands into
+   repeated operands, otherwise zero_one_operation can strip OP from
+   a call that was not accounted for, for example by decrementing
+   a negative exponent over and over.  */
 
 static bool
 stmt_is_power_of_op (gimple *stmt, tree op)
 {
+  tree base;
+  HOST_WIDE_INT exponent;
+
   if (!is_gimple_call (stmt))
     return false;
 
-  switch (gimple_call_combined_fn (stmt))
-    {
-    CASE_CFN_POW:
-      {
-	tree arg1 = gimple_call_arg (stmt, 1);
-	if (TREE_CODE (arg1) != REAL_CST)
-	  return false;
-	REAL_VALUE_TYPE c = TREE_REAL_CST (arg1);
-	REAL_VALUE_TYPE cint;
-	real_from_integer (&cint, VOIDmode, real_to_integer (&c), SIGNED);
-	if (!real_identical (&c, &cint))
-	  return false;
-	return operand_equal_p (gimple_call_arg (stmt, 0), op, 0);
-      }
-
-    CASE_CFN_POWI:
-      if (!tree_fits_shwi_p (gimple_call_arg (stmt, 1)))
-	return false;
-      return operand_equal_p (gimple_call_arg (stmt, 0), op, 0);
-
-    default:
-      return false;
-    }
+  return (reassoc_insert_powi_p
+	  && flag_unsafe_math_optimizations
+	  && acceptable_pow_call (as_a <gcall *> (stmt), &base, &exponent)
+	  && operand_equal_p (base, op, 0));
 }
 
 /* Given STMT which is a __builtin_pow* call, decrement its exponent
@@ -6151,8 +6141,10 @@ acceptable_pow_call (gcall *stmt, tree *base, HOST_WIDE_INT *exponent)
 
   /* Expanding negative exponents is generally unproductive, so we don't
      complicate matters with those.  Exponents of zero and one should
-     have been handled by expression folding.  */
+     have been handled by expression folding.  Exponents not fitting
+     the exponent argument of __builtin_powi are not handled either.  */
   if (*exponent < 2
+      || !wi::fits_to_tree_p (*exponent, integer_type_node)
       || TREE_CODE (*base) != SSA_NAME
       || !can_reassociate_op_p (*base))
     return false;
@@ -6536,7 +6528,10 @@ attempt_builtin_powi (gimple *stmt, vec<operand_entry *> *ops)
 	{
 	  FOR_EACH_VEC_ELT (repeat_factor_vec, j, rf1)
 	    {
-	      if (rf1->factor == oe->op)
+	      /* If the occurrence count would overflow, record the
+		 factor in a separate element instead.  */
+	      if (rf1->factor == oe->op
+		  && oe->count <= HOST_WIDE_INT_MAX - rf1->count)
 		{
 		  rf1->count += oe->count;
 		  break;
@@ -6590,6 +6585,12 @@ attempt_builtin_powi (gimple *stmt, vec<operand_entry *> *ops)
 
   vec_len = repeat_factor_vec.length ();
 
+  /* The occurrence counts can exceed the range of the exponent argument
+     of __builtin_powi, in which case multiple calls are emitted.  */
+  HOST_WIDE_INT max_power = HOST_WIDE_INT_MAX;
+  if (!use_mults)
+    max_power = tree_to_shwi (TYPE_MAX_VALUE (integer_type_node));
+
   /* Repeatedly look for opportunities to create a builtin_powi call.  */
   while (true)
     {
@@ -6608,7 +6609,7 @@ attempt_builtin_powi (gimple *stmt, vec<operand_entry *> *ops)
 
       if (j < vec_len)
 	{
-	  power = rf1->count;
+	  power = MIN (rf1->count, max_power);
 
 	  if (power == 1)
 	    {
@@ -6692,7 +6693,7 @@ attempt_builtin_powi (gimple *stmt, vec<operand_entry *> *ops)
 	  if (j >= vec_len)
 	    break;
 
-	  power = rf1->count;
+	  power = MIN (rf1->count, max_power);
 
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
@@ -6801,7 +6802,7 @@ attempt_builtin_powi (gimple *stmt, vec<operand_entry *> *ops)
 	 factor from OPS.  */
       for (i = j; i < vec_len; i++)
 	{
-	  unsigned k = power;
+	  HOST_WIDE_INT k = power;
 	  unsigned n;
 
 	  rf1 = &repeat_factor_vec[i];

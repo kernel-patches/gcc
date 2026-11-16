@@ -144,21 +144,41 @@ build_shift_right (tree type, tree val, tree amount)
 		      build_int_cst (TREE_TYPE (amount), bits - 1));
 }
 
-/* Build a `TUPLE.val[INDEX]` expression.  */
+/* Get the number of vectors in TUPLE, which can either be a type or an
+   expression.
+   For convenience, a vector is treated as a single-element tuple.  */
+unsigned int
+tuple_len (tree tuple)
+{
+  tree type = TYPE_P (tuple) ? tuple : TREE_TYPE (tuple);
+
+  if (VECTOR_TYPE_P (type))
+    return 1;
+
+  auto field = tuple_type_field (type);
+  auto array_type = TREE_TYPE (field);
+  return int_cst_value (TYPE_MAX_VALUE (TYPE_DOMAIN (array_type))) + 1;
+}
+
+/* Build `TUPLE.val`.  */
 tree
-build_tuple_get (tree tuple, tree index)
+build_tuple_get_array (tree tuple)
 {
   auto tuple_type = TREE_TYPE (tuple);
   auto field = tuple_type_field (tuple_type);
   auto array_type = TREE_TYPE (field);
+  return fold_build3 (COMPONENT_REF, array_type, unshare_expr (tuple), field,
+		      NULL_TREE);
+}
+
+/* Build a `TUPLE.val[INDEX]` expression.  */
+tree
+build_tuple_get (tree tuple, tree index)
+{
+  auto field_ref = build_tuple_get_array (tuple);
+  auto array_type = TREE_TYPE (field_ref);
   auto vec_type = TREE_TYPE (array_type);
-
-  auto field_ref = fold_build3 (COMPONENT_REF, array_type, unshare_expr (tuple),
-				field, NULL_TREE);
-  auto array_ref
-    = build4 (ARRAY_REF, vec_type, field_ref, index, NULL_TREE, NULL_TREE);
-
-  return array_ref;
+  return build4 (ARRAY_REF, vec_type, field_ref, index, NULL_TREE, NULL_TREE);
 }
 
 /* Build a `TUPLE.val[INDEX][LANE]` expression.  */
@@ -255,6 +275,11 @@ public:
       }
     else
       return gimple_build_assign (f.lhs, ret);
+  }
+
+  tree memory_scalar_type (const function_instance &f) const override
+  {
+    return aarch64_simd_types_trees[f.type_suffix (0).neon128_type].eltype;
   }
 };
 
@@ -1421,6 +1446,9 @@ struct gimple_minmax : public gimple_function_base
 	ret_mode = DFmode;
       }
 
+    for (int i = 0; i < 2; i++)
+      e.args[i] = force_reg (ret_mode, e.args[i]);
+
     auto ret = gen_reg_rtx (ret_mode);
     auto args = gen_rtvec_v (e.args.length (), e.args.address ());
     emit_insn (gen_rtx_SET (ret, gen_rtx_UNSPEC (ret_mode, args, unspec)));
@@ -1450,6 +1478,7 @@ struct gimple_reduce_minmax : public gimple_function_base
     auto arg_mode = e.args[0]->mode;
     auto unspec = min_p ? UNSPEC_FMINV : UNSPEC_FMAXV;
     auto icode = code_for_reduc_scal (unspec, arg_mode);
+
     gcc_assert (icode != CODE_FOR_nothing);
     return e.use_exact_insn (icode);
   }
@@ -1465,6 +1494,50 @@ struct gimple_reduce_minmax : public gimple_function_base
     args.safe_push (arg);
     auto ifn = min_p ? IFN_REDUC_MIN : IFN_REDUC_MAX;
     return gimple_build_assign (f.lhs, build_ifn_call (f, ifn, ret_type, args));
+  }
+};
+
+template <bool load_p>
+struct gimple_load_store_multiple : public gimple_function_base
+{
+  unsigned int call_properties (const function_instance &) const override
+  {
+    return load_p ? CP_READ_MEMORY : CP_WRITE_MEMORY;
+  }
+
+  rtx expand (function_expander &e) const override
+  {
+    auto tuple_mode = load_p ? e.result_mode () : e.args[1]->mode;
+    auto &ptr_arg = e.args[0];
+    ptr_arg = gen_rtx_MEM (tuple_mode, e.convert_to_pmode (ptr_arg));
+    auto icode = load_p ? code_for_aarch64_simd_load_multiple (tuple_mode)
+			: code_for_aarch64_simd_store_multiple (tuple_mode);
+    gcc_assert (icode != CODE_FOR_nothing);
+    return e.use_exact_insn (icode);
+  }
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto ptr = gimple_call_arg (f.call, 0);
+    auto mem_type
+      = load_p ? TREE_TYPE (f.lhs) : TREE_TYPE (gimple_call_arg (f.call, 1));
+
+    /* LD1x1 and LDR are just a normal load.  */
+    if (load_p && !AGGREGATE_TYPE_P (mem_type))
+      {
+	if (VECTOR_TYPE_P (mem_type))
+	  aarch64_record_vector_load_arg (ptr);
+	return gimple_build_assign (f.lhs, aarch64_dereference (ptr, mem_type));
+      }
+
+    /* ST1x1 and STR are just a normal store.  */
+    if (!load_p && !AGGREGATE_TYPE_P (mem_type))
+      {
+	auto tuple = gimple_call_arg (f.call, 1);
+	return gimple_build_assign (aarch64_dereference (ptr, mem_type), tuple);
+      }
+
+    return nullptr;
   }
 };
 
@@ -1550,6 +1623,184 @@ public:
       = build_uniform_cst (TREE_TYPE (amount),
 			   wide_int_to_tree (TREE_TYPE (cst), wi::abs (wcst)));
     return gimple_build_assign (f.lhs, RSHIFT_EXPR, val, rhs);
+  }
+};
+
+template <bool load_p>
+struct gimple_load_store_interleaved : public gimple_function_base
+{
+  unsigned int call_properties (const function_instance &) const override
+  {
+    return load_p ? CP_READ_MEMORY : CP_WRITE_MEMORY;
+  }
+
+  rtx expand (function_expander &e) const override
+  {
+    auto tuple_mode = load_p ? e.result_mode () : e.args[1]->mode;
+    insn_code icode;
+
+    auto &ptr_arg = e.args[0];
+    ptr_arg = gen_rtx_MEM (tuple_mode, e.convert_to_pmode (ptr_arg));
+
+    switch (tuple_mode)
+      {
+      case V2x1DImode: case V2x1DFmode:
+      case V3x1DImode: case V3x1DFmode:
+      case V4x1DImode: case V4x1DFmode:
+	icode = load_p ? code_for_aarch64_simd_load_multiple (tuple_mode)
+		       : code_for_aarch64_simd_store_multiple (tuple_mode);
+	break;
+      default:
+	icode = load_p ? code_for_aarch64_load_interleaved (tuple_mode)
+		       : code_for_aarch64_store_interleaved (tuple_mode);
+	break;
+      }
+
+    gcc_assert (icode != CODE_FOR_nothing);
+    return e.use_exact_insn (icode);
+  }
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto ptr = gimple_call_arg (f.call, 0);
+    auto tuple_type = load_p ? TREE_TYPE (f.lhs) : TREE_TYPE (gimple_call_arg (f.call, 1));
+    auto array_type = TREE_TYPE (tuple_type_field (tuple_type));
+    auto vec_type = TREE_TYPE (array_type);
+
+    if (BYTES_BIG_ENDIAN)
+      return nullptr;
+
+    if (one_element_vector_type_p (vec_type))
+      return nullptr;
+
+    auto deref = aarch64_dereference (ptr, array_type);
+    if (load_p)
+      {
+	/* lhs = VIEW_CONVERT (.LOAD_LANES (*ptr)) */
+	auto array = build_var (array_type);
+	auto call = gimple_build_call_internal (IFN_LOAD_LANES, 1, deref);
+	gimple_seq_add_stmt_without_update (&f.stmts,call);
+	gimple_call_set_lhs (call, array);
+	return gimple_build_assign (f.lhs, build_cast (tuple_type, array));
+      }
+    else
+      {
+	/* *ptr = .STORE_LANES (tuple.val) */
+	auto tuple = gimple_call_arg (f.call, 1);
+	auto array = build_tuple_get_array (tuple);
+	auto call = gimple_build_call_internal (IFN_STORE_LANES, 1, array);
+	gimple_call_set_lhs (call, deref);
+	return call;
+      }
+  }
+};
+
+template <bool load_p>
+struct gimple_load_store_lane : public gimple_function_base
+{
+public:
+  unsigned int call_properties (const function_instance &) const override
+  {
+    return load_p ? CP_READ_MEMORY : CP_WRITE_MEMORY;
+  }
+
+  rtx expand (function_expander &e) const override
+  {
+    auto tuple_mode = load_p ? e.result_mode () : e.args[1]->mode;
+    auto &ptr_arg = e.args[0];
+    ptr_arg = gen_rtx_MEM (BLKmode, e.convert_to_pmode (ptr_arg));
+    set_mem_size (ptr_arg, GET_MODE_SIZE (GET_MODE_INNER (tuple_mode))
+			     * targetm.hard_regno_nregs (V0_REGNUM, tuple_mode));
+    auto icode = load_p ? code_for_aarch64_simd_load_lane (tuple_mode)
+			: code_for_aarch64_simd_store_lane (tuple_mode);
+    gcc_assert (icode != CODE_FOR_nothing);
+    return e.use_exact_insn (icode);
+  }
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto ptr = gimple_call_arg (f.call, 0);
+    auto tuple = gimple_call_arg (f.call, 1);
+    auto index = gimple_call_arg (f.call, 2);
+
+    auto tuple_type = TREE_TYPE (tuple);
+    auto elem_type = this->memory_scalar_type (f);
+
+    if (VECTOR_TYPE_P (tuple_type))
+      {
+	auto deref = aarch64_dereference (ptr, elem_type);
+	if (load_p)
+	  /* tuple[lane] = *ptr;  */
+	  return gimple_build_assign (f.lhs,
+				      build_lane_set (tuple, index,
+						      f.force_val (deref)));
+	else
+	  /* *ptr = tuple[lane];  */
+	  return gimple_build_assign (deref, f.force_val (
+					       build_lane_get (tuple, index)));
+      }
+
+    return nullptr;
+  }
+};
+
+template <bool load_p>
+struct gimple_load_store_lane_atomic : public gimple_function_base
+{
+public:
+  unsigned int call_properties (const function_instance &) const override
+  {
+    return load_p ? CP_READ_MEMORY : CP_WRITE_MEMORY;
+  }
+
+  rtx expand (function_expander &e) const override
+  {
+    auto tuple_mode = load_p ? e.result_mode () : e.args[1]->mode;
+    auto &ptr_arg = e.args[0];
+    ptr_arg = e.convert_to_pmode (ptr_arg);
+    auto icode = load_p ? code_for_aarch64_vec_ldap1_lane (tuple_mode)
+			: code_for_aarch64_vec_stl1_lane (tuple_mode);
+    gcc_assert (icode != CODE_FOR_nothing);
+    return e.use_exact_insn (icode);
+  }
+
+  gimple *fold (gimple_folder &) const override { return nullptr; }
+};
+
+struct gimple_load_dup : public gimple_function_base
+{
+  unsigned int call_properties (const function_instance &) const override
+  {
+    return CP_READ_MEMORY;
+  }
+
+  rtx expand (function_expander &e) const override
+  {
+    auto tuple_mode = e.result_mode ();
+    auto &ptr_arg = e.args[0];
+    ptr_arg = gen_rtx_MEM (BLKmode, e.convert_to_pmode (ptr_arg));
+    set_mem_size (ptr_arg, GET_MODE_SIZE (GET_MODE_INNER (tuple_mode))
+			     * targetm.hard_regno_nregs (V0_REGNUM, tuple_mode));
+    auto icode = code_for_aarch64_simd_load_dup (tuple_mode);
+    gcc_assert (icode != CODE_FOR_nothing);
+    return e.use_exact_insn (icode);
+  }
+
+  gimple *fold (gimple_folder &f) const override
+  {
+    auto ptr = gimple_call_arg (f.call, 0);
+    auto ret_type = TREE_TYPE (f.lhs);
+    auto elem_type = this->memory_scalar_type (f);
+    auto vec_count = tuple_len (ret_type);
+
+    if (vec_count == 1)
+      {
+	/* lhs = dup (*ptr)  */
+	auto load = f.force_val (aarch64_dereference (ptr, elem_type));
+	return gimple_build_assign (f.lhs, build_vec_dup (ret_type, load));
+      }
+
+    return nullptr;
   }
 };
 
@@ -1768,6 +2019,27 @@ NEON_FUNCTION (vqtbx1,  vqtbx2,  vqtbx3,  vqtbx4,
 NEON_FUNCTION (vluti2_lane,  vluti2_laneq,
 	       vluti2q_lane, vluti2q_laneq, gimple_luti<2>,)
 NEON_FUNCTION (vluti4q_lane, vluti4q_laneq, gimple_luti<4>,)
+
+// Load/Store
+// Load/Store without interleaving
+NEON_FUNCTION (vld1, vld1q, vldrq, gimple_load_store_multiple<true>,)
+NEON_FUNCTION (vst1, vst1q, vstrq, gimple_load_store_multiple<false>,)
+
+// Load/Store interleaved tuples
+NEON_FUNCTION (vld2, vld2q, vld3, vld3q, vld4, vld4q, gimple_load_store_interleaved<true>,)
+NEON_FUNCTION (vst2, vst2q, vst3, vst3q, vst4, vst4q, gimple_load_store_interleaved<false>,)
+
+// Load/Store lanes
+NEON_FUNCTION (vld1_lane, vld1q_lane, vld2_lane, vld2q_lane,
+	       vld3_lane, vld3q_lane, vld4_lane, vld4q_lane, gimple_load_store_lane<true>,)
+NEON_FUNCTION (vst1_lane, vst1q_lane, vst2_lane, vst2q_lane,
+	       vst3_lane, vst3q_lane, vst4_lane, vst4q_lane, gimple_load_store_lane<false>,)
+NEON_FUNCTION (vldap1_lane, vldap1q_lane, gimple_load_store_lane_atomic<true>,)
+NEON_FUNCTION (vstl1_lane,  vstl1q_lane,  gimple_load_store_lane_atomic<false>,)
+
+// Load and broadcast
+NEON_FUNCTION (vld1_dup, vld1q_dup, vld2_dup, vld2q_dup,
+	       vld3_dup, vld3q_dup, vld4_dup, vld4q_dup, gimple_load_dup,)
 
 // AES
 NEON_FUNCTION (vaeseq,   gimple_exact_insn<CODE_FOR_aarch64_crypto_aesev16qi>,)

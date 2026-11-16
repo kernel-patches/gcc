@@ -56,6 +56,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "gimple-predict.h"
 #include "alias.h"
 #include "tree-ssa-threadedge.h"
+#include "gimple-walk.h"
 
 /* Return the singleton PHI in the SEQ of PHIs for edges E0 and E1. */
 
@@ -707,6 +708,60 @@ phiopt_early_allow (gimple_seq &seq, gimple_match_op &op)
     }
 }
 
+/* Remove unused statements in SEQ. That are used in OP.
+   This is needed for the way resimplify/match and simplify
+   works as it will place some unneeded statements in the sequence
+   which can get in the way of handling phiopt_early_allow.  */
+
+static void
+remove_unused_stmts (gimple_seq *seq, const gimple_match_op &op)
+{
+  if (*seq == nullptr)
+    return;
+
+  walk_stmt_info wi = {};
+
+  /* Since the sequence of statements are not part of
+     a basic block yet, have to manually go through the operands
+     to mark the uses.  */
+  auto_bitmap uses;
+  wi.info = (bitmap)uses;
+  auto fn = [](tree *tp, int *, void *data) -> tree
+	    {
+	      walk_stmt_info *wi = (walk_stmt_info*)data;
+	      if (wi->is_lhs)
+		return NULL_TREE;
+	      bitmap uses = (bitmap)wi->info;
+	      tree use = *tp;
+	      if (TREE_CODE (use) == SSA_NAME)
+		bitmap_set_bit (uses, SSA_NAME_VERSION (use));
+	      return NULL_TREE;
+	    };
+  for (unsigned i = 0; i < op.num_ops; i++)
+    {
+      tree use = op.ops[i];
+      walk_tree (&use, fn, &wi, nullptr);
+    }
+  gimple_stmt_iterator gsi = gsi_last (*seq);
+  while (!gsi_end_p (gsi))
+    {
+      gimple *s = *gsi;
+      tree lhs = gimple_get_lhs (s);
+      if (bitmap_bit_p (uses, SSA_NAME_VERSION (lhs)))
+	{
+	  walk_gimple_op (s, fn, &wi);
+	  gsi_prev (&gsi);
+	  continue;
+	}
+      gsi_remove (&gsi, true);
+      release_defs (s);
+      ggc_free (s);
+      /* gsi_remove goes to the next stmt so start over.  */
+      if (gsi_end_p (gsi))
+	gsi = gsi_last (*seq);
+    }
+}
+
 /* gimple_simplify_phiopt is like gimple_simplify but designed for PHIOPT.
    Return NULL if nothing can be simplified or the resulting simplified value
    with parts pushed if EARLY_P was true. Also rejects non allowed tree code
@@ -748,6 +803,7 @@ gimple_simplify_phiopt (bool early_p, tree type, gimple *comp_stmt,
 
   if (op.resimplify (&seq1, follow_all_ssa_edges))
     {
+      remove_unused_stmts (&seq1, op);
       bool allowed = !early_p || phiopt_early_allow (seq1, op);
       tree result = maybe_push_res_to_seq (&op, &seq1);
       if (dump_file && (dump_flags & TDF_FOLDING))
@@ -802,6 +858,7 @@ gimple_simplify_phiopt (bool early_p, tree type, gimple *comp_stmt,
 
   if (op1.resimplify (&seq1, follow_all_ssa_edges))
     {
+      remove_unused_stmts (&seq1, op1);
       bool allowed = !early_p || phiopt_early_allow (seq1, op1);
       tree result = maybe_push_res_to_seq (&op1, &seq1);
       if (dump_file && (dump_flags & TDF_FOLDING))
@@ -830,6 +887,68 @@ gimple_simplify_phiopt (bool early_p, tree type, gimple *comp_stmt,
   gimple_seq_discard (seq1);
 
   return NULL;
+}
+
+
+/* Returns true if the uses of the sequence SEQ contains only references to
+   BB0 or BB1 (but not both) or the references are outside of either BB0/BB1. */
+
+static bool
+check_uses (gimple_seq seq, basic_block bb0, basic_block bb1)
+{
+  if (!seq)
+    return true;
+  gcc_checking_assert (bb0);
+  gcc_checking_assert (bb1);
+  struct bb_info {
+    basic_block bb0;
+    basic_block bb1;
+    bool bb0_referenced;
+    bool bb1_referenced;
+  };
+  bb_info info = { bb0, bb1, false, false };
+
+  walk_stmt_info wi = {};
+  wi.info = &info;
+  auto fn = [](tree *tp, int *, void *data) -> tree
+	    {
+	      walk_stmt_info *wi = (walk_stmt_info*)data;
+	      if (wi->is_lhs)
+		return NULL_TREE;
+	      bb_info *uses = (bb_info*)wi->info;
+	      tree use = *tp;
+	      if (TREE_CODE (use) != SSA_NAME)
+	        return NULL_TREE;
+	      gimple *stmt = SSA_NAME_DEF_STMT (use);
+	      basic_block sbb = gimple_bb (stmt);
+	      // A stmt with a null bb is ok, either it is the sequnce
+	      // or is outside default defined one.
+	      if (sbb == nullptr)
+		return NULL_TREE;
+	      else if (sbb == uses->bb0)
+		{
+		  if (uses->bb1_referenced)
+		    return use;
+		  uses->bb0_referenced = true;
+		}
+	      else if (sbb == uses->bb1)
+		{
+		  if (uses->bb0_referenced)
+		    return use;
+		  uses->bb1_referenced = true;
+		}
+	      return NULL_TREE;
+	    };
+
+
+  gimple_stmt_iterator gsi = gsi_last (seq);
+  for( ; !gsi_end_p (gsi); gsi_prev (&gsi))
+    {
+      gimple *s = *gsi;
+      if (walk_gimple_op (s, fn, &wi))
+	return false;
+    }
+  return true;
 }
 
 /* one_feeding_comparison_into_p returns true if BB has one comparison
@@ -1242,6 +1361,18 @@ match_simplify_replacement (basic_block cond_bb, basic_block middle_bb,
       statistics_counter_event (cfun, "Non-IEEE FP MIN/MAX PHI replacement",
 				1);
     }
+
+  // Make sure the sequence does not reference both basic blocks.
+  if (threeway_p && middle_bb != middle_bb_alt
+      && !check_uses (seq, middle_bb, middle_bb_alt))
+    {
+      if (dump_file && (dump_flags & TDF_FOLDING))
+	fprintf (dump_file, "rejected the phiopt match-simplify as it uses"
+		 "both conditional statements.\n");
+      gimple_seq_discard (seq);
+      return false;
+    }
+
   if (dump_file && (dump_flags & TDF_FOLDING))
     fprintf (dump_file, "accepted the phiopt match-simplify.\n");
 
