@@ -57,6 +57,34 @@
    [(set (match_dup 5) (plus:DI (ashift:DI (match_dup 1) (match_dup 2)) (match_dup 3)))
     (set (match_dup 0) (sign_extend:DI (any_div:SI (subreg:SI (match_dup 5) 0) (match_dup 4))))])
 
+;; Shifts by 1, 2 or 3 and addition have the same low word at either
+;; width, even if the widened operands have undefined upper bits.
+;; Form the shift-add at XLEN width and let the word rotation perform
+;; the final sign extension.  Keep its count expression unchanged.
+;; Leave the count predicate empty to accept masked expressions as well
+;; as register and immediate counts for the existing rotate patterns.
+(define_split
+  [(set (match_operand:DI 0 "register_operand")
+	(sign_extend:DI
+	  (bitmanip_rotate:SI
+	    (plus:SI
+	      (ashift:SI (match_operand:SI 1 "register_operand")
+			 (match_operand:QI 2 "imm123_operand"))
+	      (match_operand:SI 3 "register_operand"))
+	    (match_operand 4))))
+   (clobber (match_operand:DI 5 "register_operand"))]
+  "TARGET_64BIT && TARGET_ZBA && (TARGET_ZBB || TARGET_ZBKB)"
+  [(set (match_dup 5)
+	(plus:DI (ashift:DI (match_dup 1) (match_dup 2)) (match_dup 3)))
+   (set (match_dup 0)
+	(sign_extend:DI
+	  (bitmanip_rotate:SI (match_dup 6) (match_dup 4))))]
+{
+  operands[1] = gen_lowpart (DImode, operands[1]);
+  operands[3] = gen_lowpart (DImode, operands[3]);
+  operands[6] = gen_lowpart (SImode, operands[5]);
+})
+
 ; Zba does not provide W-forms of sh[123]add(.uw)?, which leads to an
 ; interesting irregularity: we can generate a signed 32-bit result
 ; using slli(.uw)?+ addw, but an unsigned 32-bit result can be more
@@ -477,12 +505,12 @@
   "rolw\t%0,%1,%2"
   [(set_attr "type" "bitmanip")])
 
-(define_insn "*<bitmanip_optab><mode>3_mask"
+(define_insn "*<bitmanip_optab><X:mode>3_mask"
   [(set (match_operand:X 0 "register_operand" "=r")
 	(bitmanip_rotate:X
 	  (match_operand:X 1 "register_operand" "r")
 	  (match_operator 4 "subreg_lowpart_operator"
-	    [(and:X (match_operand:X 2 "register_operand"  "r")
+	    [(and:GPR (match_operand:GPR 2 "register_operand"  "r")
 		    (match_operand 3 "<X:shiftm1>" "<X:shiftm1p>"))])))]
   "TARGET_ZBB || TARGET_ZBKB"
   "<bitmanip_insn>\t%0,%1,%2"
@@ -494,7 +522,7 @@
 	(bitmanip_rotate:SI
 	  (match_operand:SI 1 "register_operand" "r")
 	  (match_operator 3 "subreg_lowpart_operator"
-	    [(and:DI (match_operand:DI 2 "register_operand"  "r")
+	    [(and:GPR (match_operand:GPR 2 "register_operand"  "r")
 		     (const_int 31))])))]
   "TARGET_64BIT && (TARGET_ZBB || TARGET_ZBKB)"
   "<bitmanip_insn>w\t%0,%1,%2"
@@ -507,7 +535,7 @@
 	  (bitmanip_rotate:SI
 	    (match_operand:SI 1 "register_operand" "r")
 	    (match_operator 3 "subreg_lowpart_operator"
-	      [(and:DI (match_operand:DI 2 "register_operand"  "r")
+	      [(and:GPR (match_operand:GPR 2 "register_operand"  "r")
 		       (const_int 31))]))))]
   "TARGET_64BIT && (TARGET_ZBB || TARGET_ZBKB)"
   "<bitmanip_insn>w\t%0,%1,%2"
@@ -657,13 +685,13 @@
   "<bit_optab>\t%0,%1,%2"
   [(set_attr "type" "bitmanip")])
 
-(define_insn "*<bit_optab><mode>_mask"
+(define_insn "*<bit_optab><X:mode>_mask"
   [(set (match_operand:X 0 "register_operand" "=r")
 	(any_or:X
 	  (ashift:X
 	    (const_int 1)
 	    (subreg:QI
-	      (and:X (match_operand:X 2 "register_operand" "r")
+	      (and:GPR (match_operand:GPR 2 "register_operand" "r")
 		     (match_operand 3 "<X:shiftm1>" "<X:shiftm1p>")) 0))
 	  (match_operand:X 1 "register_operand" "r")))]
   "TARGET_ZBS"
@@ -884,11 +912,11 @@
 }
   [(set_attr "type" "bitmanip")])
 
-(define_insn "*bset<mode>_1_mask"
+(define_insn "*bset<X:mode>_1_mask"
   [(set (match_operand:X 0 "register_operand" "=r")
 	(ashift:X (const_int 1)
 		  (subreg:QI
-		   (and:X (match_operand:X 1 "register_operand" "r")
+		   (and:GPR (match_operand:GPR 1 "register_operand" "r")
 			  (match_operand 2 "<X:shiftm1>" "<X:shiftm1p>")) 0)))]
   "TARGET_ZBS"
   "bset\t%0,x0,%1"
@@ -956,13 +984,13 @@
 
 ;; BCLR uses only the low log2(XLEN) bits of the index, just like
 ;; BSET and BINV, so an explicit XLEN - 1 mask is redundant.
-(define_insn "*bclr<mode>_mask"
+(define_insn "*bclr<X:mode>_mask"
   [(set (match_operand:X 0 "register_operand" "=r")
 	(and:X
 	  (rotate:X
 	    (const_int -2)
 	    (subreg:QI
-	      (and:X (match_operand:X 2 "register_operand" "r")
+	      (and:GPR (match_operand:GPR 2 "register_operand" "r")
 		     (match_operand 3 "<X:shiftm1>" "<X:shiftm1p>")) 0))
 	  (match_operand:X 1 "register_operand" "r")))]
   "TARGET_ZBS"
