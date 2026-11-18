@@ -2351,7 +2351,7 @@
   [(set_attr "type" "neon_mla_<Vetype>_long")]
 )
 
-(define_expand "aarch64_<su>mlal_hi<mode>"
+(define_expand "@aarch64_<su>mlal_hi<mode>"
   [(match_operand:<VWIDE> 0 "register_operand")
    (match_operand:<VWIDE> 1 "register_operand")
    (ANY_EXTEND:<VWIDE>(match_operand:VQW 2 "register_operand"))
@@ -2428,7 +2428,7 @@
   [(set_attr "type" "neon_mla_<Vetype>_long")]
 )
 
-(define_expand "aarch64_<su>mlsl_hi<mode>"
+(define_expand "@aarch64_<su>mlsl_hi<mode>"
   [(match_operand:<VWIDE> 0 "register_operand")
    (match_operand:<VWIDE> 1 "register_operand")
    (ANY_EXTEND:<VWIDE>(match_operand:VQW 2 "register_operand"))
@@ -2473,7 +2473,7 @@
 }
 )
 
-(define_insn "aarch64_<su>mlal<mode>"
+(define_insn "@aarch64_<su>mlal<mode>"
   [(set (match_operand:<VWIDE> 0 "register_operand" "=w")
         (plus:<VWIDE>
           (mult:<VWIDE>
@@ -2502,7 +2502,7 @@
   [(set_attr "type" "neon_mla_<Vetype>_long")]
 )
 
-(define_insn "aarch64_<su>mlsl<mode>"
+(define_insn "@aarch64_<su>mlsl<mode>"
   [(set (match_operand:<VWIDE> 0 "register_operand" "=w")
         (minus:<VWIDE>
           (match_operand:<VWIDE> 1 "register_operand" "0")
@@ -2544,7 +2544,7 @@
   [(set_attr "type" "neon_mul_<Vetype>_long")]
 )
 
-(define_insn "aarch64_intrinsic_vec_<su>mult_lo_<mode>"
+(define_insn "@aarch64_intrinsic_vec_<su>mult_lo_<mode>"
   [(set (match_operand:<VWIDE> 0 "register_operand" "=w")
 	(mult:<VWIDE> (ANY_EXTEND:<VWIDE>
 			 (match_operand:VD_BHSI 1 "register_operand" "w"))
@@ -4625,8 +4625,8 @@
 (define_expand "vec_cmp<mode><v_int_equiv>"
   [(set (match_operand:<V_INT_EQUIV> 0 "register_operand")
 	(match_operator 1 "comparison_operator"
-	    [(match_operand:VDQF 2 "register_operand")
-	     (match_operand:VDQF 3 "nonmemory_operand")]))]
+	    [(match_operand:VHSDF 2 "register_operand")
+	     (match_operand:VHSDF 3 "nonmemory_operand")]))]
   "TARGET_SIMD"
 {
   int use_zero_form = 0;
@@ -8221,6 +8221,18 @@
 	    (abs:VHSDF_HSDF
 	      (match_operand:VHSDF_HSDF 2 "register_operand" "w"))
   )))]
+  "TARGET_SIMD"
+  "fac<n_optab>\t%<v>0<Vmtype>, %<v><cmp_1><Vmtype>, %<v><cmp_2><Vmtype>"
+  [(set_attr "type" "neon_fp_compare_<stype><q>")]
+)
+
+;; fac<op> is also valid if the RHS is a nonnegative constant.
+(define_insn "aarch64_fac<optab><mode><vczle><vczbe>_const"
+  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand" "=w")
+	(neg:<V_INT_EQUIV>
+	  (FAC_COMPARISONS:<V_INT_EQUIV>
+	    (abs:VHSDF_HSDF (match_operand:VHSDF_HSDF 1 "register_operand" "w"))
+	    (match_operand:VHSDF_HSDF 2 "aarch64_nonnegative_constant_operand" "w"))))]
   "TARGET_SIMD"
   "fac<n_optab>\t%<v>0<Vmtype>, %<v><cmp_1><Vmtype>, %<v><cmp_2><Vmtype>"
   [(set_attr "type" "neon_fp_compare_<stype><q>")]

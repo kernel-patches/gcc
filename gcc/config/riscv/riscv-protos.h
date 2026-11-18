@@ -666,10 +666,10 @@ enum mask_policy
 };
 
 /* Values for the VTYPE altfmt field.  Instructions that do not care about
-   altfmt leave the "altfmt" insn attribute at its default (INVALID_ATTRIBUTE);
-   FP8 instructions select between standard (ALTFMT_NONE, E4M3) and the
-   alternate format (ALTFMT_ALT, E5M2) by setting the attribute via an
-   operand.  */
+   altfmt leave the "altfmt" insn attribute at its default (INVALID_ATTRIBUTE).
+   FP8 instructions select between standard (ALTFMT_NONE, E4M3) and alternate
+   (ALTFMT_ALT, E5M2) formats.  Dot-product instructions use distinct UNSPECs
+   to select the signedness or FP8 format of vs1 statically.  */
 enum altfmt_type
 {
   ALTFMT_NONE = 0,
@@ -869,6 +869,20 @@ enum riscv_fusion_pairs
   RISCV_FUSE_BFEXT = HOST_WIDE_INT_1U << 10,
   RISCV_FUSE_EXPANDED_LD = HOST_WIDE_INT_1U << 11,
   RISCV_FUSE_B_ALUI = HOST_WIDE_INT_1U << 12,
+  RISCV_FUSE_SUB_SEQZ = HOST_WIDE_INT_1U << 13,
+  RISCV_FUSE_ADD_ST = HOST_WIDE_INT_1U << 14,
+  RISCV_FUSE_ADD_ANDI = HOST_WIDE_INT_1U << 15,
+  RISCV_FUSE_ANDI_ADD = HOST_WIDE_INT_1U << 16,
+  RISCV_FUSE_LOGIC_LOGIC = HOST_WIDE_INT_1U << 17,
+  RISCV_FUSE_SLLI_SRLI = HOST_WIDE_INT_1U << 18,
+  RISCV_FUSE_SRLI_ADD = HOST_WIDE_INT_1U << 19,
+  RISCV_FUSE_PREINDEX_ST = HOST_WIDE_INT_1U << 20,
+  RISCV_FUSE_POSTINDEX_LD = HOST_WIDE_INT_1U << 21,
+  RISCV_FUSE_POSTINDEX_ST = HOST_WIDE_INT_1U << 22,
+  RISCV_FUSE_LDST_PAIR_INC = HOST_WIDE_INT_1U << 23,
+  RISCV_FUSE_LDST_PAIR_DEC = HOST_WIDE_INT_1U << 24,
+  RISCV_FUSE_FLDFST_PAIR_INC = HOST_WIDE_INT_1U << 25,
+  RISCV_FUSE_FLDFST_PAIR_DEC = HOST_WIDE_INT_1U << 26,
 };
 
 extern bool riscv_macro_fusion_p (void);

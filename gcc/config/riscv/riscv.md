@@ -491,6 +491,11 @@
 ;; vfncvtbf16  vector narrowing single floating-point to brain floating-point instruction
 ;; vfwcvtbf16  vector widening brain floating-point to single floating-point instruction
 ;; vfwmaccbf16  vector BF16 widening multiply-accumulate
+;; 19.  Vector dot-product instructions
+;; vidota       vector integer dot-product accumulate instructions
+;; vfdota       vector floating-point dot-product accumulate instructions
+;; vibdota      vector integer batched dot-product accumulate instructions
+;; vfbdota      vector floating-point batched dot-product accumulation
 ;; SiFive custom extension instructions
 ;; sf_vqmacc      vector matrix integer multiply-add instructions
 ;; sf_vfnrclip     vector fp32 to int8 ranged clip instructions
@@ -523,6 +528,7 @@
    vgather,vcompress,vmov,vector,vandn,vbrev,vbrev8,vrev8,vclz,vctz,vcpop,vrol,vror,vwsll,
    vclmul,vclmulh,vghsh,vgmul,vaesef,vaesem,vaesdf,vaesdm,vaeskf1,vaeskf2,vaesz,
    vsha2ms,vsha2ch,vsha2cl,vsm4k,vsm4r,vsm3me,vsm3c,vfncvtbf16,vfwcvtbf16,vfwmaccbf16,
+   vidota,vfdota,vibdota,vfbdota,
    sf_vc,sf_vc_se,xt_vgmulxor,xt_vcrcfold,xt_vile,xt_vilo"
   (cond [(eq_attr "got" "load") (const_string "load")
 
@@ -559,7 +565,7 @@
 (define_attr "fp_vector_disabled" "no,yes"
   (cond [
     (and (eq_attr "type" "vfmov,vfalu,vfmul,vfdiv,
-			  vfwalu,vfwmul,vfmuladd,vfwmuladd,
+			  vfwalu,vfwmul,vfmuladd,vfwmuladd,vfdota,vfbdota,
 			  vfsqrt,vfrecp,vfminmax,vfsgnj,vfcmp,
 			  vfclass,vfmerge,
 			  vfncvtitof,vfwcvtftoi,vfcvtftoi,vfcvtitof,
@@ -5299,6 +5305,8 @@
 ;; that -x = ~x + 1 which is equivalent to (-1 - x) = ~x.  When shifting only
 ;; low bits of X matter (5 for SI, 6 for DI).  So 31/63 are equivalent to -1
 ;; for SI/DI shifts.
+;; Keep the mask in RTL, since later combinations can select instructions
+;; with a different count width.  Masked shift patterns omit it in assembly.
 ;;
 ;; Strangely, even for rv64, the shift computation is done in SI, presumably
 ;; something narrowed the arithmetic prior to gimple->rtl expansion.
@@ -5311,11 +5319,13 @@
 			       (match_operand:SI 3 "register_operand")) 0)))
     (clobber (match_operand:X 4 "register_operand"))]
   ""
-  [(set (match_dup 4) (not:X (match_dup 6)))
-   (set (match_dup 0) (any_shift_rotate:X (match_dup 1) (match_dup 5)))]
+  [(set (match_dup 4) (not:X (match_dup 5)))
+   (set (match_dup 0)
+	(any_shift_rotate:X
+	  (match_dup 1)
+	  (subreg:QI (and:X (match_dup 4) (match_dup 2)) 0)))]
  {
-   operands[5] = gen_lowpart (QImode, operands[4]);
-   operands[6] = gen_lowpart (word_mode, operands[3]);
+   operands[5] = gen_lowpart (word_mode, operands[3]);
  })
 
 ;; This is the same thing as the prior pattern, but for 32 bit shifts on rv64.
@@ -5330,11 +5340,12 @@
   "TARGET_64BIT"
   [(set (match_dup 3) (not:DI (match_dup 2)))
    (set (match_dup 0)
-	(sign_extend:DI (any_shift_rotate:SI (match_dup 1)
-					     (match_dup 4))))]
+	(sign_extend:DI
+	  (any_shift_rotate:SI
+	    (match_dup 1)
+	    (subreg:QI (and:DI (match_dup 3) (const_int 31)) 0))))]
  {
    operands[2] = gen_lowpart (DImode, operands[2]);
-   operands[4] = gen_lowpart (QImode, operands[3]);
  })
 
 ;; This is similar using a shift triplet to implement a logical AND when
@@ -5577,6 +5588,7 @@
 (include "vector.md")
 (include "vector-crypto.md")
 (include "vector-bfloat16.md")
+(include "vector-dot.md")
 (include "zicond.md")
 (include "mips-insn.md")
 (include "sfb.md")

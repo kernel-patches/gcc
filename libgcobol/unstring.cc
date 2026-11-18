@@ -606,7 +606,7 @@ unstring_fixed( const cblc_referlet_t *id2,
 
   // There are complexities because of figurative constants, including the
   // LOW-VALUE figurative constant, which precludes the use of string
-  // operations that would be confused by embedded NUL characters.  Dammit.
+  // operations that would be confused by embedded NUL characters.
 
   // For each delimiter, there is an identifier-4 receiver that must be
   // resolved.  Each might have an identifier-5 delimiter, and each might have
@@ -760,10 +760,10 @@ unstring_fixed( const cblc_referlet_t *id2,
       if( nfound != right )
         {
         // We found a delimiter
-        if( nfound > best_leftmost )
+        if( nfound >= best_leftmost )
           {
-          // This delimiter lives to the right of the best one we found so far.
-          // Ignore it, and proceed to the next delimiter.
+          // Keep the first listed delimiter when matches start at the same
+          // position, and ignore matches to its right.
           continue;
           }
         // This delimiter is the leftmost we've seen so far:

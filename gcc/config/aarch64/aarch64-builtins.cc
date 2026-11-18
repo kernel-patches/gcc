@@ -251,10 +251,6 @@ aarch64_types_binop_ssu_qualifiers[SIMD_MAX_BUILTIN_ARGS]
   = { qualifier_none, qualifier_none, qualifier_unsigned };
 #define TYPES_BINOP_SSU (aarch64_types_binop_ssu_qualifiers)
 static enum aarch64_type_qualifiers
-aarch64_types_binop_uss_qualifiers[SIMD_MAX_BUILTIN_ARGS]
-  = { qualifier_unsigned, qualifier_none, qualifier_none };
-#define TYPES_BINOP_USS (aarch64_types_binop_uss_qualifiers)
-static enum aarch64_type_qualifiers
 aarch64_types_binopp_qualifiers[SIMD_MAX_BUILTIN_ARGS]
   = { qualifier_poly, qualifier_poly, qualifier_poly };
 #define TYPES_BINOPP (aarch64_types_binopp_qualifiers)
@@ -4443,9 +4439,18 @@ aarch64_v128_highpart_ref (const_tree ref)
   return NULL_TREE;
 }
 
+/* Like aarch64_v128_highpart_ref, but only return the vector when it is a
+   register.  */
+tree
+aarch64_v128_highpart_src_reg (const_tree ref)
+{
+  tree obj = aarch64_v128_highpart_ref (ref);
+  return obj && is_gimple_reg (obj) ? obj : NULL_TREE;
+}
+
 /* Build and return a new VECTOR_CST of type OUT_TY, using repeated
    copies of the elements of VEC_IN.  */
-static tree
+tree
 aarch64_build_vector_cst (const_tree vec_in, tree out_ty)
 {
   gcc_assert (TREE_CODE (vec_in) == VECTOR_CST
@@ -4512,8 +4517,7 @@ aarch64_fold_lo_call_to_hi (unsigned int fcode, gcall *stmt,
 	  gcc_assert (wi::to_widest (TYPE_SIZE (type_lo)) == 64
 		      && wi::to_widest (TYPE_SIZE (type_hi)) == 128);
 
-	  tree vq = aarch64_v128_highpart_ref (arg);
-	  if (vq && is_gimple_reg (vq))
+	  if (auto vq = aarch64_v128_highpart_src_reg (arg))
 	    {
 	      vec_highparts.safe_push (argno);
 	      arg = vq;
