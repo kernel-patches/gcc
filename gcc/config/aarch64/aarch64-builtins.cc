@@ -481,7 +481,6 @@ static aarch64_simd_builtin_datum aarch64_simd_builtin_data[] = {
 #include "aarch64-builtin-pairs.def"
 
 #define LO_HI_PAIRINGS \
-  UNOP_LONG_LH_PAIRS \
   BINOP_LONG_LH_PAIRS \
   BINOP_LONG_N_LH_PAIRS \
   BINOP_WIDE_LH_PAIRS \
@@ -2924,7 +2923,7 @@ aarch64_expand_builtin_rsqrt (int fcode, tree exp, rtx target)
   tree arg0 = CALL_EXPR_ARG (exp, 0);
   rtx op0 = expand_normal (arg0);
 
-  rtx (*gen) (rtx, rtx);
+  rtx_insn *(*gen) (rtx, rtx);
 
   switch (fcode)
     {

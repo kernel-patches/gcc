@@ -15197,6 +15197,57 @@ aarch64_extr_rtx_p (rtx x, rtx *res_op0, rtx *res_op1)
   return false;
 }
 
+/* Return true if BASE and INS, the operands of an IOR or PLUS in MODE,
+   match the *aarch64_bfi patterns with BASE being the value that is
+   updated.  Set *SRC to the register whose bits are inserted.  This must
+   be kept in sync with the operand forms of those patterns.  */
+
+static bool
+aarch64_bfi_operands_p (scalar_int_mode mode, rtx base, rtx ins, rtx *src)
+{
+  if (GET_CODE (base) != AND || !CONST_INT_P (XEXP (base, 1)))
+    return false;
+
+  unsigned HOST_WIDE_INT shft_amnt = 0;
+  unsigned HOST_WIDE_INT mask = HOST_WIDE_INT_M1U;
+  if (GET_CODE (ins) == AND && CONST_INT_P (XEXP (ins, 1)))
+    {
+      mask = UINTVAL (XEXP (ins, 1));
+      ins = XEXP (ins, 0);
+    }
+  if (GET_CODE (ins) == ASHIFT && CONST_INT_P (XEXP (ins, 1)))
+    {
+      shft_amnt = UINTVAL (XEXP (ins, 1));
+      if (shft_amnt >= GET_MODE_BITSIZE (mode))
+	return false;
+      /* Without an AND, the shift clears the low bits of the insertion.  */
+      if (mask == HOST_WIDE_INT_M1U)
+	mask <<= shft_amnt;
+      ins = XEXP (ins, 0);
+    }
+  else if (mask == HOST_WIDE_INT_M1U)
+    return false;
+
+  *src = ins;
+  return aarch64_masks_and_shift_for_bfi_p (mode, UINTVAL (XEXP (base, 1)),
+					    shft_amnt, mask);
+}
+
+/* Return true if X is an IOR or PLUS that matches a *aarch64_bfi
+   pattern.  Set *SRC to the register whose bits are inserted.  */
+
+static bool
+aarch64_bfi_rtx_p (rtx x, rtx *src)
+{
+  scalar_int_mode mode;
+  if (!is_a <scalar_int_mode> (GET_MODE (x), &mode)
+      || (GET_CODE (x) != IOR && GET_CODE (x) != PLUS))
+    return false;
+
+  return aarch64_bfi_operands_p (mode, XEXP (x, 0), XEXP (x, 1), src)
+	 || aarch64_bfi_operands_p (mode, XEXP (x, 1), XEXP (x, 0), src);
+}
+
 /* Calculate the cost of calculating (if_then_else (OP0) (OP1) (OP2)),
    storing it in *COST.  Result is true if the total cost of the operation
    has now been calculated.  */
@@ -15982,6 +16033,14 @@ cost_minus:
       {
 	rtx new_op0;
 
+	if (aarch64_bfi_rtx_p (x, &op0))
+	  {
+	    *cost += rtx_cost (op0, mode, code, 0, speed);
+	    if (speed)
+	      *cost += extra_cost->alu.bfi;
+	    return true;
+	  }
+
 	op0 = XEXP (x, 0);
 	op1 = XEXP (x, 1);
 
@@ -16128,6 +16187,14 @@ cost_plus:
 
           return true;
         }
+
+      if (aarch64_bfi_rtx_p (x, &op0))
+	{
+	  *cost += rtx_cost (op0, mode, code, 0, speed);
+	  if (speed)
+	    *cost += extra_cost->alu.bfi;
+	  return true;
+	}
     /* Fall through.  */
     case XOR:
     case AND:
@@ -18878,16 +18945,24 @@ aarch64_vector_costs::count_ops (unsigned int count, vect_cost_for_stmt kind,
       && vect_reduc_type (m_vinfo, node) == COND_REDUCTION)
     ops->general_ops += count;
 
-  /* Count the predicate operations needed by an SVE comparison.  */
+  /* Count the general and predicate operations needed by an SVE comparison.  */
   if (stmt_info
       && sve_issue
       && (kind == vector_stmt || kind == vec_to_scalar))
     if (tree type = vect_comparison_type (stmt_info))
       {
-	unsigned int base = (FLOAT_TYPE_P (type)
-			     ? sve_issue->fp_cmp_pred_ops
-			     : sve_issue->int_cmp_pred_ops);
-	ops->pred_ops += base * count;
+	auto cmp_ops = (FLOAT_TYPE_P (type)
+			? sve_issue->fp_cmp_ops
+			: sve_issue->int_cmp_ops);
+	/* Subtracting 1 from cmp_ops because the basic operation count is
+	   already included above.  The effect of this is now the additional
+	   cost of cmp instructions.  */
+	ops->general_ops += (cmp_ops - 1) * count;
+
+	auto cmp_pred_ops = (FLOAT_TYPE_P (type)
+			    ? sve_issue->fp_cmp_pred_ops
+			    : sve_issue->int_cmp_pred_ops);
+	ops->pred_ops += cmp_pred_ops * count;
       }
 
   /* Add any extra overhead associated with LD[234] and ST[234] operations.  */

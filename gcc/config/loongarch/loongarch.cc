@@ -5282,7 +5282,7 @@ loongarch_output_move (rtx *operands)
   if ((lsx_p || lasx_p)
       && dest_code == REG && FP_REG_P (REGNO (dest))
       && src_code == CONST_VECTOR
-      && CONST_INT_P (CONST_VECTOR_ELT (src, 0)))
+      && CONST_SCALAR_INT_P (CONST_VECTOR_ELT (src, 0)))
     {
       operands[1] = loongarch_const_vector_vldi (src, mode);
       gcc_assert (operands[1]);
@@ -9290,8 +9290,9 @@ loongarch_expand_vec_interleave (rtx target, rtx op0, rtx op1, bool high_p)
 
 void
 loongarch_expand_vec_widen_hilo (rtx dest, rtx op1, rtx op2,
-				 bool high_p, rtx (*fn_even) (rtx, rtx, rtx),
-				 rtx (*fn_odd) (rtx, rtx, rtx))
+				 bool high_p,
+				 rtx_insn *(*fn_even) (rtx, rtx, rtx),
+				 rtx_insn *(*fn_odd) (rtx, rtx, rtx))
 {
   machine_mode wmode = GET_MODE (dest);
   machine_mode mode = GET_MODE (op1);
@@ -10497,7 +10498,7 @@ loongarch_expand_vector_init (rtx target, rtx vals)
   /* Copy two elements of vals to target vector.  */
   typedef rtx (*loongarch_vec_repl2_fn) (rtx, rtx, rtx);
   /* Insert scalar operands into the specified position of the vector.  */
-  typedef rtx (*loongarch_vec_set_fn) (rtx, rtx, rtx);
+  typedef rtx_insn *(*loongarch_vec_set_fn) (rtx, rtx, rtx);
   /* Copy 64bit lowpart to highpart.  */
   typedef rtx (*loongarch_vec_mirror_fn) (rtx, rtx, rtx);
   /* Merge lowpart and highpart into target.  */

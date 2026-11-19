@@ -3066,7 +3066,7 @@ void
 avr_final_prescan_insn (rtx_insn *insn, rtx * /*operands*/,
 			int /*num_operands*/)
 {
-  avr_insn_location = LOCATION_LOCUS (INSN_LOCATION (insn));
+  avr_insn_location = LOCATION_LOCUS (insn->location ());
 
   if (avr_log.rtx_costs)
     {
@@ -15694,7 +15694,7 @@ avr_move_fixed_operands (rtx *op, rtx *hreg, unsigned mask)
    move the contents of respective pseudos to their hard regs.  */
 
 bool
-avr_emit3_fix_outputs (rtx (*gen)(rtx,rtx,rtx), rtx *op,
+avr_emit3_fix_outputs (rtx_insn *(*gen)(rtx,rtx,rtx), rtx *op,
 		       unsigned opmask, unsigned rmask)
 {
   const int n = 3;
