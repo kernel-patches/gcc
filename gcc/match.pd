@@ -6005,6 +6005,47 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
    (with { wide_int c = wi::to_wide (@2) | wi::bit_not (wi::to_wide (@1)); }
     (cmp @0 { wide_int_to_tree (TREE_TYPE (@0), c); })))))
 
+/* Fold (X op A) cmp C, with op in { |, ^ } and cmp in {le,gt,lt,ge},
+   into X cmp C when all potentially nonzero bits of A are below bit m
+   and 0 < m < the precision of A (to avoid sign bit).
+   'A' leaves the bits of X at and above position m unchanged,
+   so the comparison is decided by the high parts alone when the
+   low m bits of C are all ones (cmp = le/gt) or all zeros (cmp = lt/ge).
+   Skip cases where A is known to be zero, which are handled by
+   other simplifications.  */
+(for cmp (le gt lt ge)
+ (for bitop (bit_ior bit_xor)
+  (simplify
+   (cmp (bitop:c@3 @0 @1) INTEGER_CST@2)
+   (if (INTEGRAL_TYPE_P (TREE_TYPE (@2)))
+    (with
+     {
+       wide_int nz;
+       bool nz_valid = true;
+#if GIMPLE
+       int_range_max vr;
+       nz_valid = (gimple_match_range_of_expr (vr, @1, @3)
+		    && !vr.undefined_p ());
+       if (nz_valid)
+	  nz = vr.get_nonzero_bits ();
+#else
+	nz = tree_nonzero_bits (@1);
+#endif
+     }
+     (if (nz_valid)
+      (with
+       {
+	  unsigned int prec = TYPE_PRECISION (TREE_TYPE (@1));
+	  unsigned int m = prec - (unsigned int) wi::clz (nz);
+	  wide_int mask = wi::mask (m, false, prec);
+	  wide_int lowc = cmp == LE_EXPR || cmp == GT_EXPR
+			  ? mask : wi::zero (prec);
+       }
+       (if (0 < m && m < prec
+	    && wi::eq_p (wi::bit_and (wi::to_wide (@2), mask), lowc))
+	  (cmp @0 @2)))))))))
+
+
 /* Fold ((X << C1) & C2) cmp C3 into (X & (C2 >> C1)) cmp (C3 >> C1)
 	((X >> C1) & C2) cmp C3 into (X & (C2 << C1)) cmp (C3 << C1).  */
 (for cmp (ne eq)
@@ -11951,6 +11992,54 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
       (if (cfn == CFN_BUILT_IN_POPCOUNTLL)
        (BUILT_IN_POPCOUNTLL (convert:type0 @0))))))))
 
+/* popcount (X) -> popcount ((narrower unsigned) X) when the range of X
+   fits the narrower type.  */
+(simplify
+ (POPCOUNT @0)
+ (if (INTEGRAL_TYPE_P (TREE_TYPE (@0))
+      && TYPE_PRECISION (TREE_TYPE (@0)) > TYPE_PRECISION (unsigned_type_node))
+  (with { combined_fn cfn = CFN_LAST;
+	  tree type0 = NULL_TREE;
+	  int_range_max vr0;
+	  if (gimple_match_range_of_expr (vr0, @0))
+	    for (unsigned prec = TYPE_PRECISION (unsigned_type_node);
+		 prec < TYPE_PRECISION (TREE_TYPE (@0))
+		 && prec <= MAX_FIXED_MODE_SIZE;
+		 prec *= 2)
+	      if (range_fits_type_p (&vr0, prec, UNSIGNED))
+		{
+		  type0 = build_nonstandard_integer_type (prec, 1);
+		  break;
+		}
+	  if (type0
+	      && direct_internal_fn_supported_p (IFN_POPCOUNT, type0,
+						 OPTIMIZE_FOR_BOTH))
+	    cfn = CFN_POPCOUNT;
+	  if (type0 && cfn == CFN_LAST
+	      && TYPE_PRECISION (TREE_TYPE (@0)) > BITS_PER_WORD
+	      && !direct_internal_fn_supported_p (IFN_POPCOUNT, TREE_TYPE (@0),
+						  OPTIMIZE_FOR_BOTH))
+	    {
+	      if (TYPE_PRECISION (type0)
+		  == TYPE_PRECISION (unsigned_type_node))
+		{
+		  cfn = CFN_BUILT_IN_POPCOUNT;
+		  type0 = unsigned_type_node;
+		}
+	      else if (TYPE_PRECISION (type0)
+		       == TYPE_PRECISION (long_long_unsigned_type_node))
+		{
+		  cfn = CFN_BUILT_IN_POPCOUNTLL;
+		  type0 = long_long_unsigned_type_node;
+		}
+	    } }
+   (if (cfn == CFN_POPCOUNT)
+    (IFN_POPCOUNT (convert:type0 @0))
+    (if (cfn == CFN_BUILT_IN_POPCOUNT)
+     (BUILT_IN_POPCOUNT (convert:type0 @0))
+     (if (cfn == CFN_BUILT_IN_POPCOUNTLL)
+      (BUILT_IN_POPCOUNTLL (convert:type0 @0))))))))
+
 /* popcount (X ^ (X - 1)) is the same as ffs(x) when x is nonzero, and
    using ctz+1 will generate better code.  */
 (simplify
@@ -13547,7 +13636,7 @@ and,
    constraints, and @shift0 ties the shift amount to the inner constants.  */
 (match (mul_carry_low_sum @op0 @op1 @mul_hilo0 @mul_hilo1 @mul_hilo2 @shift0)
   (lshift
-    (convert (gt
+    (convert (gt:c
       @mul_hilo0
       (mul_low_sum @op0 @op1 @mul_hilo1 @mul_hilo2 @shift0
        @1)))
@@ -13555,9 +13644,9 @@ and,
 /* Carry from cross-sum overflow: (cast?) (hilo > cross_sum) << N.
    Explicit guard required because mul_cross_sum is just (plus:c @0 @1)
    with no inherent type or halfwidth constraint.  */
-(match (mul_carry_cross_sum @mul_hilo0 @mul_hilo1 @mul_hilo2 @0)
+(match (mul_carry_cross_sum @mul_hilo0 @mul_hilo1 @mul_hilo2)
   (lshift
-    (convert (gt
+    (convert (gt:c
       @mul_hilo0
       (mul_cross_sum @mul_hilo1 @mul_hilo2)))
     INTEGER_CST@0)

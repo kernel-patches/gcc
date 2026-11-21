@@ -300,6 +300,7 @@ struct riscv_tune_param
   const char *jump_align;
   const char *loop_align;
   bool prefer_agnostic;
+  unsigned short case_values_threshold = 0;
   unsigned short int_reassoc_width = 1;
   unsigned short fp_reassoc_width = 1;
   unsigned short vec_reassoc_width = 1;
@@ -727,6 +728,7 @@ static const struct riscv_tune_param generic_ooo_tune_info = {
   NULL,						/* jump_align */
   NULL,						/* loop_align */
   true,						/* prefer-agnostic.  */
+  0,						/* case_values_threshold.  */
   2,						/* int_reassoc_width.  */
   2,						/* fp_reassoc_width.  */
   1,						/* vec_reassoc_width.  */
@@ -815,6 +817,7 @@ static const struct riscv_tune_param xt_c9501_tune_info = {
   "8",						/* jump_align */
   "16",						/* loop_align */
   true,						/* prefer-agnostic.  */
+  11,						/* case_values_threshold.  */
   3,						/* int_reassoc_width.  */
   2,						/* fp_reassoc_width.  */
   1,						/* vec_reassoc_width.  */
@@ -1019,6 +1022,7 @@ static const struct riscv_tune_param spacemit_x100_tune_info = {
   NULL,						/* jump_align */
   NULL,						/* loop_align */
   true,						/* prefer-agnostic.  */
+  11,						/* case_values_threshold.  */
 };
 
 /* Costs to use when optimizing for Andes 23 series.  */
@@ -2462,6 +2466,16 @@ riscv_cannot_force_const_mem (machine_mode mode ATTRIBUTE_UNUSED, rtx x)
     return true;
 
   return false;
+}
+
+/* Implement TARGET_CASE_VALUES_THRESHOLD.  */
+
+static unsigned int
+riscv_case_values_threshold (void)
+{
+  if (!optimize_size && tune_param->case_values_threshold)
+    return tune_param->case_values_threshold;
+  return default_case_values_threshold ();
 }
 
 /* Return true if register REGNO is a valid base register for mode MODE.
@@ -11846,7 +11860,10 @@ riscv_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 	return false;
 
       if (GET_MODE_CLASS (mode) != MODE_FLOAT
-	  && GET_MODE_CLASS (mode) != MODE_COMPLEX_FLOAT)
+	  && GET_MODE_CLASS (mode) != MODE_COMPLEX_FLOAT
+	  && !((mode == DImode && TARGET_DOUBLE_FLOAT && TARGET_64BIT)
+	       || (mode == SImode && TARGET_HARD_FLOAT)
+	       || (mode == HImode && TARGET_ZFHMIN)))
 	return false;
 
       /* Only use callee-saved registers if a potential callee is guaranteed
@@ -13484,6 +13501,30 @@ riscv_can_change_mode_class (machine_mode from, machine_mode to,
       && !ordered_p (GET_MODE_PRECISION (from), GET_MODE_PRECISION (to)))
     return false;
 
+  if ((SCALAR_INT_MODE_P (to) || SCALAR_FLOAT_MODE_P (to))
+      && (rclass == FP_REGS || rclass == RVC_FP_REGS
+	  || rclass == GR_REGS || rclass == RVC_GR_REGS
+	  || rclass == JALR_REGS))
+    {
+      /* fmv.x.w or fmv.w.x.  */
+      if (TARGET_HARD_FLOAT)
+	if ((from == SFmode && to == SImode)
+	    || (from == SImode && to == SFmode))
+	  return true;
+
+      /* fmv.x.d or fmv.d.x.  */
+      if (TARGET_DOUBLE_FLOAT && TARGET_64BIT)
+	if ((from == DFmode && to == DImode)
+	    || (from == DImode && to == DFmode))
+	  return true;
+
+      /* fmv.x.h or fmv.h.x.  */
+      if (TARGET_ZFHMIN)
+	if ((from == HFmode && to == HImode)
+	    || (from == HImode && to == HFmode))
+	  return true;
+    }
+
   return !reg_classes_intersect_p (FP_REGS, rclass);
 }
 
@@ -13722,8 +13763,9 @@ static bool
 riscv_optab_supported_p (int op, machine_mode, machine_mode result_mode,
 			 optimization_type opt_type)
 {
-  /* The second CRC optab mode is the result mode.  The CLMUL expansion
-     requires room for a quotient wider than the CRC value itself.  */
+  /* The second CRC optab mode is the result mode.  For a full-width
+     Zbkc CRC, materializing the constants for clmul can take more
+     space than the original loop.  */
   if (op == crc_rev_optab && opt_type != OPTIMIZE_FOR_SPEED)
     return (((TARGET_ZBKC || TARGET_ZBC || TARGET_ZVBC)
 	     && result_mode < word_mode)
@@ -14342,7 +14384,10 @@ singleton_vxrm_need (void)
 	continue;
 
       int vxrm_mode = get_attr_vxrm_mode (insn);
-      if (vxrm_mode == VXRM_MODE_NONE)
+
+      /* Even if the VXRM write at the start is redundant because there is
+	 a call on every path, DCE should take care of it.  */
+      if (vxrm_mode == VXRM_MODE_NONE || vxrm_mode == VXRM_MODE_CLOBBER)
 	continue;
 
       /* If this is the first VXRM need, note it.  */
@@ -16046,6 +16091,12 @@ riscv_use_by_pieces_infrastructure_p (unsigned HOST_WIDE_INT size,
 				      unsigned alignment,
 				      enum by_pieces_operation op, bool speed_p)
 {
+  /* Do not bypass an explicit memset threshold through by-pieces.  */
+  if ((op == CLEAR_BY_PIECES || op == SET_BY_PIECES)
+      && riscv_memset_size_threshold >= 0
+      && size > (unsigned HOST_WIDE_INT) riscv_memset_size_threshold)
+    return false;
+
   /* Query the expanders whether they can handle the given operation.  */
   if ((op == CLEAR_BY_PIECES || op == SET_BY_PIECES)
       && speed_p && size > UNITS_PER_WORD)
@@ -16219,8 +16270,7 @@ expand_reversed_crc_using_clmul (scalar_mode crc_mode, scalar_mode data_mode,
   ref_polynomial = reflect_hwi (UINTVAL (polynomial),
 				crc_size);
 
-  bool use_clmulr = crc_size == BITS_PER_WORD;
-  gcc_assert (TARGET_ZBC || !use_clmulr);
+  bool use_clmulr = crc_size == BITS_PER_WORD && TARGET_ZBC;
 
   rtx t1 = gen_reg_rtx (word_mode);
   if (use_clmulr)
@@ -16253,6 +16303,14 @@ expand_reversed_crc_using_clmul (scalar_mode crc_mode, scalar_mode data_mode,
 	    emit_insn (gen_riscv_clmulr_di (a0, a0, t1));
 	  else
 	    emit_insn (gen_riscv_clmulr_si (a0, a0, t1));
+	}
+      else if (crc_mode == DImode && (UINTVAL (polynomial) & 1))
+	{
+	  /* The left shift of the reflected polynomial discarded its top
+	     bit.  XOR the multiplicand back into the high product.  */
+	  rtx high = gen_reg_rtx (DImode);
+	  emit_insn (gen_riscv_clmulh_di (high, a0, t1));
+	  riscv_expand_op (XOR, DImode, a0, high, a0);
 	}
       else
 	{
@@ -17282,6 +17340,8 @@ riscv_memtag_tag_bitsize ()
 #define TARGET_SCHED_MACRO_FUSION_P riscv_macro_fusion_p
 #undef TARGET_SCHED_MACRO_FUSION_PAIR_P
 #define TARGET_SCHED_MACRO_FUSION_PAIR_P riscv_macro_fusion_pair_p
+#undef TARGET_SCHED_FUSION_PRIORITY
+#define TARGET_SCHED_FUSION_PRIORITY riscv_sched_fusion_priority
 
 #undef TARGET_SCHED_INIT
 #define TARGET_SCHED_INIT riscv_sched_init
@@ -17409,6 +17469,9 @@ riscv_memtag_tag_bitsize ()
 
 #undef TARGET_CANNOT_FORCE_CONST_MEM
 #define TARGET_CANNOT_FORCE_CONST_MEM riscv_cannot_force_const_mem
+
+#undef TARGET_CASE_VALUES_THRESHOLD
+#define TARGET_CASE_VALUES_THRESHOLD riscv_case_values_threshold
 
 #undef TARGET_LEGITIMATE_CONSTANT_P
 #define TARGET_LEGITIMATE_CONSTANT_P riscv_legitimate_constant_p

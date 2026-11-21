@@ -36,22 +36,22 @@ the proprietary CUDA toolkit.  */
 extern "C" {
 #endif
 
-typedef void *CUcontext;
+typedef struct CUctx_st *CUcontext;
 typedef int CUdevice;
 #if defined(__LP64__) || defined(_WIN64)
 typedef unsigned long long CUdeviceptr;
 #else
 typedef unsigned CUdeviceptr;
 #endif
-typedef void *CUevent;
-typedef void *CUfunction;
-typedef void *CUlinkState;
-typedef void *CUmodule;
-typedef void *CUarray;
+typedef struct CUevent_st *CUevent;
+typedef struct CUfunc_st *CUfunction;
+typedef struct CUlinkState_st *CUlinkState;
+typedef struct CUmod_st *CUmodule;
+typedef struct CUarray_st *CUarray;
 typedef size_t (*CUoccupancyB2DSize)(int);
-typedef void *CUstream;
+typedef struct CUstream_st *CUstream;
 
-typedef enum {
+typedef enum cudaError_enum {
   CUDA_SUCCESS = 0,
   CUDA_ERROR_INVALID_VALUE = 1,
   CUDA_ERROR_OUT_OF_MEMORY = 2,
@@ -63,13 +63,12 @@ typedef enum {
   CUDA_ERROR_NOT_FOUND = 500,
   CUDA_ERROR_NOT_READY = 600,
   CUDA_ERROR_LAUNCH_FAILED = 719,
-  CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE = 720,
   CUDA_ERROR_NOT_PERMITTED = 800,
   CUDA_ERROR_NOT_SUPPORTED = 801,
   CUDA_ERROR_UNKNOWN = 999
 } CUresult;
 
-typedef enum {
+typedef enum CUdevice_attribute_enum {
   CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK = 1,
   CU_DEVICE_ATTRIBUTE_WARP_SIZE = 10,
   CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK = 12,
@@ -87,21 +86,21 @@ typedef enum {
   CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS = 88
 } CUdevice_attribute;
 
-typedef enum {
+typedef enum CUmemAttach_flags_enum {
   CU_MEM_ATTACH_GLOBAL = 0x1
 } CUmemAttach_flags;
 
-enum {
+typedef enum CUevent_flags_enum {
   CU_EVENT_DEFAULT = 0,
   CU_EVENT_DISABLE_TIMING = 2
-};
+} CUevent_flags;
 
-typedef enum {
+typedef enum CUfunction_attribute_enum {
   CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = 0,
   CU_FUNC_ATTRIBUTE_NUM_REGS = 4
 } CUfunction_attribute;
 
-typedef enum {
+typedef enum CUjit_option_enum {
   CU_JIT_WALL_TIME = 2,
   CU_JIT_INFO_LOG_BUFFER = 3,
   CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES = 4,
@@ -113,44 +112,45 @@ typedef enum {
   CU_JIT_GENERATE_LINE_INFO = 13,
 } CUjit_option;
 
-typedef enum {
+typedef enum CUjitInputType_enum {
   CU_JIT_INPUT_PTX = 1
 } CUjitInputType;
 
-enum {
+typedef enum CUctx_flags_enum {
   CU_CTX_SCHED_AUTO = 0
-};
+} CUctx_flags;
 
 #define CU_LAUNCH_PARAM_END ((void *) 0)
 #define CU_LAUNCH_PARAM_BUFFER_POINTER ((void *) 1)
 #define CU_LAUNCH_PARAM_BUFFER_SIZE ((void *) 2)
-#define CU_MEMHOSTALLOC_DEVICEMAP 0x02U
 
-enum {
+#define CU_MEMHOSTALLOC_DEVICEMAP 0x02
+
+typedef enum CUstream_flags_enum {
   CU_STREAM_DEFAULT = 0,
   CU_STREAM_NON_BLOCKING = 1
-};
+} CUstream_flags;
 
-typedef enum {
+typedef enum CUlimit_enum {
   CU_LIMIT_STACK_SIZE = 0x00,
   CU_LIMIT_MALLOC_HEAP_SIZE = 0x02,
 } CUlimit;
 
-typedef enum {
+typedef enum CUmemorytype_enum {
   CU_MEMORYTYPE_HOST = 0x01,
   CU_MEMORYTYPE_DEVICE = 0x02,
   CU_MEMORYTYPE_ARRAY = 0x03,
   CU_MEMORYTYPE_UNIFIED = 0x04
 } CUmemorytype;
 
-typedef enum {
+typedef enum CUpointer_attribute_enum {
   CU_POINTER_ATTRIBUTE_CONTEXT = 0x01,
   CU_POINTER_ATTRIBUTE_MEMORY_TYPE = 0x02,
   CU_POINTER_ATTRIBUTE_DEVICE_POINTER = 0x03,
   CU_POINTER_ATTRIBUTE_HOST_POINTER = 0x04
 } CUpointer_attribute;
 
-typedef struct {
+typedef struct CUDA_MEMCPY2D_st {
   size_t srcXInBytes, srcY;
   CUmemorytype srcMemoryType;
   const void *srcHost;
@@ -168,7 +168,7 @@ typedef struct {
   size_t WidthInBytes, Height;
 } CUDA_MEMCPY2D;
 
-typedef struct {
+typedef struct CUDA_MEMCPY3D_st {
   size_t srcXInBytes, srcY, srcZ;
   size_t srcLOD;
   CUmemorytype srcMemoryType;
@@ -190,7 +190,7 @@ typedef struct {
   size_t WidthInBytes, Height, Depth;
 } CUDA_MEMCPY3D;
 
-typedef struct {
+typedef struct CUDA_MEMCPY3D_PEER_st {
   size_t srcXInBytes, srcY, srcZ;
   size_t srcLOD;
   CUmemorytype srcMemoryType;
@@ -212,7 +212,7 @@ typedef struct {
   size_t WidthInBytes, Height, Depth;
 } CUDA_MEMCPY3D_PEER;
 
-typedef struct {
+typedef struct CUuuid_st {
   char bytes[16];
 } CUuuid;
 
@@ -229,9 +229,6 @@ CUresult cuCtxPushCurrent (CUcontext);
 CUresult cuCtxSynchronize (void);
 CUresult cuCtxSetLimit (CUlimit, size_t);
 CUresult cuDeviceGet (CUdevice *, int);
-/* _v2 was added in CUDA 11.4 and 'will supplant' the old one in 12.0.  */
-CUresult cuDeviceGetUuid (CUuuid*, CUdevice);
-CUresult cuDeviceGetUuid_v2 (CUuuid*, CUdevice);
 #define cuDeviceTotalMem cuDeviceTotalMem_v2
 CUresult cuDeviceTotalMem (size_t *, CUdevice);
 CUresult cuDeviceGetAttribute (int *, CUdevice_attribute, CUdevice);
@@ -308,8 +305,7 @@ CUresult cuModuleGetGlobal (CUdeviceptr *, size_t *, CUmodule, const char *);
 CUresult cuModuleLoad (CUmodule *, const char *);
 CUresult cuModuleLoadData (CUmodule *, const void *);
 CUresult cuModuleUnload (CUmodule);
-CUresult cuPointerGetAttribute (CUmemorytype *, CUpointer_attribute,
-				CUdeviceptr);
+CUresult cuPointerGetAttribute (void *, CUpointer_attribute, CUdeviceptr);
 CUresult cuOccupancyMaxPotentialBlockSize(int *, int *, CUfunction,
 					  CUoccupancyB2DSize, size_t, int);
 typedef void (*CUstreamCallback)(CUstream, CUresult, void *);

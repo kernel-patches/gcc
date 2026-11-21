@@ -727,13 +727,31 @@ lto_write_tree_1 (struct output_block *ob, tree expr, bool ref_p)
       const char *sym;
       unsigned HOST_WIDE_INT off;
       if (debug_info_level > DINFO_LEVEL_NONE
-	  && debug_hooks->die_ref_for_decl (expr, &sym, &off))
+	  && debug_hooks->die_ref_for_decl (expr, DEBUG_DIE_REF, &sym, &off))
 	{
 	  streamer_write_string (ob, ob->main_stream, sym, true);
 	  streamer_write_uhwi (ob, off);
 	}
       else
 	streamer_write_string (ob, ob->main_stream, NULL, true);
+    }
+
+  if (lto_origin_ref_node_p (expr))
+    {
+      const char *sym;
+      unsigned HOST_WIDE_INT off;
+      if (debug_info_level > DINFO_LEVEL_NONE
+	  && debug_hooks->die_ref_for_decl (expr, DEBUG_ABSTRACT_ORIGIN_REF,
+					    &sym, &off))
+	{
+	  streamer_write_uhwi (ob, LTO_ORIGIN_REF_DIE);
+	  streamer_write_string (ob, ob->main_stream, sym, true);
+	  streamer_write_uhwi (ob, off);
+	}
+      else if (flag_wpa || flag_incremental_link == INCREMENTAL_LINK_LTO)
+	streamer_write_uhwi (ob, LTO_ORIGIN_REF_NONE);
+      else
+	streamer_write_uhwi (ob, LTO_ORIGIN_REF_TREE);
     }
 }
 
@@ -2838,6 +2856,10 @@ copy_function_or_variable (struct symtab_node *node, int output_order)
   out_state->compressed = in_state->compressed;
   gcc_assert (in_state);
 
+  unsigned nrefs = vec_safe_length (in_state->origin_refs);
+  out_state->origin_refs.reserve_exact (nrefs);
+  for (unsigned k = 0; k < nrefs; ++k)
+    out_state->origin_refs.quick_push ((*in_state->origin_refs)[k]);
   for (i = 0; i < LTO_N_DECL_STREAMS; i++)
     {
       size_t n = vec_safe_length (in_state->streams[i]);
@@ -3302,6 +3324,26 @@ lto_output_decl_state_refs (struct output_block *ob,
     write_global_references (ob, &state->streams[i]);
 }
 
+/* Only LGEN output may derive slot origins.  All subsequent outputs carry
+   explicit lists, including empty ones, since their trees may be shared.  */
+
+static void
+lto_output_decl_origin_refs (output_block *ob, lto_output_stream *stream,
+			     lto_out_decl_state *state)
+{
+  bool explicit_p = (flag_wpa
+		     || flag_incremental_link == INCREMENTAL_LINK_LTO);
+  streamer_write_uhwi_stream (stream, explicit_p
+			     ? state->origin_refs.length () + 1 : 0);
+  if (explicit_p)
+    for (const auto &entry : state->origin_refs)
+      {
+	streamer_write_uhwi_stream (stream, entry.index);
+	streamer_write_string (ob, stream, entry.ref.sym, true);
+	streamer_write_uhwi_stream (stream, entry.ref.off);
+      }
+}
+
 
 /* Return the written size of STATE. */
 
@@ -3708,6 +3750,13 @@ produce_asm_for_decls (void)
      the globals vector, so that it need not be resized as it is extended.  */
   header.num_nodes = -1;
 
+  lto_output_stream debug_refs = {};
+  lto_output_decl_origin_refs (ob, &debug_refs, out_state);
+  for (idx = 0; idx < num_fns; idx++)
+    lto_output_decl_origin_refs (ob, &debug_refs,
+				 lto_function_decl_states[idx]);
+  header.debug_ref_size = debug_refs.total_size;
+
   /* Compute the total size of all decl out states. */
   decl_state_size = sizeof (int32_t);
   decl_state_size += lto_out_decl_state_written_size (out_state);
@@ -3736,6 +3785,7 @@ produce_asm_for_decls (void)
     }
 
   lto_write_stream (ob->main_stream);
+  lto_write_stream (&debug_refs);
   lto_write_stream (ob->string_stream);
 
   lto_end_section ();

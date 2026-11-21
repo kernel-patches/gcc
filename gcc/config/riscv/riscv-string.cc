@@ -645,18 +645,11 @@ emit_memcmp_scalar_load_and_compare (rtx result, rtx src1, rtx src2,
 
   while (nbytes > 0)
     {
-      unsigned HOST_WIDE_INT cmp_bytes = xlen < nbytes ? xlen : nbytes;
-      machine_mode load_mode;
-
-      /* Special cases to avoid masking of trailing bytes.  */
-      if (cmp_bytes == 1)
-	load_mode = QImode;
-      else if (cmp_bytes == 2)
-	load_mode = HImode;
-      else if (cmp_bytes == 4)
-	load_mode = SImode;
-      else
-	load_mode = Xmode;
+      /* Use the largest scalar load that fits in the remaining bytes.  */
+      unsigned HOST_WIDE_INT cmp_bytes
+	= HOST_WIDE_INT_1U << floor_log2 (MIN (nbytes, xlen));
+      scalar_int_mode load_mode
+	= int_mode_for_size (cmp_bytes * BITS_PER_UNIT, 0).require ();
 
       rtx addr1 = adjust_address (src1, load_mode, offset);
       do_load (load_mode, data1, addr1);
@@ -670,15 +663,6 @@ emit_memcmp_scalar_load_and_compare (rtx result, rtx src1, rtx src2,
 	  emit_jump_insn (gen_jump (final_label));
 	  emit_barrier (); /* No fall-through.  */
 	  return;
-	}
-
-      /* Shift off trailing bytes in words if needed.  */
-      unsigned int load_bytes = GET_MODE_SIZE (load_mode).to_constant ();
-      if (cmp_bytes < load_bytes)
-	{
-	  int shamt = (load_bytes - cmp_bytes) * BITS_PER_UNIT;
-	  do_ashl3 (data1, data1, GEN_INT (shamt));
-	  do_ashl3 (data2, data2, GEN_INT (shamt));
 	}
 
       /* Break out if data1 != data2 */
@@ -1117,6 +1101,12 @@ riscv_expand_block_clear (rtx dest, rtx length, bool testing_p)
   if (optimize_function_for_size_p (cfun))
     return false;
 
+  if (CONST_INT_P (length)
+      && riscv_memset_size_threshold >= 0
+      && UINTVAL (length)
+	 > (unsigned HOST_WIDE_INT) riscv_memset_size_threshold)
+    return false;
+
   return riscv_expand_block_clear_zicboz_zic64b (dest, length, testing_p);
 }
 
@@ -1452,7 +1442,9 @@ expand_block_move (rtx dst_in, rtx src_in, rtx length_in, bool overlap_p)
 	  && length > riscv_memcpy_size_threshold)
 	return false;
     }
-  else if (riscv_memmove_size_threshold != -1)
+  else if ((overlap_p
+	    ? riscv_memmove_size_threshold
+	    : riscv_memcpy_size_threshold) != -1)
     return false;
 
   /* Inlining general memmove is a pessimisation: we can't avoid having to
