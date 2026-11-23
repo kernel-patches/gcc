@@ -1177,7 +1177,8 @@ struct codeview_function
 {
   codeview_function *next;
   codeview_function *htab_next;
-  function *func;
+  dw_die_ref die;
+  int funcdef_no;
   unsigned int end_label;
   codeview_line_block *blocks, *last_block;
   codeview_function *parent;
@@ -1470,9 +1471,14 @@ struct cv_func_hasher : nofree_ptr_hash <struct codeview_function>
 {
   typedef dw_die_ref compare_type;
 
+  static hashval_t hash (const codeview_function *f)
+  {
+    return htab_hash_pointer (f->die);
+  }
+
   static bool equal (const codeview_function *f, dw_die_ref die)
   {
-    return lookup_decl_die (f->func->decl) == die;
+    return f->die == die;
   }
 };
 
@@ -1544,13 +1550,13 @@ static codeview_function *
 new_codeview_function (void)
 {
   codeview_function **slot;
-  dw_die_ref die;
   codeview_function *f = (codeview_function *)
 			    xmalloc (sizeof (codeview_function));
 
   f->next = NULL;
   f->htab_next = NULL;
-  f->func = cfun;
+  f->die = lookup_decl_die (cfun->decl);
+  f->funcdef_no = current_function_funcdef_no;
   f->end_label = 0;
   f->blocks = f->last_block = NULL;
   f->inline_block = 0;
@@ -1566,10 +1572,8 @@ new_codeview_function (void)
   if (!cv_func_htab)
     cv_func_htab = new hash_table<cv_func_hasher> (10);
 
-  die = lookup_decl_die (cfun->decl);
-
-  slot = cv_func_htab->find_slot_with_hash (die, htab_hash_pointer (die),
-					    INSERT);
+  slot = cv_func_htab->find_slot_with_hash (f->die,
+					    htab_hash_pointer (f->die), INSERT);
   if (*slot)
     f->htab_next = *slot;
 
@@ -1589,7 +1593,7 @@ codeview_source_line (unsigned int line_no, const char *filename)
 
   targetm.asm_out.internal_label (asm_out_file, LINE_LABEL, label_num);
 
-  if (!cur_func || cur_func->func != cfun)
+  if (!cur_func || cur_func->funcdef_no != current_function_funcdef_no)
     {
       codeview_function *f = new_codeview_function ();
 
@@ -2331,6 +2335,9 @@ write_local_s_ldata32 (dw_die_ref die, dw_loc_descr_ref loc_ref)
   const char *name = get_AT_string (die, DW_AT_name);
   uint32_t type;
 
+  if (!name)
+    return;
+
   /* This is struct datasym in binutils:
 
       struct datasym
@@ -2522,6 +2529,9 @@ write_s_register (dw_die_ref die, dw_loc_descr_ref loc_ref)
   uint16_t regno;
   uint32_t type;
 
+  if (!name)
+    return;
+
   /* This is struct regsym in binutils and REGSYM in Microsoft's cvinfo.h:
 
     struct regsym
@@ -2583,6 +2593,9 @@ write_fbreg_variable (dw_die_ref die, dw_loc_descr_ref loc_ref,
   uint32_t type;
   uint16_t regno;
   int offset;
+
+  if (!name)
+    return;
 
   /* This is struct regrel in binutils and REGREL32 in Microsoft's cvinfo.h:
 
@@ -2907,6 +2920,9 @@ write_optimized_local_variable (dw_die_ref die, dw_loc_descr_ref fbloc,
 {
   dw_attr_node *loc;
   dw_loc_list_ref loc_list;
+
+  if (!get_AT_string (die, DW_AT_name))
+    return;
 
   loc = get_AT (die, DW_AT_location);
   if (!loc)
@@ -3454,6 +3470,9 @@ write_binary_annotations (codeview_function *line_func, uint32_t func_id)
   codeview_inlinee_lines **slot, *il;
   codeview_function *top_parent;
   unsigned int line_no, label_num;
+
+  if (!inlinee_lines_htab)
+    return;
 
   slot = inlinee_lines_htab->find_slot_with_hash (func_id, func_id, NO_INSERT);
   if (!slot || !*slot)
@@ -4465,8 +4484,18 @@ write_lf_enum (codeview_custom_type *t)
   fprint_whex (asm_out_file, t->lf_enum.fieldlist);
   putc ('\n', asm_out_file);
 
-  name_len = strlen (t->lf_enum.name) + 1;
-  ASM_OUTPUT_ASCII (asm_out_file, t->lf_enum.name, name_len);
+  if (t->lf_enum.name)
+    {
+      name_len = strlen (t->lf_enum.name) + 1;
+      ASM_OUTPUT_ASCII (asm_out_file, t->lf_enum.name, name_len);
+    }
+  else
+    {
+      static const char unnamed_enum[] = "<unnamed-tag>";
+
+      name_len = sizeof (unnamed_enum);
+      ASM_OUTPUT_ASCII (asm_out_file, unnamed_enum, name_len);
+    }
 
   leaf_len = 14 + name_len;
   write_cv_padding (4 - (leaf_len % 4));
@@ -5078,7 +5107,7 @@ write_lf_methodlist (codeview_custom_type *t)
 static void
 write_custom_types (void)
 {
-  targetm.asm_out.named_section (".debug$T", SECTION_DEBUG, NULL);
+  switch_to_section (get_section (".debug$T", SECTION_DEBUG, NULL));
 
   fputs (integer_asm_op (4, false), asm_out_file);
   fprint_whex (asm_out_file, CV_SIGNATURE_C13);
@@ -5165,7 +5194,7 @@ write_custom_types (void)
 void
 codeview_debug_finish (void)
 {
-  targetm.asm_out.named_section (".debug$S", SECTION_DEBUG, NULL);
+  switch_to_section (get_section (".debug$S", SECTION_DEBUG, NULL));
 
   fputs (integer_asm_op (4, false), asm_out_file);
   fprint_whex (asm_out_file, CV_SIGNATURE_C13);
@@ -5786,7 +5815,8 @@ get_type_num_enumeration_type (dw_die_ref type, bool in_struct)
       ct2 = ct->next;
       ct->next = NULL;
 
-      if (ct->lf_fieldlist.last_subtype->kind == LF_INDEX)
+      if (ct->lf_fieldlist.last_subtype
+	  && ct->lf_fieldlist.last_subtype->kind == LF_INDEX)
 	ct->lf_fieldlist.last_subtype->lf_index.type_num = last_type;
 
       add_custom_type (ct);
@@ -5846,10 +5876,10 @@ flush_deferred_types (void)
     {
       codeview_deferred_type *next;
 
-      next = deferred_types->next;
-
       get_type_num (deferred_types->type, false, true);
 
+      /* Completing a nested type can defer its containing type.  */
+      next = deferred_types->next;
       free (deferred_types);
       deferred_types = next;
     }
@@ -6319,19 +6349,21 @@ get_type_num_struct (dw_die_ref type, bool in_struct, bool *is_fwd_ref)
   uint16_t num_members = 0;
   uint32_t last_type = 0;
 
-  parent = dw_get_die_parent(type);
-
-  if (parent && (dw_get_die_tag (parent) == DW_TAG_structure_type
-      || dw_get_die_tag (parent) == DW_TAG_class_type
-      || dw_get_die_tag (parent) == DW_TAG_union_type))
-    get_type_num (parent, true, false);
-
   if ((in_struct && get_AT_string (type, DW_AT_name))
       || get_AT_flag (type, DW_AT_declaration))
     {
       *is_fwd_ref = true;
       return add_struct_forward_def (type);
     }
+
+  parent = dw_get_die_parent (type);
+
+  if (parent && (dw_get_die_tag (parent) == DW_TAG_structure_type
+      || dw_get_die_tag (parent) == DW_TAG_class_type
+      || dw_get_die_tag (parent) == DW_TAG_union_type))
+    /* An unnamed parent may still be building the member that led here.
+       Complete this type before visiting the parent.  */
+    add_deferred_type (parent);
 
   *is_fwd_ref = false;
 
@@ -6703,7 +6735,7 @@ get_type_num_array_type (dw_die_ref type, bool in_struct)
   /* We need to know the size of our base type.  Loop through until we find
      it.  */
   t = base_type;
-  while (t && size == 0)
+  do
     {
       switch (dw_get_die_tag (t))
 	{
@@ -6722,12 +6754,14 @@ get_type_num_array_type (dw_die_ref type, bool in_struct)
 	case DW_TAG_reference_type:
 	case DW_TAG_rvalue_reference_type:
 	  size = get_AT_unsigned (t, DW_AT_byte_size);
+	  t = NULL;
 	  break;
 
 	default:
 	  return 0;
 	}
     }
+  while (t);
 
   if (size == 0)
     return 0;
@@ -7260,9 +7294,6 @@ codeview_abstract_function (tree decl)
   dw_die_ref die;
   uint32_t func_id;
   struct dwarf_file_data *file;
-
-  if (!DECL_DECLARED_INLINE_P (decl))
-    return;
 
   die = lookup_decl_die (decl);
   if (!die)

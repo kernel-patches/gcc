@@ -120,6 +120,9 @@ struct noce_if_info
      we're optimizing for size.  */
   bool speed_p;
 
+  /* True if TEST_BB was inside a loop at the start of this pass.  */
+  bool in_loop;
+
   /* An estimate of the cost of the original, un-converted if-region.  It
      covers COND and JUMP plus the arms: both arms when optimizing for size,
      and their branch-probability-weighted average when optimizing for speed,
@@ -134,5 +137,7 @@ struct noce_if_info
      this structure.  Used for debugging.  */
   const char *transform_name;
 };
+
+extern unsigned int noce_parallel_seq_cost (rtx_insn *, bool);
 
 #endif /* GCC_IFCVT_H */

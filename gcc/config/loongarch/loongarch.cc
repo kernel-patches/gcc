@@ -4153,6 +4153,10 @@ loongarch_rtx_costs (rtx x, machine_mode mode, int outer_code,
 
   switch (code)
     {
+    case IF_THEN_ELSE:
+      *total = COSTS_N_INSNS (1);
+      return true;
+
     case CONST_INT:
       if (TARGET_64BIT && outer_code == AND && UINTVAL (x) == 0xffffffff)
 	{
@@ -6030,6 +6034,15 @@ loongarch_expand_conditional_move (rtx *operands)
 	{
 	  op0 = loongarch_zero_if_equal (op0, op1);
 	  op1 = const0_rtx;
+
+	  if (FLOAT_MODE_P (mode))
+	    {
+	      rtx target = gen_reg_rtx (GET_MODE (op0));
+	      rtx zero = force_reg (GET_MODE (op0), const0_rtx);
+	      loongarch_emit_int_order_test (LTU, NULL, target, zero, op0);
+	      op0 = target;
+	    }
+
 	  /* For EQ, set target to 1 if op0 and op1 are the same,
 	     otherwise set to 0.
 	     For NE, set target to 0 if op0 and op1 are the same,
@@ -6081,6 +6094,18 @@ loongarch_expand_conditional_move (rtx *operands)
       mode = DImode;
     }
 
+  /* Transfer integer comparison result to fcc.  */
+  if (INTEGRAL_MODE_P (GET_MODE (op0)) && FLOAT_MODE_P (mode))
+    {
+      rtx tmp = op0;
+      op0 = gen_reg_rtx (FCCmode);
+      emit_move_insn (op0, gen_lowpart (FCCmode, tmp));
+      if (code != NE)
+	{
+	  std::swap (operands[2], operands[3]);
+	  code = NE;
+	}
+    }
   rtx cond = gen_rtx_fmt_ee (code, GET_MODE (op0), op0, op1);
   /* There is no direct support for general conditional GP move involving
      two registers using SEL.  */
@@ -7628,7 +7653,8 @@ loongarch_move_to_gpr_cost (reg_class_t from)
       return 4;
 
     case FCC_REGS:
-      return loongarch_cost->movcf2gr;
+      /* MOVCF2GR or MOVCF2FR + MOVFR2GR.  */
+      return MIN (loongarch_cost->movcf2gr, COSTS_N_INSNS (2));
 
     default:
       return 0;
@@ -7653,7 +7679,8 @@ loongarch_move_from_gpr_cost (reg_class_t to)
       return 4;
 
     case FCC_REGS:
-      return loongarch_cost->movgr2cf;
+      /* MOVGR2CF or MOVGR2FR + MOVFR2CF.  */
+      return MIN (loongarch_cost->movgr2cf, COSTS_N_INSNS (2));
 
     default:
       return 0;
@@ -7739,7 +7766,7 @@ loongarch_secondary_reload (bool in_p ATTRIBUTE_UNUSED, rtx x,
 	  auto fn = in_p ? loongarch_move_from_gpr_cost
 			 : loongarch_move_to_gpr_cost;
 
-	  if (fn (FCC_REGS) > fn (FP_REGS) + COSTS_N_INSNS (1))
+	  if (fn (FCC_REGS) > COSTS_N_INSNS (1))
 	    return FP_REGS;
 
 	  return GP_REG_P (regno) ? NO_REGS : GR_REGS;
@@ -7750,7 +7777,7 @@ loongarch_secondary_reload (bool in_p ATTRIBUTE_UNUSED, rtx x,
 	  auto fn = in_p ? loongarch_move_to_gpr_cost
 			 : loongarch_move_from_gpr_cost;
 
-	  if (fn (FCC_REGS) > fn (FP_REGS) + COSTS_N_INSNS (1))
+	  if (fn (FCC_REGS) > COSTS_N_INSNS (1))
 	    return FP_REGS;
 
 	  return NO_REGS;
