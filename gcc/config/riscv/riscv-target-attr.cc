@@ -48,6 +48,11 @@ public:
   {
   }
 
+  ~riscv_target_attr_parser ()
+  {
+    delete m_subset_list;
+  }
+
   bool handle_arch (const char *);
   bool handle_cpu (const char *);
   bool handle_tune (const char *);
@@ -56,7 +61,6 @@ public:
 
   void update_settings (struct gcc_options *opts) const;
 private:
-  const char *m_raw_attr_str;
   bool parse_arch (const char *);
 
   bool m_found_arch_p;
@@ -102,7 +106,10 @@ bool
 riscv_target_attr_parser::parse_arch (const char *str)
 {
   if (m_subset_list)
-    delete m_subset_list;
+    {
+      delete m_subset_list;
+      m_subset_list = nullptr;
+    }
   /* Check if it's setting full arch string.  */
   if (strncmp ("rv", str, strlen ("rv")) == 0)
     {

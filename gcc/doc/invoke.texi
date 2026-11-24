@@ -392,7 +392,7 @@ Objective-C and Objective-C++ Dialects}.
 -Wdangling-else  -Wdangling-pointer  -Wdangling-pointer=@var{n}
 -Wdate-time
 -Wno-deprecated  -Wno-deprecated-declarations  -Wno-designated-init
--Wno-deprecated-openmp
+-Wdeprecated-octal-literal -Wno-deprecated-openmp
 -Wdisabled-optimization
 -Wno-discarded-array-qualifiers  -Wno-discarded-qualifiers
 -Wno-div-by-zero  -Wdouble-promotion
@@ -1342,6 +1342,7 @@ See RS/6000 and PowerPC Options.
 -msave-restore  -mno-shorten-memrefs
 -mstrict-align  -mscalar-strict-align  -mno-vector-strict-align
 -mzilsd-word-align  -mzilsd-strict-align
+-mfix-sifive-mal-9174  -mfix-sifive-mal-9191
 -mcmodel=medlow  -mcmodel=medany  -mcmodel=large
 -mexplicit-relocs  -mrelax  -mriscv-attribute
 -malign-data=@var{type}
@@ -1404,8 +1405,7 @@ See RS/6000 and PowerPC Options.
 -mveclibabi=@var{type}  -mfriz
 -mpointers-to-nested-functions  -msave-toc-indirect  -mpower8-fusion
 -mcrypto  -mhtm  -mquad-memory  -mquad-memory-atomic
--mcompat-align-parm
--mfloat128  -mfloat128-hardware
+-mcompat-align-parm -mfloat128  -mfloat128-hardware -mfloat16
 -mgnu-attribute
 -mstack-protector-guard=@var{guard}  -mstack-protector-guard-reg=@var{reg}
 -mstack-protector-guard-offset=@var{offset}  -mprefixed
@@ -11614,6 +11614,16 @@ Requires @option{-flto} to be enabled.  Enabled by default.
 Suppress warnings when a positional initializer is used to initialize
 a structure that has been marked with the @code{designated_init}
 attribute.
+
+@opindex Wdeprecated-octal-literal
+@opindex Wno-deprecated-octal-literal
+@item -Wdeprecated-octal-literal
+Warn on 0 prefixed octal literals other than 0.  In C++29 and C2Y
+octal literals should be specified with 0o or 0O prefix and the older
+0 prefixed octal literals are deprecated.  0 is not deprecated, but
+00 or 0177 is and should be written in C++29 or C2Y as 0o0 (or in this
+case 0) or 0o177 (or 0O177).
+This flag is enabled by default for @option{-std=c++29}.
 
 @opindex Wzero-init-padding-bits=
 @item -Wzero-init-padding-bits=@var{value}
@@ -31685,6 +31695,30 @@ The precedence among @option{-mzilsd-word-align},
 @option{-mno-strict-align}, @option{-mscalar-strict-align}, and
 @option{-mno-scalar-strict-align} is determined by the last one specified.
 
+@opindex mfix-sifive-mal-9174
+@opindex mno-fix-sifive-mal-9174
+@opindex mfix-sifive-mal-9191
+@opindex mno-fix-sifive-mal-9191
+@item -mfix-sifive-mal-9174
+@itemx -mno-fix-sifive-mal-9174
+@itemx -mfix-sifive-mal-9191
+@itemx -mno-fix-sifive-mal-9191
+Enable or disable the workaround for SiFive erratum MAL-9174, also known
+as MAL-9191, which keeps the destination of a vector indexed load from
+overlapping its index.  On the affected cores, a trap in the middle of
+such a load can clobber the index, so the load reads from the wrong
+address when it is restarted.
+
+By default, the workarounds for the errata of the processor selected by
+@option{-mcpu} are enabled, along with the ones given by the
+@option{--with-errata} configure option.  @option{-mtune} has no effect
+on them.  The errata of each processor are:
+
+@table @samp
+@item sifive-p870-d
+@samp{sifive-mal-9174} (also @samp{sifive-mal-9191})
+@end table
+
 @opindex mmax-vectorization
 @opindex mno-max-vectorization
 @item -mmax-vectorization
@@ -32277,6 +32311,28 @@ Enable/disable using ISA 3.0 hardware instructions to support the
 The default for @option{-mfloat128-hardware} is enabled on PowerPC
 Linux systems using the ISA 3.0 instruction set, and disabled on other
 systems.
+
+
+@opindex mfloat16
+@opindex mno-float16
+@item -mfloat16
+@itemx -mno-float16
+Enable/disable both the @code{_Float16} and @code{__bf16} keywords
+for using 16-bit floating point.
+
+The @code{_Float16} keyword is for IEEE 16-bit floating point and GCC
+generates either software emulation for IEEE 16-bit floating point or
+hardware instructions.
+
+The @code{__bf16} keyword is for Google brain 16-bit floating
+point and GCC generates either software emulation for Google brain
+16-bit floating point or hardware instructions.
+
+At the current time, 16-bit floating point support is experimental,
+and support may be changed in future releases.
+
+The configuration option @option{--with-powerpc-float16} controls
+whether @option{-mfloat16} is enabled by default.
 
 @opindex m32
 @opindex m64
