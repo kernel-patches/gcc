@@ -3218,12 +3218,12 @@ aarch64_gen_compare_reg (RTX_CODE code, rtx x, rtx y)
       cc_mode = CCmode;
       cc_reg = gen_rtx_REG (cc_mode, CC_REGNUM);
 
-      rtx x_lo = operand_subword (x, 0, 0, TImode);
-      rtx y_lo = operand_subword (y, 0, 0, TImode);
+      rtx x_lo = force_lowpart_subreg (DImode, x, TImode);
+      rtx y_lo = force_lowpart_subreg (DImode, y, TImode);
       emit_set_insn (cc_reg, gen_rtx_COMPARE (cc_mode, x_lo, y_lo));
 
-      rtx x_hi = operand_subword (x, 1, 0, TImode);
-      rtx y_hi = operand_subword (y, 1, 0, TImode);
+      rtx x_hi = force_highpart_subreg (DImode, x, TImode);
+      rtx y_hi = force_highpart_subreg (DImode, y, TImode);
       emit_insn (gen_ccmpccdi (cc_reg, cc_reg, x_hi, y_hi,
 			       gen_rtx_EQ (cc_mode, cc_reg, const0_rtx),
 			       GEN_INT (AARCH64_EQ)));
@@ -6480,6 +6480,129 @@ aarch64_expand_sve_ld1rq (rtx dest, rtx src)
   return true;
 }
 
+/* SRC is an SVE CONST_VECTOR that contains N "foreground" values followed by N
+   "background" values, where N is the number of patterns and the number of
+   elements per pattern is 2.  WIDTH is the number of vector register bits that
+   a complete set of N values would occupy in SRC.  Try to move SRC into TARGET.
+   This requires the "background" values to be zero (as they often are) and
+   WIDTH to be small enough such that the "foreground" values can be moved
+   directly into the lower lanes of TARGET.  If this is successful then
+   remaining lanes of TARGET are implicitly zero.
+
+   Return the target on success, otherwise return null.  */
+
+static rtx
+aarch64_expand_sve_const_vector_zero_tail (rtx target, rtx src,
+					   unsigned int width)
+{
+  gcc_assert (CONST_VECTOR_NELTS_PER_PATTERN (src) == 2);
+
+  machine_mode mode = GET_MODE (src);
+  scalar_mode elt_mode = GET_MODE_INNER (mode);
+  unsigned int npatterns = CONST_VECTOR_NPATTERNS (src);
+  unsigned int container_bits = aarch64_sve_container_bits (mode);
+
+  gcc_checking_assert (container_bits * npatterns == width);
+
+  if (width > 64 || BYTES_BIG_ENDIAN)
+    return NULL_RTX;
+
+  /* Only single-byte loads are consistently lowered more efficiently by
+     falling back to aarch64_expand_sve_const_vector_sel.  For example, this
+     predicated constant broadcast:
+
+	ptrue p3.b, vl1
+	mov z0.b, p3/z, #1
+
+     is preferable to this GPR-to-SIMD transfer and mask operation:
+
+	mov w0, 1
+	fmov h0, w0
+	and z0.h, z0.h, #0xff
+    */
+  if (npatterns == 1 && elt_mode == QImode)
+    return NULL_RTX;
+
+  /* We can only handle cases where every "background" value of SRC is constant
+     zero, because those values describe an infinitely repeating tail.  */
+  for (unsigned int i = 0; i < npatterns; ++i)
+    if (CONST_VECTOR_ENCODED_ELT (src, i + npatterns) != CONST0_RTX (elt_mode))
+      return NULL_RTX;
+
+  machine_mode const_mode;
+  rtx const_val;
+  unsigned int elt_bits = GET_MODE_BITSIZE (elt_mode);
+  unsigned int load_width;
+
+  if (npatterns == 1)
+    {
+      /* Use the scalar constant value of the first element directly.  */
+      const_val = CONST_VECTOR_ENCODED_ELT (src, 0);
+      const_mode = elt_mode;
+      load_width = elt_bits;
+    }
+  else
+    {
+      /* Build a non-scalable vector constant from the foreground values.  */
+      gcc_checking_assert (container_bits % elt_bits == 0);
+      unsigned int nelts_per_container = container_bits / elt_bits;
+
+      /* We can't get CONST_MODE for a narrow vector, but that
+	 does not matter because we can pad it.  */
+      load_width = MAX (width, 16);
+
+      const_mode = aarch64_simd_container_mode (elt_mode, load_width);
+
+      if (!VECTOR_MODE_P (const_mode))
+	return NULL_RTX;
+
+      unsigned int const_mem_nunits
+	= GET_MODE_NUNITS (const_mode).to_constant ();
+      if (npatterns * nelts_per_container > const_mem_nunits)
+	return NULL_RTX;
+
+      rtx_vector_builder builder (const_mode, const_mem_nunits, 1);
+      for (unsigned int i = 0; i < npatterns; ++i)
+	{
+	  rtx elt = CONST_VECTOR_ENCODED_ELT (src, i);
+	  builder.quick_push (elt);
+
+	  /* Handle partial vector modes.  For example, we can build a vector of
+	     V8QImode (8 x 8-bit values) from SRC if WIDTH = 64,
+	     MODE == VNx4QImode and N == 2 (i.e., 2 x 8-bit values in 32-bit
+	     containers).  Only one in four ELTs would be non-zero.  */
+	  for (unsigned int p = 1; p < nelts_per_container; ++p)
+	    {
+	      builder.quick_push (CONST0_RTX (elt_mode));
+	    }
+	}
+
+      for (unsigned int i = builder.length (); i < const_mem_nunits; ++i)
+	builder.quick_push (CONST0_RTX (elt_mode));
+
+      const_val = builder.build ();
+    }
+
+  rtx val = force_const_mem (const_mode, const_val);
+  if (!val)
+    return NULL_RTX;
+
+  /* Determine a machine mode, FULL_SVE_MODE, that has the same ELT_MODE
+     as MODE but is definitely not a partial vector mode (e.g., VNx16QImode
+     instead of VNx4QImode).  */
+  machine_mode full_sve_mode = aarch64_full_sve_mode (elt_mode).require ();
+  rtx full_sve = gen_reg_rtx (full_sve_mode);
+
+  scalar_int_mode load_mode = int_mode_for_size (load_width, 0).require ();
+  aarch64_emit_load_store_through_mode (full_sve, val, load_mode);
+
+  /* Reinterpret the temporary that has FULL_SVE_MODE (e.g., VNx16QImode) as
+     if it instead had MODE (e.g., VNx4QImode).  */
+  target = aarch64_target_reg (target, mode);
+  emit_insn (gen_aarch64_sve_reinterpret (mode, target, full_sve));
+  return target;
+}
+
 /* SRC is an SVE CONST_VECTOR that contains N "foreground" values followed
    by N "background" values.  Try to move it into TARGET using:
 
@@ -6666,8 +6789,14 @@ aarch64_expand_sve_const_vector (rtx target, rtx src)
     return NULL_RTX;
 
   if (nelts_per_pattern == 2)
-    if (rtx res = aarch64_expand_sve_const_vector_sel (target, src))
-      return res;
+    {
+      if (rtx res = aarch64_expand_sve_const_vector_zero_tail (
+	    target, src, encoded_bits / nelts_per_pattern))
+	return res;
+
+      if (rtx res = aarch64_expand_sve_const_vector_sel (target, src))
+	return res;
+    }
 
   /* Expand each pattern individually.  */
   gcc_assert (npatterns > 1);
@@ -18940,10 +19069,13 @@ aarch64_vector_costs::count_ops (unsigned int count, vect_cost_for_stmt kind,
       /* We currently don't expect these to be used in a loop body.  */
       break;
 
+    case vec_deconstruct:
+      /* add_stmt_cost converts vec_deconstruct to vec_to_scalar.  */
+      gcc_unreachable ();
+
     case vec_perm:
     case vec_promote_demote:
     case vec_construct:
-    case vec_deconstruct:
     case vec_to_scalar:
     case scalar_to_vec:
     case vector_stmt:
@@ -19355,6 +19487,16 @@ aarch64_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 	 but those only work on GPR anyway and this is the best we can do.  */
       if (tree lhs = gimple_get_lhs (STMT_VINFO_STMT (stmt_info)))
 	vectype = TREE_TYPE (lhs);
+    }
+
+  /* A vec_deconstruct extracts every lane of a vector.  Cost it as one
+     vec_to_scalar per lane, so that the code below that handles
+     vec_to_scalar also applies to it.  */
+  if (kind == vec_deconstruct)
+    {
+      gcc_checking_assert (vectype);
+      count *= vect_nunits_for_cost (vectype);
+      kind = vec_to_scalar;
     }
 
   fractional_cost stmt_cost
@@ -24268,6 +24410,38 @@ aarch64_full_sve_mode (scalar_mode mode)
     }
 }
 
+/* Return the 16-bit vector mode for element mode MODE, if it exists.  */
+static opt_machine_mode
+aarch64_v16_mode (scalar_mode mode)
+{
+  switch (mode)
+    {
+    case E_QImode:
+      return V2QImode;
+    default:
+      return {};
+    }
+}
+
+/* Return the 32-bit vector mode for element mode MODE, if it exists.  */
+static opt_machine_mode
+aarch64_v32_mode (scalar_mode mode)
+{
+  switch (mode)
+    {
+    case E_HFmode:
+      return V2HFmode;
+    case E_BFmode:
+      return V2BFmode;
+    case E_HImode:
+      return V2HImode;
+    case E_QImode:
+      return V4QImode;
+    default:
+      return {};
+    }
+}
+
 /* Return the 64-bit Advanced SIMD vector mode for element mode MODE,
    if it exists.  */
 opt_machine_mode
@@ -24330,13 +24504,18 @@ aarch64_simd_container_mode (scalar_mode mode, poly_int64 width)
       && known_eq (width, BITS_PER_SVE_VECTOR))
     return aarch64_full_sve_mode (mode).else_mode (word_mode);
 
-  gcc_assert (known_eq (width, 64) || known_eq (width, 128));
+  gcc_assert (known_eq (width, 16) || known_eq (width, 32)
+	      || known_eq (width, 64) || known_eq (width, 128));
   if (TARGET_BASE_SIMD)
     {
       if (known_eq (width, 128))
 	return aarch64_v128_mode (mode).else_mode (word_mode);
-      else
+      if (known_eq (width, 64))
 	return aarch64_v64_mode (mode).else_mode (word_mode);
+      if (known_eq (width, 32))
+	return aarch64_v32_mode (mode).else_mode (word_mode);
+      if (known_eq (width, 16))
+	return aarch64_v16_mode (mode).else_mode (word_mode);
     }
   return word_mode;
 }

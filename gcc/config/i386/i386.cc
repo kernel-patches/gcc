@@ -2270,6 +2270,72 @@ merge_classes (enum x86_64_reg_class class1, enum x86_64_reg_class class2)
   return X86_64_SSE_CLASS;
 }
 
+/* ABI changes of classify_argument that are diagnosed by -Wpsabi.  Each
+   of them is a place where the classification differs from the one of an
+   older GCC release.
+
+   To add a change, add a bit here and a case to inform_psabi_change, and
+   call psabi_new_behavior_p at the place where the classification
+   depends on it.  */
+
+enum psabi_change
+{
+  PSABI_ZERO_WIDTH_BITFIELD = 1 << 0,
+  PSABI_UNALIGNED_MEMBER = 1 << 1
+};
+
+/* State of the classification, shared by all recursive calls.  */
+
+struct classify_state
+{
+  /* The changes whose new behavior was applied.  */
+  unsigned int seen;
+  /* The changes that are classified with the old behavior.  */
+  unsigned int legacy;
+};
+
+/* Return true if the new behavior of CHANGE should be applied and record
+   it in STATE.  This is called only if the classification of the current
+   field or member depends on CHANGE.  The old behavior is selected by
+   the wrapper of classify_argument to find out whether CHANGE alters the
+   classification of the whole type.
+
+   A change can use this only if the code that follows an unsuccessful
+   call classifies the type exactly as the older GCC release did.  The
+   notes for the older changes that do not satisfy this are emitted
+   directly where the classification differs.  */
+
+static bool
+psabi_new_behavior_p (classify_state &state, unsigned int change)
+{
+  if (state.legacy & change)
+    return false;
+
+  state.seen |= change;
+  return true;
+}
+
+/* Return true if a member of type TYPE at bit offset BIT_POS violates
+   the psABI rule that an object containing unaligned fields has class
+   MEMORY.  The alignment of scalar members is checked at the leaves of
+   classify_argument, but that check is skipped for an aggregate whose
+   only fields are bit-fields, and for _BitInt(N) with N > 32, whose WORDS
+   includes the bit offset.  Check the offset against the alignment of
+   the member's type for aggregates and _BitInt here, and for an array of
+   them against the alignment of its element type.
+
+   Use the natural alignment of the type, like the check of scalar members
+   does with the mode alignment, and not the alignment of a variant that
+   the aligned attribute of a typedef has raised or lowered.  */
+
+static bool
+misaligned_member_p (tree type, HOST_WIDE_INT bit_pos)
+{
+  type = TYPE_MAIN_VARIANT (strip_array_types (type));
+  return ((AGGREGATE_TYPE_P (type) || BITINT_TYPE_P (type))
+	  && bit_pos % TYPE_ALIGN (type) != 0);
+}
+
 /* Classify the argument of type TYPE and mode MODE.
    CLASSES will be filled by the register class used to pass each word
    of the operand.  The number of words is returned.  In case the parameter
@@ -2285,7 +2351,7 @@ merge_classes (enum x86_64_reg_class class1, enum x86_64_reg_class class2)
 static int
 classify_argument (machine_mode mode, const_tree type,
 		   enum x86_64_reg_class classes[MAX_CLASSES], int bit_offset,
-		   int &zero_width_bitfields)
+		   classify_state &state)
 {
   HOST_WIDE_INT bytes
     = mode == BLKmode ? int_size_in_bytes (type) : (int) GET_MODE_SIZE (mode);
@@ -2348,11 +2414,10 @@ classify_argument (machine_mode mode, const_tree type,
 			{
 			  if (DECL_FIELD_CXX_ZERO_WIDTH_BIT_FIELD (field))
 			    continue;
-			  if (zero_width_bitfields != 2)
-			    {
-			      zero_width_bitfields = 1;
-			      continue;
-			    }
+
+			  if (psabi_new_behavior_p
+			      (state, PSABI_ZERO_WIDTH_BITFIELD))
+			    continue;
 			}
 		      for (i = (int_bit_position (field)
 				+ (bit_offset % 64)) / 8 / 8;
@@ -2388,13 +2453,21 @@ classify_argument (machine_mode mode, const_tree type,
 			    }
 			  continue;
 			}
+
+		      HOST_WIDE_INT member_pos
+			= int_bit_position (field) + bit_offset;
+
+		      if (misaligned_member_p (TREE_TYPE (field), member_pos)
+			  && (psabi_new_behavior_p
+			      (state, PSABI_UNALIGNED_MEMBER)))
+			return 0;
+
 		      num = classify_argument (TYPE_MODE (type), type,
-					       subclasses,
-					       (int_bit_position (field)
-						+ bit_offset) % 512,
-					       zero_width_bitfields);
+					       subclasses, member_pos % 512,
+					       state);
 		      if (!num)
 			return 0;
+
 		      pos = (int_bit_position (field)
 			     + (bit_offset % 64)) / 8 / 8;
 		      for (i = 0; i < num && (i + pos) < words; i++)
@@ -2436,7 +2509,7 @@ classify_argument (machine_mode mode, const_tree type,
 		int num = classify_argument (TYPE_MODE (elt_type), elt_type,
 					     subclasses,
 					     (bit_offset + elt_offset) % 512,
-					     zero_width_bitfields);
+					     state);
 		if (!num)
 		  return 0;
 
@@ -2473,9 +2546,15 @@ classify_argument (machine_mode mode, const_tree type,
 		  if (TREE_TYPE (field) == error_mark_node)
 		    continue;
 
+		  /* Members of a packed union can be misaligned.  */
+		  if (!DECL_BIT_FIELD (field)
+		      && misaligned_member_p (TREE_TYPE (field), bit_offset)
+		      && psabi_new_behavior_p (state, PSABI_UNALIGNED_MEMBER))
+		    return 0;
+
 		  num = classify_argument (TYPE_MODE (TREE_TYPE (field)),
 					   TREE_TYPE (field), subclasses,
-					   bit_offset, zero_width_bitfields);
+					   bit_offset, state);
 		  if (!num)
 		    return 0;
 		  for (i = 0; i < num && i < words; i++)
@@ -2767,17 +2846,48 @@ classify_argument (machine_mode mode, const_tree type,
     }
 }
 
-/* Wrapper around classify_argument with the extra zero_width_bitfields
-   argument, to diagnose GCC 12.1 ABI differences for C.  */
+/* Inform about the ABI change CHANGE.  */
+
+static void
+inform_psabi_change (unsigned int change)
+{
+  switch (change)
+    {
+    case PSABI_ZERO_WIDTH_BITFIELD:
+      {
+	const char *url
+	  = CHANGES_ROOT_URL "gcc-12/changes.html#zero_width_bitfields";
+
+	inform (input_location,
+		"the ABI of passing C structures with zero-width bit-fields"
+		" has changed in GCC %{12.1%}", url);
+      }
+      break;
+
+    case PSABI_UNALIGNED_MEMBER:
+      inform (input_location,
+	      "the ABI of passing structures and unions with unaligned"
+	      " members has changed in GCC 17.1");
+      break;
+
+    default:
+      gcc_unreachable ();
+    }
+}
+
+/* Wrapper around classify_argument with the extra classify_state
+   argument, to diagnose ABI differences.  */
 
 static int
 classify_argument (machine_mode mode, const_tree type,
 		   enum x86_64_reg_class classes[MAX_CLASSES], int bit_offset)
 {
-  int zero_width_bitfields = 0;
-  static bool warned = false;
-  int n = classify_argument (mode, type, classes, bit_offset,
-			     zero_width_bitfields);
+  /* The changes that have been diagnosed.  */
+  static unsigned int warned = 0;
+  classify_state state = { 0, 0 };
+
+  int n = classify_argument (mode, type, classes, bit_offset, state);
+
   /* More than 2 classes is only possible for a single 256-bit or
      512-bit vector register: SSE followed by all SSEUP.  This is
      relied upon by function_arg_advance_64, function_arg_64 and
@@ -2790,29 +2900,35 @@ classify_argument (machine_mode mode, const_tree type,
       for (int i = 1; i < n; i++)
 	gcc_assert (classes[i] == X86_64_SSEUP_CLASS);
     }
-  if (!zero_width_bitfields || warned || !warn_psabi)
-    return n;
-  enum x86_64_reg_class alt_classes[MAX_CLASSES];
-  zero_width_bitfields = 2;
-  if (classify_argument (mode, type, alt_classes, bit_offset,
-			 zero_width_bitfields) != n)
-    zero_width_bitfields = 3;
-  else
-    for (int i = 0; i < n; i++)
-      if (classes[i] != alt_classes[i])
-	{
-	  zero_width_bitfields = 3;
-	  break;
-	}
-  if (zero_width_bitfields == 3)
-    {
-      warned = true;
-      const char *url
-	= CHANGES_ROOT_URL "gcc-12/changes.html#zero_width_bitfields";
 
-      inform (input_location,
-	      "the ABI of passing C structures with zero-width bit-fields"
-	      " has changed in GCC %{12.1%}", url);
+  unsigned int pending = state.seen & ~warned;
+  if (!pending || !warn_psabi)
+    return n;
+
+  /* Classify again with the old behavior of every change that has not
+     been diagnosed yet, one change at a time, and diagnose the changes
+     that alter the classification.  */
+  for (unsigned int change = 1; pending; change <<= 1)
+    {
+      if (!(pending & change))
+	continue;
+
+      pending &= ~change;
+
+      enum x86_64_reg_class alt_classes[MAX_CLASSES];
+      classify_state alt_state = { 0, change };
+      bool differs
+	= (classify_argument
+	   (mode, type, alt_classes, bit_offset, alt_state) != n);
+
+      for (int i = 0; !differs && i < n; i++)
+	differs = classes[i] != alt_classes[i];
+
+      if (differs)
+	{
+	  warned |= change;
+	  inform_psabi_change (change);
+	}
     }
   return n;
 }
