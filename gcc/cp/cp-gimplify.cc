@@ -916,6 +916,25 @@ cp_gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p)
 		return ret;
 	      }
 	    break;
+	  case IFN_BITCOMPRESS:
+	  case IFN_BITEXPAND:
+	    if (ret == GS_OK)
+	      {
+		location_t loc = EXPR_LOCATION (*expr_p);
+		internal_fn ifn = CALL_EXPR_IFN (*expr_p);
+		tree arg1 = CALL_EXPR_ARG (*expr_p, 0);
+		tree arg2 = CALL_EXPR_ARG (*expr_p, 1);
+		tree r = fold_build_builtin_bitcompressg_bitexpandg (loc, ifn,
+								     arg1,
+								     arg2);
+		if (TREE_CODE (r) == CALL_EXPR
+		    && !CALL_EXPR_FN (r)
+		    && CALL_EXPR_IFN (r) == ifn)
+		  break;
+		*expr_p = r;
+		return ret;
+	      }
+	    break;
 	  default:
 	    break;
 	  }
@@ -2158,20 +2177,6 @@ cp_genericize_r (tree *stmt_p, int *walk_subtrees, void *data)
 				     : OMP_CLAUSE_DEFAULT_PRIVATE);
 	      }
 	}
-      if (sanitize_flags_p (SANITIZE_NULL | SANITIZE_ALIGNMENT | SANITIZE_VPTR))
-	{
-	  /* The point here is to not sanitize static initializers.  */
-	  bool no_sanitize_p = wtd->no_sanitize_p;
-	  wtd->no_sanitize_p = true;
-	  for (tree decl = BIND_EXPR_VARS (stmt);
-	       decl;
-	       decl = DECL_CHAIN (decl))
-	    if (VAR_P (decl)
-		&& TREE_STATIC (decl)
-		&& DECL_INITIAL (decl))
-	      cp_walk_tree (&DECL_INITIAL (decl), cp_genericize_r, data, NULL);
-	  wtd->no_sanitize_p = no_sanitize_p;
-	}
       if (flag_reflection)
 	/* Adjust consteval-only vars in BIND_EXPR_VARS so that REFLECT_EXPR
 	   doesn't leak into the ME.  */
@@ -2194,6 +2199,20 @@ cp_genericize_r (tree *stmt_p, int *walk_subtrees, void *data)
 	      }
 	    p = &DECL_CHAIN (*p);
 	  }
+      if (sanitize_flags_p (SANITIZE_NULL | SANITIZE_ALIGNMENT | SANITIZE_VPTR))
+	{
+	  /* The point here is to not sanitize static initializers.  */
+	  bool no_sanitize_p = wtd->no_sanitize_p;
+	  wtd->no_sanitize_p = true;
+	  for (tree decl = BIND_EXPR_VARS (stmt);
+	       decl;
+	       decl = DECL_CHAIN (decl))
+	    if (VAR_P (decl)
+		&& TREE_STATIC (decl)
+		&& DECL_INITIAL (decl))
+	      cp_walk_tree (&DECL_INITIAL (decl), cp_genericize_r, data, NULL);
+	  wtd->no_sanitize_p = no_sanitize_p;
+	}
       wtd->bind_expr_stack.safe_push (stmt);
       cp_walk_tree (&BIND_EXPR_BODY (stmt),
 		    cp_genericize_r, data, NULL);
@@ -3786,6 +3805,16 @@ cp_fold (tree x, fold_flags_t flags)
 	    }
 	}
 
+      /* If either op1 or op2 or both are bit-fields, promote them now,
+	 as middle-end folding doesn't expect COND_EXPR with inconsistent
+	 types.  At this point we shouldn't care whether COND_EXPR or what
+	 it folds into is an lvalue or rvalue, after all middle-end
+	 folding doesn't differentiate that either.  */
+      if (op1 && is_bitfield_expr_with_lowered_type (op1))
+	op1 = fold_convert_loc (loc, TREE_TYPE (x), op1);
+      if (op2 && is_bitfield_expr_with_lowered_type (op2))
+	op2 = fold_convert_loc (loc, TREE_TYPE (x), op2);
+
       if (op0 == error_mark_node
 	  || op1 == error_mark_node
 	  || op2 == error_mark_node)
@@ -3796,13 +3825,6 @@ cp_fold (tree x, fold_flags_t flags)
 	x = fold_build3_loc (loc, code, TREE_TYPE (x), op0, op1, op2);
       else
 	x = fold (x);
-
-      /* A COND_EXPR might have incompatible types in branches if one or both
-	 arms are bitfields.  If folding exposed such a branch, fix it up.  */
-      if (TREE_CODE (x) != code
-	  && x != error_mark_node
-	  && !useless_type_conversion_p (TREE_TYPE (org_x), TREE_TYPE (x)))
-	x = fold_convert (TREE_TYPE (org_x), x);
 
       break;
 

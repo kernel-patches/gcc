@@ -24,11 +24,13 @@
 ; EV6 has two symmetric pairs ("clusters") of two asymmetric integer
 ; units ("upper" and "lower"), yielding pipe names U0, U1, L0, L1.
 ;
-; ??? The clusters have independent register files that are re-synced
-; every cycle.  Thus there is one additional cycle of latency between
-; insns issued on different clusters.  Possibly model that by duplicating
-; all EBOX insn_reservations that can issue to either cluster, increasing
-; all latencies by one, and adding bypasses within the cluster.
+; The clusters have independent register files that are re-synced every cycle,
+; so there is one additional cycle of latency between insns issued on different
+; clusters.  Duplicating every EBOX reservation to model that would be wrong:
+; the hardware issues a dependent consumer into its producer's cluster whenever
+; it can, and a dependent add chain measures one cycle per link on an EV68AL,
+; not two.  The delay is only forced between units that exist in a single
+; cluster, and is modeled below as bypasses between them.
 ;
 ; ??? In addition, instruction order affects cluster issue.
 
@@ -107,6 +109,13 @@
        (eq_attr "type" "imul"))
   "ev6_u1")
 
+; The count/MVI unit exists only in U0 and the multiplier only in U1, so a
+; dependence between them always crosses clusters.  On an EV68AL a ctpop chain
+; costs 3 per link and a mulq chain 7, and a chain alternating between them
+; costs 24.2 per four links, which is 20 plus one cycle per crossing.
+(define_bypass 4 "ev6_mvi" "ev6_imul")
+(define_bypass 8 "ev6_imul" "ev6_mvi")
+
 ; Conditional moves decompose into two independent primitives, each taking
 ; one cycle.  Since ev6 is out-of-order, we can't see anything but two cycles.
 (define_insn_reservation "ev6_icmov" 2
@@ -126,8 +135,9 @@
        (eq_attr "type" "jsr"))
   "ev6_l0")
 
-; Ftoi/itof only issue to lower pipes.
-(define_insn_reservation "ev6_itof" 3
+; Ftoi/itof only issue to lower pipes.  Table 2-4 of the Compiler Writer's
+; Guide gives itof a latency of 4.
+(define_insn_reservation "ev6_itof" 4
   (and (eq_attr "tune" "ev6")
        (eq_attr "type" "itof"))
   "ev6_l")
@@ -136,6 +146,10 @@
   (and (eq_attr "tune" "ev6")
        (eq_attr "type" "ftoi"))
   "ev6_fst,nothing,ev6_l")
+
+; An itof feeding an ftoi directly costs 8 cycles rather than 4.  Routing the
+; value through a floating-point operate avoids the penalty.
+(define_bypass 8 "ev6_itof" "ev6_ftoi")
 
 (define_insn_reservation "ev6_fmul" 4
   (and (eq_attr "tune" "ev6")

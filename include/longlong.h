@@ -578,29 +578,8 @@ extern UDItype __umulsidi3 (USItype, USItype);
   __asm__ ("xma.hu %0 = %2, %3, f0\n\txma.l %1 = %2, %3, f0"		\
 	   : "=&f" (ph), "=f" (pl)					\
 	   : "f" (m0), "f" (m1))
-#define count_leading_zeros(count, x)					\
-  do {									\
-    UWtype _x = (x), _y, _a, _c;					\
-    __asm__ ("mux1 %0 = %1, @rev" : "=r" (_y) : "r" (_x));		\
-    __asm__ ("czx1.l %0 = %1" : "=r" (_a) : "r" (-_y | _y));		\
-    _c = (_a - 1) << 3;							\
-    _x >>= _c;								\
-    if (_x >= 1 << 4)							\
-      _x >>= 4, _c += 4;						\
-    if (_x >= 1 << 2)							\
-      _x >>= 2, _c += 2;						\
-    _c += _x >> 1;							\
-    (count) =  W_TYPE_SIZE - 1 - _c;					\
-  } while (0)
-/* similar to what gcc does for __builtin_ffs, but 0 based rather than 1
-   based, and we don't need a special case for x==0 here */
-#define count_trailing_zeros(count, x)					\
-  do {									\
-    UWtype __ctz_x = (x);						\
-    __asm__ ("popcnt %0 = %1"						\
-	     : "=r" (count)						\
-	     : "r" ((__ctz_x-1) & ~__ctz_x));				\
-  } while (0)
+#define count_leading_zeros(count, x) ((count) = __builtin_clzll (x))
+#define count_trailing_zeros(count, x) ((count) = __builtin_ctzll (x))
 #define UMUL_TIME 14
 #endif
 
@@ -1089,6 +1068,22 @@ extern UDItype __umulsidi3 (USItype, USItype);
 #ifdef __riscv_mul
 #define __umulsidi3(u,v) ((UDWtype)(UWtype)(u) * (UWtype)(v))
 #define __muluw3(a, b) ((UWtype)(a) * (UWtype)(b))
+/* soft-fp does not define UDWtype, so do not use __umulsidi3 here.  */
+#if W_TYPE_SIZE == 32
+#define umul_ppmm(w1, w0, u, v) \
+  do {									\
+    UDItype __ll = (UDItype) (USItype) (u) * (USItype) (v);		\
+    (w1) = (USItype) (__ll >> 32);					\
+    (w0) = (USItype) __ll;						\
+  } while (0)
+#elif W_TYPE_SIZE == 64 && __riscv_xlen == 64
+#define umul_ppmm(w1, w0, u, v) \
+  do {									\
+    __uint128_t __ll = (__uint128_t) (UDItype) (u) * (UDItype) (v);	\
+    (w1) = (UDItype) (__ll >> 64);					\
+    (w0) = (UDItype) __ll;						\
+  } while (0)
+#endif
 #else
 #if __riscv_xlen == 32
   #define MULUW3 "call __mulsi3"
@@ -1109,7 +1104,6 @@ extern UDItype __umulsidi3 (USItype, USItype);
                   : "ra", "a2", "a3"); \
     __op0; \
   })
-#endif /* __riscv_mul */
 #define umul_ppmm(w1, w0, u, v) \
   do { \
     UWtype __x0, __x1, __x2, __x3; \
@@ -1133,6 +1127,7 @@ extern UDItype __umulsidi3 (USItype, USItype);
     (w1) = __x3 + __ll_highpart (__x1); \
     (w0) = __ll_lowpart (__x1) * __ll_B + __ll_lowpart (__x0); \
   } while (0)
+#endif /* __riscv_mul */
 #endif /* __riscv */
 
 #if defined(__sh__) && W_TYPE_SIZE == 32
@@ -1448,9 +1443,9 @@ extern UDItype __umulsidi3 (USItype, USItype);
 	     : "=r" __ll_check_output (UDItype, sh),			\
 	       "=&r" __ll_check_output (UDItype, sl),			\
 	       "+r" (__carry)				      		\
-	     : "%rJ" ((UDItype)(ah)),				     	\
+	     : "rJ" ((UDItype)(ah)),				     	\
 	       "rI" ((UDItype)(bh)),				      	\
-	       "%rJ" ((UDItype)(al)),				     	\
+	       "rJ" ((UDItype)(al)),				     	\
 	       "rI" ((UDItype)(bl))				       	\
 	     __CLOBBER_CC);						\
   } while (0)

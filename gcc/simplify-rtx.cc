@@ -712,13 +712,14 @@ simplify_context::simplify_truncation (machine_mode mode, rtx op,
       rtx shift_op = XEXP (XEXP (op, 0), 1);
       rtx mask_op = XEXP (op, 1);
       unsigned HOST_WIDE_INT shift = UINTVAL (shift_op);
-      unsigned HOST_WIDE_INT mask = UINTVAL (mask_op);
+      unsigned HOST_WIDE_INT mask
+	= UINTVAL (mask_op) & GET_MODE_MASK (op_mode);
 
       if (shift < precision
-	  /* If doing this transform works for an X with all bits set,
-	     it works for any X.  */
-	  && ((GET_MODE_MASK (mode) >> shift) & mask)
-	     == ((GET_MODE_MASK (op_mode) >> shift) & mask)
+	  && HWI_COMPUTABLE_MODE_P (mode)
+	  /* Every bit selected by the mask must be produced by the narrowed
+	     shift, not by bits of X above the truncated mode.  */
+	  && (mask & ~(GET_MODE_MASK (mode) >> shift)) == 0
 	  && (op0 = simplify_gen_unary (TRUNCATE, mode, op0, op_mode))
 	  && (op0 = simplify_gen_binary (LSHIFTRT, mode, op0, shift_op)))
 	{
@@ -3916,6 +3917,32 @@ simplify_context::simplify_binary_operation_1 (rtx_code code,
 
       if (rtx tem = simplify_unsigned_cmp_minmax (IOR, mode, op0, op1))
 	return tem;
+
+      if (HWI_COMPUTABLE_MODE_P (mode))
+	{
+	  /* When WORD_REGISTER_OPERATIONS is true, we need to know the
+	     nonzero bits in WORD_MODE rather than MODE.  */
+	  scalar_int_mode tmode = as_a <scalar_int_mode> (mode);
+	  if (WORD_REGISTER_OPERATIONS
+	      && GET_MODE_BITSIZE (tmode) < BITS_PER_WORD)
+	    tmode = word_mode;
+
+	  /* Convert (ior (xor A 1) (xor B 1)) to (xor (and A B) 1) when A and B
+	     are both known to be 0 or 1.  */
+	  if (is_a <scalar_int_mode> (mode, &int_mode)
+	      && HWI_COMPUTABLE_MODE_P (int_mode)
+	      && GET_CODE (op0) == XOR
+	      && GET_CODE (op1) == XOR
+	      && XEXP (op0, 1) == CONST1_RTX (mode)
+	      && XEXP (op1, 1) == CONST1_RTX (mode)
+	      && (nonzero_bits (XEXP (op0, 0), tmode) & ~HOST_WIDE_INT_1U) == 0
+	      && (nonzero_bits (XEXP (op1, 0), tmode) & ~HOST_WIDE_INT_1U) == 0)
+	    return simplify_gen_binary (XOR, mode,
+					simplify_gen_binary (AND, mode,
+							     XEXP (op0, 0),
+							     XEXP (op1, 0)),
+					CONST1_RTX (mode));
+	  }
 
       /* IOR of two single bit bitfields extracted from the same object.
 	 Bitfields are represented as an AND based extraction */
