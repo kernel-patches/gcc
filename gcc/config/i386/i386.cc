@@ -2280,8 +2280,9 @@ merge_classes (enum x86_64_reg_class class1, enum x86_64_reg_class class2)
 
 enum psabi_change
 {
-  PSABI_ZERO_WIDTH_BITFIELD = 1 << 0,
-  PSABI_UNALIGNED_MEMBER = 1 << 1
+  PSABI_FLEXIBLE_ARRAY_STRUCT = 1 << 0,
+  PSABI_ZERO_WIDTH_BITFIELD = 1 << 1,
+  PSABI_UNALIGNED_MEMBER = 1 << 2
 };
 
 /* State of the classification, shared by all recursive calls.  */
@@ -2313,6 +2314,18 @@ psabi_new_behavior_p (classify_state &state, unsigned int change)
 
   state.seen |= change;
   return true;
+}
+
+/* Return true if TYPE is a flexible array member type.  */
+
+static bool
+flexible_array_p (const_tree type)
+{
+  return (TYPE_MODE (type) == BLKmode
+	  && TREE_CODE (type) == ARRAY_TYPE
+	  && TYPE_SIZE (type) == NULL_TREE
+	  && TYPE_DOMAIN (type) != NULL_TREE
+	  && TYPE_MAX_VALUE (TYPE_DOMAIN (type)) == NULL_TREE);
 }
 
 /* Return true if a member of type TYPE at bit offset BIT_POS violates
@@ -2452,25 +2465,10 @@ classify_argument (machine_mode mode, const_tree type,
 		  else
 		    {
 		      /* Flexible array member is ignored.  */
-		      if (TYPE_MODE (field_type) == BLKmode
-			  && TREE_CODE (field_type) == ARRAY_TYPE
-			  && TYPE_SIZE (field_type) == NULL_TREE
-			  && TYPE_DOMAIN (field_type) != NULL_TREE
-			  && (TYPE_MAX_VALUE (TYPE_DOMAIN (field_type))
-			      == NULL_TREE))
-			{
-			  static bool warned;
-
-			  if (!warned && warn_psabi)
-			    {
-			      warned = true;
-			      inform (input_location,
-				      "the ABI of passing struct with"
-				      " a flexible array member has"
-				      " changed in GCC 4.4");
-			    }
-			  continue;
-			}
+		      if (flexible_array_p (field_type)
+			  && (psabi_new_behavior_p
+			      (state, PSABI_FLEXIBLE_ARRAY_STRUCT)))
+			continue;
 
 		      /* Position of FIELD, in bits, from the start
 			 of the outermost object being classified.  */
@@ -2891,6 +2889,12 @@ inform_psabi_change (unsigned int change)
 {
   switch (change)
     {
+    case PSABI_FLEXIBLE_ARRAY_STRUCT:
+      inform (input_location,
+	      "the ABI of passing struct with a flexible array member"
+	      " has changed in GCC 4.4");
+      break;
+
     case PSABI_ZERO_WIDTH_BITFIELD:
       {
 	const char *url
@@ -8966,46 +8970,85 @@ ix86_find_all_reg_uses (HARD_REG_SET &regset,
     }
 }
 
-/* Return true if the hard register REGNO used for a stack access is
-   defined in a basic block that dominates the block where it is used.  */
+/* Return true if a definition reaching USE uses a register in
+   HARD_STACK_SLOT_ACCESS outside of memory, directly or through the
+   definitions of registers in STACK_SLOT_ACCESS, like "rax = rax + rdi".
+   UD chains are computed on the first call, which sets CHAIN_P.
+   VISITED has the UIDs of insns known not to compute a stack address.  */
 
 static bool
-ix86_access_stack_p (unsigned int regno, basic_block bb,
-		     HARD_REG_SET &set_up_by_prologue,
-		     HARD_REG_SET &prologue_used,
-		     auto_bitmap reg_dominate_bbs_known[],
-		     auto_bitmap reg_dominate_bbs[])
+ix86_access_stack_p (df_ref use,
+		     HARD_REG_SET &stack_slot_access,
+		     HARD_REG_SET &hard_stack_slot_access,
+		     bool &chain_p, bitmap visited)
 {
-  if (bitmap_bit_p (reg_dominate_bbs_known[regno], bb->index))
-    return bitmap_bit_p (reg_dominate_bbs[regno], bb->index);
+  if (!chain_p)
+    {
+      /* df_analyze is safe here.  This is called in prologue expansion
+	 right after df_analyze, so no insn rescan is pending and the
+	 refs which the caller is walking won't change.  */
+      gcc_checking_assert (bitmap_empty_p (&df->insns_to_delete)
+			   && bitmap_empty_p (&df->insns_to_rescan)
+			   && bitmap_empty_p (&df->insns_to_notes_rescan)
+			   && !df->redo_entry_and_exit);
+      chain_p = true;
+      df_set_flags (DF_RD_PRUNE_DEAD_DEFS);
+      df_chain_add_problem (DF_UD_CHAIN);
+      df_analyze ();
+    }
 
-  bitmap_set_bit (reg_dominate_bbs_known[regno], bb->index);
+  auto_vec<df_ref, 16> worklist;
+  worklist.safe_push (use);
 
-  /* Get all BBs which set REGNO and dominate the current BB from all
-     DEFs of REGNO.  */
-  for (df_ref def = DF_REG_DEF_CHAIN (regno);
-       def;
-       def = DF_REF_NEXT_REG (def))
-    if (!DF_REF_IS_ARTIFICIAL (def)
-	&& !DF_REF_FLAGS_IS_SET (def, DF_REF_MAY_CLOBBER)
-	&& !DF_REF_FLAGS_IS_SET (def, DF_REF_MUST_CLOBBER))
-      {
-	basic_block set_bb = DF_REF_BB (def);
-	if (dominated_by_p (CDI_DOMINATORS, bb, set_bb))
-	  {
-	    rtx_insn *insn = DF_REF_INSN (def);
-	    /* Return true if INSN requires stack.  */
-	    if (requires_stack_frame_p (insn, prologue_used,
-					set_up_by_prologue))
-	      {
-		bitmap_set_bit (reg_dominate_bbs[regno], bb->index);
-		return true;
-	      }
-	  }
-      }
+  /* The UIDs of the insns added to VISITED by this walk.  They are
+     fully checked only if false is returned.  */
+  auto_bitmap walked;
 
-  /* When we get here, REGNO used in the current BB doesn't access
-     stack.  */
+  do
+    {
+      use = worklist.pop ();
+
+      /* Check all DEFs of the register which reach USE.  */
+      for (df_link *link = DF_REF_CHAIN (use); link; link = link->next)
+	{
+	  df_ref def = link->ref;
+	  /* There are no clobbers in UD chains since RD doesn't generate
+	     them.  */
+	  if (!DF_REF_IS_ARTIFICIAL (def))
+	    {
+	      rtx_insn *insn = DF_REF_INSN (def);
+	      if (!NONJUMP_INSN_P (insn)
+		  || !bitmap_set_bit (visited, INSN_UID (insn)))
+		continue;
+
+	      bitmap_set_bit (walked, INSN_UID (insn));
+
+	      /* Return true if INSN uses a register in
+		 HARD_STACK_SLOT_ACCESS outside of memory.  Otherwise, check
+		 the registers in STACK_SLOT_ACCESS used outside of memory
+		 by INSN.  */
+	      df_ref insn_use;
+	      FOR_EACH_INSN_USE (insn_use, insn)
+		{
+		  if (DF_REF_REG_MEM_P (insn_use))
+		    continue;
+		  unsigned int regno = DF_REF_REGNO (insn_use);
+		  if (TEST_HARD_REG_BIT (hard_stack_slot_access, regno))
+		    {
+		      /* Remove the insns of this walk from VISITED since
+			 they may not have been fully checked.  */
+		      bitmap_and_compl_into (visited, walked);
+		      return true;
+		    }
+		  if (TEST_HARD_REG_BIT (stack_slot_access, regno))
+		    worklist.safe_push (insn_use);
+		}
+	    }
+	}
+    }
+  while (!worklist.is_empty ());
+
+  /* When we get here, the register used by USE doesn't access stack.  */
   return false;
 }
 
@@ -9144,8 +9187,6 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
   /* Registers on HARD_STACK_SLOT_ACCESS always access stack.  */
   HARD_REG_SET hard_stack_slot_access = stack_slot_access;
 
-  calculate_dominance_info (CDI_DOMINATORS);
-
   unsigned int regno;
 
   do
@@ -9158,8 +9199,8 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
   hard_reg_set_iterator hrsi;
   stack_access_data data;
 
-  auto_bitmap reg_dominate_bbs_known[FIRST_PSEUDO_REGISTER];
-  auto_bitmap reg_dominate_bbs[FIRST_PSEUDO_REGISTER];
+  bool chain_p = false;
+  auto_bitmap visited;
 
   data.stack_alignment = &stack_alignment;
 
@@ -9172,6 +9213,10 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
 	  if (DF_REF_IS_ARTIFICIAL (ref))
 	    continue;
 
+	  /* Only a register used in memory address may access stack.  */
+	  if (!DF_REF_REG_MEM_P (ref))
+	    continue;
+
 	  rtx_insn *insn = DF_REF_INSN (ref);
 
 	  if (!NONJUMP_INSN_P (insn))
@@ -9181,11 +9226,9 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
 	     STACK_ALIGNMENT.  */
 	  if (ix86_need_alignment_p (insn, stack_alignment)
 	      && (TEST_HARD_REG_BIT (hard_stack_slot_access, regno)
-		  || ix86_access_stack_p (regno, BLOCK_FOR_INSN (insn),
-					  set_up_by_prologue,
-					  prologue_used,
-					  reg_dominate_bbs_known,
-					  reg_dominate_bbs)))
+		  || ix86_access_stack_p (ref, stack_slot_access,
+					  hard_stack_slot_access,
+					  chain_p, visited)))
 	    {
 	      /* Update stack alignment if REGNO is used for stack
 		 access.  */
@@ -9195,7 +9238,12 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
 	}
     }
 
-  free_dominance_info (CDI_DOMINATORS);
+  /* Remove the RD and chain problems added by ix86_access_stack_p.  */
+  if (chain_p)
+    {
+      df_remove_problem (df_rd);
+      df_clear_flags (DF_RD_PRUNE_DEAD_DEFS);
+    }
 }
 
 /* Finalize stack_realign_needed and frame_pointer_needed flags, which
@@ -9268,8 +9316,12 @@ ix86_finalize_stack_frame_flags (void)
       if (cfun->machine->stack_frame_required)
 	{
 	  /* Stack frame is required.  If stack alignment needed is less
-	     than incoming stack boundary, don't realign stack.  */
-	  stack_realign = incoming_stack_boundary < stack_alignment;
+	     than incoming stack boundary, don't realign stack.  Never turn
+	     stack realignment on here: crtl isn't updated, so the next
+	     call, e.g. from the epilogue, would compute a different
+	     STACK_REALIGN from crtl.  */
+	  if (stack_realign)
+	    stack_realign = incoming_stack_boundary < stack_alignment;
 	  if (!stack_realign)
 	    {
 	      crtl->max_used_stack_slot_alignment

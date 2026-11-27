@@ -326,7 +326,7 @@ gimple_build_call_valist (tree fn, unsigned nargs, va_list ap)
    Build the basic components of a GIMPLE_CALL statement to internal
    function FN with NARGS arguments.  */
 
-static inline gcall *
+gcall *
 gimple_build_call_internal_1 (enum internal_fn fn, unsigned nargs)
 {
   gcall *s
@@ -2913,6 +2913,9 @@ gimple_get_alias_set (tree t)
      compatible types.  */
   else if (TREE_CODE (t) == ENUMERAL_TYPE)
     {
+      if (BITINT_TYPE_P (t))
+	return get_alias_set (TREE_TYPE (t));
+
       tree t1 = lang_hooks.types.type_for_size (tree_to_uhwi (TYPE_SIZE (t)),
 						false /* short-cut above */);
       return get_alias_set (t1);
