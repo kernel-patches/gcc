@@ -806,8 +806,10 @@ alpha_in_small_data_p (const_tree exp)
   if (TREE_CODE (exp) == FUNCTION_DECL)
     return false;
 
-  /* COMMON symbols are never small data.  */
-  if (VAR_P (exp) && DECL_COMMON (exp))
+  /* COMMON symbols are never small data, nor is the decl for the ASan
+     $LASANPC label in the text section, which asan_emit_stack_protection
+     marks with DECL_INITIAL == decl.  */
+  if (VAR_P (exp) && (DECL_COMMON (exp) || DECL_INITIAL (exp) == exp))
     return false;
 
   if (VAR_P (exp) && DECL_SECTION_NAME (exp))

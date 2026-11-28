@@ -2,6 +2,7 @@
 /* { dg-skip-if "" { ! run_expensive_tests } { "*" } { "-O2" } } */
 /* { dg-options "-fsanitize=float-cast-overflow -DUSE_FLT_DBL_LDBL" } */
 /* { dg-additional-options "-DUSE_INT128" { target int128 } } */
+/* { dg-add-options ieee } */
 
 #include "float-cast-overflow-7.h"
 

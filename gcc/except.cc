@@ -1763,7 +1763,17 @@ insn_could_throw_p (const rtx_insn *insn)
   return false;
 }
 
-/* Copy an REG_EH_REGION note to each insn that might throw beginning
+/* Return true if a REG_EH_REGION note should be copied to INSN.  Every
+   call needs it, even one that cannot throw: an INT_MIN note also says
+   the call cannot perform a nonlocal goto.  */
+
+static bool
+copy_reg_eh_region_note_p (const rtx_insn *insn)
+{
+  return CALL_P (insn) || insn_could_throw_p (insn);
+}
+
+/* Copy an REG_EH_REGION note to each insn that needs it, beginning
    at FIRST and ending at LAST.  NOTE_OR_INSN is either the source insn
    to look for a note, or the note itself.  */
 
@@ -1786,7 +1796,7 @@ copy_reg_eh_region_note_forward (rtx note_or_insn, rtx_insn *first,
 
   for (rtx_insn *insn = first; insn != last ; insn = NEXT_INSN (insn))
     if (!find_reg_note (insn, REG_EH_REGION, NULL_RTX)
-        && insn_could_throw_p (insn))
+	&& copy_reg_eh_region_note_p (insn))
       add_reg_note (insn, REG_EH_REGION, note);
 }
 
@@ -1810,7 +1820,8 @@ copy_reg_eh_region_note_backward (rtx note_or_insn, rtx_insn *last,
   note = XEXP (note, 0);
 
   for (rtx_insn *insn = last; insn != first; insn = PREV_INSN (insn))
-    if (insn_could_throw_p (insn))
+    if (!find_reg_note (insn, REG_EH_REGION, NULL_RTX)
+	&& copy_reg_eh_region_note_p (insn))
       add_reg_note (insn, REG_EH_REGION, note);
 }
 

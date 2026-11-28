@@ -46,6 +46,7 @@ Software Foundation, 51 Franklin Street, Fifth Floor, Boston, MA
 #include "gimple-fold.h"
 #include "tree-cfg.h"
 #include "cfgloop.h"
+#include "tree-ssa-loop-ivopts.h"
 #include "alloc-pool.h"
 #include "target.h"
 #include "tree-into-ssa.h"
@@ -3000,31 +3001,12 @@ make_pass_convert_switch (gcc::context *ctxt)
 
 namespace {
 
-template <bool O0> class pass_lower_switch: public gimple_opt_pass
-{
-public:
-  pass_lower_switch (gcc::context *ctxt) : gimple_opt_pass (data, ctxt) {}
-
-  static const pass_data data;
-  opt_pass *
-  clone () final override
-  {
-    return new pass_lower_switch<O0> (m_ctxt);
-  }
-
-  bool
-  gate (function *) final override
-  {
-    return !O0 || !optimize;
-  }
-
-  unsigned int execute (function *fun) final override;
-}; // class pass_lower_switch
-
-template <bool O0>
-const pass_data pass_lower_switch<O0>::data = {
+/* The two instances of the pass: one that runs before the late threaders
+   and only lowers the switches whose controlling value is loop invariant,
+   and the regular one that lowers the remaining switches after them.  */
+static const pass_data pass_data_lower_switch = {
   GIMPLE_PASS,		       /* type */
-  O0 ? "switchlower_O0" : "switchlower", /* name */
+  "switchlower",	       /* name */
   OPTGROUP_NONE, /* optinfo_flags */
   TV_TREE_SWITCH_LOWERING, /* tv_id */
   ( PROP_cfg | PROP_ssa ), /* properties_required */
@@ -3034,6 +3016,63 @@ const pass_data pass_lower_switch<O0>::data = {
   TODO_update_ssa | TODO_cleanup_cfg, /* todo_flags_finish */
 };
 
+static const pass_data pass_data_lower_switch_early = {
+  GIMPLE_PASS,		       /* type */
+  "switchlower_early",	       /* name */
+  OPTGROUP_NONE, /* optinfo_flags */
+  TV_TREE_SWITCH_LOWERING, /* tv_id */
+  ( PROP_cfg | PROP_ssa ), /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  TODO_update_ssa | TODO_cleanup_cfg, /* todo_flags_finish */
+};
+
+static const pass_data pass_data_lower_switch_O0 = {
+  GIMPLE_PASS,		       /* type */
+  "switchlower_O0",	       /* name */
+  OPTGROUP_NONE, /* optinfo_flags */
+  TV_TREE_SWITCH_LOWERING, /* tv_id */
+  ( PROP_cfg | PROP_ssa ), /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  TODO_update_ssa | TODO_cleanup_cfg, /* todo_flags_finish */
+};
+
+template <bool O0> class pass_lower_switch: public gimple_opt_pass
+{
+public:
+  pass_lower_switch (gcc::context *ctxt, const pass_data &data_)
+    : gimple_opt_pass (data_, ctxt), data (data_) {}
+
+  opt_pass *
+  clone () final override
+  {
+    return new pass_lower_switch<O0> (m_ctxt, data);
+  }
+
+  /* The early instance runs before the late threaders and only lowers the
+     switches whose controlling value is loop invariant; the instance after
+     the threaders lowers the rest.  */
+  bool
+  only_invariant_p () const
+  {
+    return &data == &pass_data_lower_switch_early;
+  }
+
+  bool
+  gate (function *) final override
+  {
+    return !O0 || !optimize;
+  }
+
+  unsigned int execute (function *fun) final override;
+
+private:
+  const pass_data &data;
+}; // class pass_lower_switch
+
 template <bool O0>
 unsigned int
 pass_lower_switch<O0>::execute (function *fun)
@@ -3041,18 +3080,55 @@ pass_lower_switch<O0>::execute (function *fun)
   basic_block bb;
   bool expanded = false;
 
+  /* When this instance runs before the threaders, only lower the switches
+     whose controlling value is invariant in its innermost loop.  Lowering
+     such a switch produces a compare chain that is evaluated with the same
+     outcome on every iteration; letting the threaders see it only makes
+     them duplicate the whole chain once per case value (PR128962), while
+     the gains from keeping the switch come from data dependent switches in
+     loops that behave like a state machine.  Switches outside any natural
+     loop, i.e. straight line code and irreducible regions, are left for the
+     late instance.  */
+  bool only_invariant = only_invariant_p () && !O0;
+  /* Loop structures are preserved across the GIMPLE pipeline while
+     PROP_loops is set, so they are live here for ordinary functions.
+     loop_optimizer_finalize keeps them in that case, so they have to be
+     marked for fixup once the lowering below has changed the CFG.  */
+  bool loops_were_live = (cfun->curr_properties & PROP_loops) != 0;
+
   auto_vec<gimple *> switch_statements;
   switch_statements.create (1);
 
+  /* The loop tree is only needed when there is at least one switch to
+     consider, so initialize it lazily, on the first one.  */
+  bool loops_inited = false;
   FOR_EACH_BB_FN (bb, fun)
     {
-      if (gswitch *swtch = safe_dyn_cast <gswitch *> (*gsi_last_bb (bb)))
+      gswitch *swtch = safe_dyn_cast <gswitch *> (*gsi_last_bb (bb));
+      if (swtch == NULL)
+	continue;
+      if (only_invariant)
 	{
-	  if (!O0)
-	    group_case_labels_stmt (swtch);
-	  switch_statements.safe_push (swtch);
+	  if (!loops_inited)
+	    {
+	      loop_optimizer_init (AVOID_CFG_MODIFICATIONS);
+	      loops_inited = true;
+	    }
+	  class loop *loop = bb->loop_father;
+	  if (loop == NULL || loop->num == 0
+	      || !expr_invariant_in_loop_p (loop,
+					    gimple_switch_index (swtch)))
+	    continue;
 	}
+      switch_statements.safe_push (swtch);
     }
+
+  if (loops_inited)
+    loop_optimizer_finalize ();
+
+  if (!O0)
+    for (unsigned i = 0; i < switch_statements.length (); i++)
+      group_case_labels_stmt (as_a <gswitch *> (switch_statements[i]));
 
   for (unsigned i = 0; i < switch_statements.length (); i++)
     {
@@ -3081,6 +3157,9 @@ pass_lower_switch<O0>::execute (function *fun)
       free_dominance_info (CDI_DOMINATORS);
       free_dominance_info (CDI_POST_DOMINATORS);
       mark_virtual_operands_for_renaming (cfun);
+      /* The preserved loop tree refers to blocks that no longer exist.  */
+      if (loops_were_live)
+	loops_state_set (LOOPS_NEED_FIXUP);
     }
 
   return 0;
@@ -3091,10 +3170,16 @@ pass_lower_switch<O0>::execute (function *fun)
 gimple_opt_pass *
 make_pass_lower_switch_O0 (gcc::context *ctxt)
 {
-  return new pass_lower_switch<true> (ctxt);
+  return new pass_lower_switch<true> (ctxt, pass_data_lower_switch_O0);
 }
 gimple_opt_pass *
 make_pass_lower_switch (gcc::context *ctxt)
 {
-  return new pass_lower_switch<false> (ctxt);
+  return new pass_lower_switch<false> (ctxt, pass_data_lower_switch);
+}
+
+gimple_opt_pass *
+make_pass_lower_switch_early (gcc::context *ctxt)
+{
+  return new pass_lower_switch<false> (ctxt, pass_data_lower_switch_early);
 }

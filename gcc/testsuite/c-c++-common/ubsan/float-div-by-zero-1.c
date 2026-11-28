@@ -1,5 +1,6 @@
 /* { dg-do run } */
 /* { dg-options "-fsanitize=float-divide-by-zero" } */
+/* { dg-add-options ieee } */
 
 int
 main (void)
