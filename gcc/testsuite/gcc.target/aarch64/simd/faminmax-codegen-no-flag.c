@@ -52,7 +52,11 @@ test_vamaxq_f16 (float16x8_t a, float16x8_t b)
 ** test_vamax_f32:
 **	fabs	v1.2s, v1.2s
 **	fabs	v0.2s, v0.2s
+**	(
 **	fmaxnm	v0.2s, v0.2s, v1.2s
+**	|
+**	fmaxnm	v0.2s, v1.2s, v0.2s
+**	)
 **	ret
 */
 float32x2_t
@@ -94,7 +98,11 @@ test_vamaxq_f32 (float32x4_t a, float32x4_t b)
 ** test_vamaxq_f64:
 **	fabs	v1.2d, v1.2d
 **	fabs	v0.2d, v0.2d
+**	(
 **	fmaxnm	v0.2d, v0.2d, v1.2d
+**	|
+**	fmaxnm	v0.2d, v1.2d, v0.2d
+**	)
 **	ret
 */
 float64x2_t
@@ -157,7 +165,11 @@ test_vaminq_f16 (float16x8_t a, float16x8_t b)
 ** test_vamin_f32:
 **	fabs	v1.2s, v1.2s
 **	fabs	v0.2s, v0.2s
+**	(
 **	fminnm	v0.2s, v0.2s, v1.2s
+**	|
+**	fminnm	v0.2s, v1.2s, v0.2s
+**	)
 **	ret
 */
 float32x2_t
@@ -199,7 +211,11 @@ test_vaminq_f32 (float32x4_t a, float32x4_t b)
 ** test_vaminq_f64:
 **	fabs	v1.2d, v1.2d
 **	fabs	v0.2d, v0.2d
+**	(
 **	fminnm	v0.2d, v0.2d, v1.2d
+**	|
+**	fminnm	v0.2d, v1.2d, v0.2d
+**	)
 **	ret
 */
 float64x2_t
