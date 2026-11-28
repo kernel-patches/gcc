@@ -429,6 +429,7 @@ extern gimple_opt_pass *make_pass_lower_complex (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lower_bitint_O0 (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lower_bitint (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lower_switch (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_lower_switch_early (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lower_switch_O0 (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lower_vector (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lower_vector_ssa (gcc::context *ctxt);

@@ -346,6 +346,12 @@ along with GCC; see the file COPYING3.  If not see
       POP_INSERT_PASSES ()
       NEXT_PASS (pass_simduid_cleanup);
       NEXT_PASS (pass_lower_vector_ssa);
+      /* Lower the switches whose controlling value does not change inside
+	 their innermost enclosing loop before the threaders run; such a
+	 switch cannot gain from being seen by them and only duplicates its
+	 case chain.  The remaining switches are lowered after the late
+	 threaders.  */
+      NEXT_PASS (pass_lower_switch_early);
       NEXT_PASS (pass_cse_sincos);
       NEXT_PASS (pass_cse_reciprocals);
       NEXT_PASS (pass_reassoc, false /* early_p */);
